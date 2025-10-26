@@ -17,21 +17,29 @@ def generate_signature(method: str, endpoint: str, api_secret: str,
         method: HTTP method (GET, POST, DELETE)
         endpoint: API endpoint path
         api_secret: API secret key
-        query_string: Query parameters (optional)
-        body: Request body (optional)
+        query_string: Query parameters (sorted alphabetically)
+        body: Request body (no spaces in JSON)
     
     Returns:
         Tuple of (signature, timestamp)
     """
     try:
         timestamp = str(int(time.time()))
-        message = method + timestamp + endpoint + query_string + body
         
+        # Build signature string: METHOD + TIMESTAMP + ENDPOINT + QUERY_STRING + BODY
+        signature_string = method + timestamp + endpoint
+        if query_string:
+            signature_string += "?" + query_string
+        signature_string += body
+        
+        # Generate HMAC-SHA256 signature
         signature = hmac.new(
             api_secret.encode('utf-8'),
-            message.encode('utf-8'),
+            signature_string.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
+        
+        logger.info(f"🔐 Signature data: {signature_string}")
         
         return signature, timestamp
         
