@@ -17,15 +17,24 @@ async def get_positions(client: DeltaExchangeClient) -> Optional[List[Dict[str, 
         List of open positions or None on failure
     """
     try:
-        response = await client.get("/v2/positions")
+        # Delta Exchange India requires underlying_asset_symbol parameter
+        # Fetch positions for all major assets
+        all_positions = []
         
-        if response and response.get("success"):
-            positions = response.get("result", [])
-            logger.info(f"✅ Retrieved {len(positions)} open positions")
-            return positions
+        # Common assets on Delta Exchange India
+        assets = ["BTC", "ETH", "SOL", "MATIC", "AVAX"]
         
-        logger.error(f"❌ Failed to get positions: {response}")
-        return None
+        for asset in assets:
+            response = await client.get("/v2/positions", params={"underlying_asset_symbol": asset})
+            
+            if response and response.get("success"):
+                positions = response.get("result", [])
+                # Filter out zero-size positions
+                active_positions = [p for p in positions if abs(float(p.get("size", 0))) > 0]
+                all_positions.extend(active_positions)
+        
+        logger.info(f"✅ Retrieved {len(all_positions)} open positions")
+        return all_positions
         
     except Exception as e:
         logger.error(f"❌ Exception getting positions: {e}")
