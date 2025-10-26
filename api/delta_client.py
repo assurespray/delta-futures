@@ -48,30 +48,32 @@ class DeltaExchangeClient:
                       json_data: Optional[Dict] = None, retry: int = 0) -> Optional[Dict[str, Any]]:
         """
         Make authenticated request to Delta Exchange API.
-        
+    
         Args:
             method: HTTP method
             endpoint: API endpoint
             params: Query parameters
             json_data: JSON body data
             retry: Current retry attempt
-        
+    
         Returns:
             Response JSON or None on failure
         """
         await self._rate_limit()
-        
+    
         try:
             # Prepare request components
             query_string = ""
             if params:
-                query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-            
+                # Sort parameters alphabetically for consistent signature
+                sorted_params = sorted(params.items())
+                query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
+        
             body = ""
             if json_data:
                 import json
-                body = json.dumps(json_data)
-            
+                body = json.dumps(json_data, separators=(',', ':'))  # No spaces
+        
             # Generate authentication headers
             headers = get_auth_headers(
                 method=method.upper(),
@@ -81,39 +83,41 @@ class DeltaExchangeClient:
                 query_string=query_string,
                 body=body
             )
-            
-            # Make request
+        
+            # Build full URL
             url = f"{self.base_url}{endpoint}"
-            
+            if query_string:
+                url = f"{url}?{query_string}"
+        
+            # Make request WITHOUT params (already in URL)
             response = await self.client.request(
                 method=method,
                 url=url,
-                params=params,
-                json=json_data,
+                json=json_data if json_data else None,
                 headers=headers
             )
-            
+        
             # Check response
             if response.status_code == 200:
                 return response.json()
-            
+        
             elif response.status_code == 429:  # Rate limit
                 logger.warning(f"⚠️ Rate limit hit, retrying after delay...")
                 await asyncio.sleep(2)
                 if retry < REQUEST_RETRY_ATTEMPTS:
                     return await self._request(method, endpoint, params, json_data, retry + 1)
-            
+        
             else:
                 logger.error(f"❌ API request failed: {response.status_code} - {response.text}")
                 return None
-        
+    
         except httpx.TimeoutException:
             logger.error(f"❌ Request timeout for {endpoint}")
             if retry < REQUEST_RETRY_ATTEMPTS:
                 await asyncio.sleep(REQUEST_RETRY_DELAY * (retry + 1))
                 return await self._request(method, endpoint, params, json_data, retry + 1)
             return None
-        
+    
         except Exception as e:
             logger.error(f"❌ Request failed: {e}")
             if retry < REQUEST_RETRY_ATTEMPTS:
