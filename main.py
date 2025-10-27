@@ -49,14 +49,14 @@ async def lifespan(app: FastAPI):
         ptb_app = create_application()
         
         # Delete old webhook (prevents conflicts)
-        try:
-            await ptb_app.bot.delete_webhook(drop_pending_updates=True)
-            logger.info("🗑️ Old webhook deleted")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not delete old webhook: {e}")
+       # try:
+          #  await ptb_app.bot.delete_webhook(drop_pending_updates=True)
+         #   logger.info("🗑️ Old webhook deleted")
+      #  except Exception as e:
+          #  logger.warning(f"⚠️ Could not delete old webhook: {e}")
         
         # Wait a moment to ensure deletion is processed
-        await asyncio.sleep(1)
+    #    await asyncio.sleep(1)
         
         # Set new webhook
         webhook_url = settings.webhook_url
