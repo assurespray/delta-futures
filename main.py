@@ -48,10 +48,34 @@ async def lifespan(app: FastAPI):
         # Create Telegram bot application
         ptb_app = create_application()
         
-        # Set webhook
+        # Delete old webhook (prevents conflicts)
+        try:
+            await ptb_app.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("🗑️ Old webhook deleted")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not delete old webhook: {e}")
+        
+        # Wait a moment to ensure deletion is processed
+        await asyncio.sleep(1)
+        
+        # Set new webhook
         webhook_url = settings.webhook_url
-        await ptb_app.bot.set_webhook(webhook_url)
-        logger.info(f"✅ Webhook set to: {webhook_url}")
+        webhook_set = await ptb_app.bot.set_webhook(
+            url=webhook_url,
+            drop_pending_updates=True,  # Don't process old updates
+            allowed_updates=["message", "callback_query"]  # Only process these
+        )
+        
+        if webhook_set:
+            logger.info(f"✅ Webhook set to: {webhook_url}")
+        else:
+            logger.error("❌ Failed to set webhook!")
+            raise RuntimeError("Webhook setup failed")
+        
+        # Verify webhook is set correctly
+        webhook_info = await ptb_app.bot.get_webhook_info()
+        logger.info(f"📡 Webhook URL: {webhook_info.url}")
+        logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
         
         # Initialize bot
         await ptb_app.initialize()
@@ -84,6 +108,14 @@ async def lifespan(app: FastAPI):
     logger.info("🔒 Shutting down application...")
     
     try:
+        # Delete webhook on shutdown (clean exit)
+        if ptb_app:
+            try:
+                await ptb_app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("🗑️ Webhook deleted on shutdown")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not delete webhook on shutdown: {e}")
+        
         # Stop scheduler
         scheduler_service.shutdown()
         
@@ -224,5 +256,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-        )
+    )
     
