@@ -138,8 +138,8 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                 "15m": 150,
                 "30m": 200,
                 "1h": 250,
-                "4h": 400,  # ← Key change!
-                "1d": 500
+                "4h": 500,  # ← Key change!
+                "1d": 700
             }
             limit = timeframe_candle_count.get(timeframe, 200)
         
