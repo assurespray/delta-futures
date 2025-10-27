@@ -33,39 +33,40 @@ class DualSuperTrendStrategy:
         self.signal_generator = SignalGenerator()
     
     async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, 
-                                   timeframe: str) -> Optional[Dict[str, Any]]:
+                               timeframe: str) -> Optional[Dict[str, Any]]:
         """
         Calculate both Perusu and Sirusu indicators.
-        
+    
         Args:
             client: Delta Exchange client
             symbol: Trading symbol
             timeframe: Timeframe for calculation
-        
+    
         Returns:
             Dictionary with both indicator results or None
         """
         try:
-            # Fetch candles (need enough for longest ATR period)
-            required_candles = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
+            # Fetch candles (need enough for longest ATR period + buffer)
+            # Perusu needs 20 periods, so fetch 50 to be safe
+            required_candles = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 30
             candles = await get_candles(client, symbol, timeframe, limit=required_candles)
-            
+        
             if not candles or len(candles) < required_candles:
-                logger.warning(f"⚠️ Insufficient candle data for {symbol}")
+                logger.warning(f"⚠️ Insufficient candle data for {symbol}: got {len(candles) if candles else 0}, need {required_candles}")
                 return None
-            
+        
             # Calculate Perusu
             perusu_result = self.perusu.calculate(candles)
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
-            
+        
             # Calculate Sirusu
             sirusu_result = self.sirusu.calculate(candles)
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
                 return None
-            
+        
             result = {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -73,17 +74,17 @@ class DualSuperTrendStrategy:
                 "perusu": perusu_result,
                 "sirusu": sirusu_result
             }
-            
+        
             logger.info(f"✅ Indicators calculated for {symbol} ({timeframe})")
             logger.info(f"   Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']}")
             logger.info(f"   Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']}")
-            
+        
             return result
-            
+        
         except Exception as e:
             logger.error(f"❌ Exception calculating indicators: {e}")
             return None
-    
+
     def generate_entry_signal(self, perusu_signal: int, direction: str, 
                              current_position: Optional[str]) -> Optional[str]:
         """
