@@ -133,11 +133,11 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         # Auto-scale candles based on timeframe if not specified
         if limit is None:
             timeframe_candle_count = {
-                "1m": 100,
-                "5m": 150,
-                "15m": 150,
-                "30m": 200,
-                "1h": 250,
+                "1m": 300,
+                "5m": 350,
+                "15m": 350,
+                "30m": 350,
+                "1h": 400,
                 "4h": 500,  # ← Key change!
                 "1d": 700
             }
