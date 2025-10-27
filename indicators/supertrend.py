@@ -1,4 +1,4 @@
-"""SuperTrend indicator implementation."""
+"""SuperTrend indicator implementation - TradingView compatible."""
 import logging
 import pandas as pd
 import numpy as np
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class SuperTrend(BaseIndicator):
-    """SuperTrend indicator based on ATR with Wilder's smoothing."""
+    """SuperTrend indicator based on ATR with RMA (TradingView default)."""
     
     def __init__(self, atr_length: int, factor: float, name: str = "SuperTrend"):
         """
@@ -27,11 +27,14 @@ class SuperTrend(BaseIndicator):
     
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
-        Calculate Average True Range (ATR) using Wilder's smoothing.
-        This matches TradingView's SuperTrend calculation exactly.
+        Calculate Average True Range (ATR) using RMA (Relative Moving Average).
+        This EXACTLY matches TradingView's default SuperTrend calculation.
         
-        Formula: ATR = [(Prior ATR × (n - 1)) + Current TR] / n
-        Implemented as: EWM with alpha = 1/n, adjust=False
+        RMA Formula (Wilder's Smoothing):
+        - First value: SMA of first 'length' TR values
+        - Subsequent: (Previous RMA * (length-1) + Current TR) / length
+        
+        This is different from EWM!
         
         Args:
             df: DataFrame with OHLC data
@@ -44,19 +47,29 @@ class SuperTrend(BaseIndicator):
         close = df['close']
         
         # True Range calculation
-        # TR = max(high - low, |high - prev_close|, |low - prev_close|)
+        # TR = max(H-L, |H-C_prev|, |L-C_prev|)
         tr1 = high - low
         tr2 = abs(high - close.shift())
         tr3 = abs(low - close.shift())
         
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         
-        # Wilder's smoothing for ATR
-        # This is equivalent to EWM with alpha = 1/n, adjust=False
-        # ATR[i] = (ATR[i-1] * (n-1) + TR[i]) / n
-        atr = tr.ewm(alpha=1/self.atr_length, adjust=False).mean()
+        # Initialize ATR series
+        atr = pd.Series(index=df.index, dtype=float)
         
-        logger.info(f"🔍 {self.name} ATR calculation:")
+        # Calculate first ATR as SMA of first 'length' TR values
+        # This is the initialization that TradingView uses
+        atr.iloc[self.atr_length - 1] = tr.iloc[:self.atr_length].mean()
+        
+        # Calculate subsequent ATR values using RMA (Wilder's smoothing)
+        # RMA[i] = (RMA[i-1] * (length-1) + TR[i]) / length
+        for i in range(self.atr_length, len(df)):
+            atr.iloc[i] = (atr.iloc[i-1] * (self.atr_length - 1) + tr.iloc[i]) / self.atr_length
+        
+        # Fill initial NaN values
+        atr = atr.ffill().bfill()
+        
+        logger.info(f"🔍 {self.name} ATR (RMA method):")
         logger.info(f"   Period: {self.atr_length}")
         logger.info(f"   Latest TR: {tr.iloc[-1]:.2f}")
         logger.info(f"   Latest ATR: {atr.iloc[-1]:.2f}")
@@ -65,13 +78,12 @@ class SuperTrend(BaseIndicator):
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Calculate SuperTrend indicator.
+        Calculate SuperTrend indicator - TradingView compatible.
         
         Formula:
         - HL2 = (High + Low) / 2
         - Upper Band = HL2 + (Factor × ATR)
         - Lower Band = HL2 - (Factor × ATR)
-        - Trend switches when price crosses the bands
         
         Args:
             candles: List of OHLC candle data
@@ -87,19 +99,13 @@ class SuperTrend(BaseIndicator):
                 logger.warning(f"⚠️ Not enough data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
                 return None
             
-            # Calculate ATR using Wilder's smoothing
+            # Calculate ATR using RMA (TradingView's default method)
             atr = self.calculate_atr(df)
             
-            # Handle NaN in ATR (first few values)
-            if atr.isna().any():
-                logger.warning(f"⚠️ NaN values in ATR for {self.name}, filling")
-                # Use forward fill then backward fill (pandas 2.1+ syntax)
-                atr = atr.ffill().bfill()
-            
             # Calculate basic bands using median price (HL2)
-            hl_avg = (df['high'] + df['low']) / 2
-            basic_upperband = hl_avg + (self.factor * atr)
-            basic_lowerband = hl_avg - (self.factor * atr)
+            hl2 = (df['high'] + df['low']) / 2
+            basic_upperband = hl2 + (self.factor * atr)
+            basic_lowerband = hl2 - (self.factor * atr)
             
             # Initialize final bands
             final_upperband = pd.Series(index=df.index, dtype=float)
@@ -110,7 +116,7 @@ class SuperTrend(BaseIndicator):
             # Calculate final bands and SuperTrend
             for i in range(len(df)):
                 # Skip if we don't have ATR yet
-                if pd.isna(atr.iloc[i]):
+                if pd.isna(atr.iloc[i]) or pd.isna(basic_upperband.iloc[i]):
                     continue
                 
                 if i == 0:
@@ -147,7 +153,7 @@ class SuperTrend(BaseIndicator):
                         supertrend.iloc[i] = final_upperband.iloc[i]
                         signal.iloc[i] = SIGNAL_DOWNTREND
             
-            # Clean data by removing NaN rows
+            # Clean data
             valid_idx = ~supertrend.isna()
             df_clean = df[valid_idx].copy()
             supertrend_clean = supertrend[valid_idx]
@@ -155,7 +161,7 @@ class SuperTrend(BaseIndicator):
             atr_clean = atr[valid_idx]
             
             if len(df_clean) == 0:
-                logger.error(f"❌ No valid data after cleaning NaN for {self.name}")
+                logger.error(f"❌ No valid data after cleaning for {self.name}")
                 return None
             
             # Get latest values
@@ -176,7 +182,12 @@ class SuperTrend(BaseIndicator):
                 "atr": round(latest_atr, 2)
             }
             
-            logger.info(f"✅ {self.name} calculated: Signal={result['signal_text']}, Value=${result['supertrend_value']}")
+            logger.info(f"✅ {self.name} calculated:")
+            logger.info(f"   Price: ${latest_close:.2f}")
+            logger.info(f"   ATR: {latest_atr:.2f}")
+            logger.info(f"   SuperTrend: ${latest_supertrend:.2f}")
+            logger.info(f"   Signal: {result['signal_text']}")
+            
             return result
             
         except Exception as e:
@@ -184,4 +195,4 @@ class SuperTrend(BaseIndicator):
             import traceback
             logger.error(traceback.format_exc())
             return None
-                
+                    
