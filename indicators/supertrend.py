@@ -1,4 +1,4 @@
-"""SuperTrend indicator implementation - TradingView compatible."""
+"""SuperTrend indicator implementation - TradingView compatible with dynamic precision."""
 import logging
 import pandas as pd
 import numpy as np
@@ -25,6 +25,37 @@ class SuperTrend(BaseIndicator):
         self.atr_length = atr_length
         self.factor = factor
     
+    def _get_precision(self, value: float) -> int:
+        """
+        Determine appropriate decimal precision based on value magnitude.
+        
+        Args:
+            value: Price or ATR value
+        
+        Returns:
+            Number of decimal places to use
+        """
+        if value == 0:
+            return 8  # Max precision for zero
+        
+        abs_value = abs(value)
+        
+        # For very small values (like SHIB: 0.00001062)
+        if abs_value < 0.0001:
+            return 8
+        # For small values (like XRP: 2.65)
+        elif abs_value < 1:
+            return 6
+        # For medium values (like ETH: 2,850)
+        elif abs_value < 100:
+            return 4
+        # For large values (like BTC: 115,000)
+        elif abs_value < 10000:
+            return 2
+        # For very large values
+        else:
+            return 2
+    
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
         Calculate Average True Range (ATR) using RMA (Relative Moving Average).
@@ -33,8 +64,6 @@ class SuperTrend(BaseIndicator):
         RMA Formula (Wilder's Smoothing):
         - First value: SMA of first 'length' TR values
         - Subsequent: (Previous RMA * (length-1) + Current TR) / length
-        
-        This is different from EWM!
         
         Args:
             df: DataFrame with OHLC data
@@ -58,7 +87,6 @@ class SuperTrend(BaseIndicator):
         atr = pd.Series(index=df.index, dtype=float)
         
         # Calculate first ATR as SMA of first 'length' TR values
-        # This is the initialization that TradingView uses
         atr.iloc[self.atr_length - 1] = tr.iloc[:self.atr_length].mean()
         
         # Calculate subsequent ATR values using RMA (Wilder's smoothing)
@@ -69,10 +97,16 @@ class SuperTrend(BaseIndicator):
         # Fill initial NaN values
         atr = atr.ffill().bfill()
         
+        # Get precision for logging
+        latest_tr = tr.iloc[-1]
+        latest_atr = atr.iloc[-1]
+        tr_precision = self._get_precision(latest_tr)
+        atr_precision = self._get_precision(latest_atr)
+        
         logger.info(f"🔍 {self.name} ATR (RMA method):")
         logger.info(f"   Period: {self.atr_length}")
-        logger.info(f"   Latest TR: {tr.iloc[-1]:.2f}")
-        logger.info(f"   Latest ATR: {atr.iloc[-1]:.2f}")
+        logger.info(f"   Latest TR: {latest_tr:.{tr_precision}f}")
+        logger.info(f"   Latest ATR: {latest_atr:.{atr_precision}f}")
         
         return atr
     
@@ -171,22 +205,29 @@ class SuperTrend(BaseIndicator):
             latest_close = float(df_clean['close'].iloc[latest_idx])
             latest_atr = float(atr_clean.iloc[latest_idx])
             
+            # Determine appropriate precision based on price
+            price_precision = self._get_precision(latest_close)
+            st_precision = self._get_precision(latest_supertrend)
+            atr_precision = self._get_precision(latest_atr)
+            
             result = {
                 "indicator_name": self.name,
                 "atr_length": self.atr_length,
                 "factor": self.factor,
-                "latest_close": round(latest_close, 2),
-                "supertrend_value": round(latest_supertrend, 2),
+                "latest_close": round(latest_close, price_precision),
+                "supertrend_value": round(latest_supertrend, st_precision),
                 "signal": latest_signal,
                 "signal_text": "Uptrend" if latest_signal == SIGNAL_UPTREND else "Downtrend",
-                "atr": round(latest_atr, 2)
+                "atr": round(latest_atr, atr_precision),
+                "precision": price_precision  # Store for display formatting
             }
             
             logger.info(f"✅ {self.name} calculated:")
-            logger.info(f"   Price: ${latest_close:.2f}")
-            logger.info(f"   ATR: {latest_atr:.2f}")
-            logger.info(f"   SuperTrend: ${latest_supertrend:.2f}")
+            logger.info(f"   Price: ${latest_close:.{price_precision}f}")
+            logger.info(f"   ATR: {latest_atr:.{atr_precision}f}")
+            logger.info(f"   SuperTrend: ${latest_supertrend:.{st_precision}f}")
             logger.info(f"   Signal: {result['signal_text']}")
+            logger.info(f"   Precision used: {price_precision} decimals")
             
             return result
             
@@ -195,4 +236,4 @@ class SuperTrend(BaseIndicator):
             import traceback
             logger.error(traceback.format_exc())
             return None
-                    
+        
