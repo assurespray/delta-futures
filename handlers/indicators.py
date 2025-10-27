@@ -127,14 +127,10 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     return INDICATOR_ASSET
 
 
+# Update the indicator_asset_received function to use dynamic precision
+
 async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Calculate and display indicator after receiving asset symbol.
-    
-    Args:
-        update: Telegram update
-        context: Callback context
-    """
+    """Calculate and display indicator after receiving asset symbol."""
     asset = update.message.text.strip().upper()
     
     # Get stored context
@@ -201,6 +197,9 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
                 indicator_data = result['sirusu']
                 message = f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
             
+            # Get precision for formatting
+            precision = indicator_data.get('precision', 2)
+            
             message += f"**Symbol:** {asset}\n"
             message += f"**Timeframe:** {timeframe}\n"
             message += f"**API Account:** {api_name}\n"
@@ -209,11 +208,11 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
             message += f"├ ATR Length: {indicator_data['atr_length']}\n"
             message += f"├ Factor: {indicator_data['factor']}\n"
             message += f"├ ATR Value: {indicator_data['atr']}\n"
-            message += f"└ Current Price: ${indicator_data['latest_close']:,.2f}\n\n"
+            message += f"└ Current Price: ${indicator_data['latest_close']}\n\n"
             
             signal_emoji = "📈" if indicator_data['signal'] == 1 else "📉"
             message += f"**Signal:** {signal_emoji} **{indicator_data['signal_text']}**\n"
-            message += f"**SuperTrend Value:** ${indicator_data['supertrend_value']:,.2f}\n\n"
+            message += f"**SuperTrend Value:** ${indicator_data['supertrend_value']}\n\n"
             
             if indicator_data['signal'] == 1:
                 message += f"💡 Price is above SuperTrend line (Uptrend)\n"
