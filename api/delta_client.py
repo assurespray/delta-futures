@@ -55,24 +55,24 @@ class DeltaExchangeClient:
             params: Query parameters
             json_data: JSON body data
             retry: Current retry attempt
-    
+        
         Returns:
             Response JSON or None on failure
         """
         await self._rate_limit()
     
         try:
-            # Prepare request components
+            # Prepare query string (sorted alphabetically)
             query_string = ""
             if params:
-                # Sort parameters alphabetically for consistent signature
                 sorted_params = sorted(params.items())
                 query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
-        
+            
+            # Prepare body (compact JSON with NO SPACES)
             body = ""
             if json_data:
-                import json
-                body = json.dumps(json_data, separators=(',', ':'))  # No spaces
+                # CRITICAL: Use separators with NO SPACES
+                body = json.dumps(json_data, separators=(',', ':'))
         
             # Generate authentication headers
             headers = get_auth_headers(
@@ -89,13 +89,16 @@ class DeltaExchangeClient:
             if query_string:
                 url = f"{url}?{query_string}"
         
-            # Make request WITHOUT params (already in URL)
-            response = await self.client.request(
-                method=method,
-                url=url,
-                json=json_data if json_data else None,
-                headers=headers
-            )
+            # Make request
+            if method.upper() == "GET":
+                response = await self.client.get(url, headers=headers)
+            elif method.upper() == "POST":
+                response = await self.client.post(url, headers=headers, content=body)
+            elif method.upper() == "DELETE":
+                response = await self.client.delete(url, headers=headers)
+            else:
+                logger.error(f"❌ Unsupported HTTP method: {method}")
+                return None
         
             # Check response
             if response.status_code == 200:
