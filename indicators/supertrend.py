@@ -27,27 +27,37 @@ class SuperTrend(BaseIndicator):
     
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
-        Calculate Average True Range (ATR).
-        
+        Calculate Average True Range (ATR) using Wilder's smoothing.
+        This matches TradingView's SuperTrend calculation exactly.
+    
+        Formula: ATR = [(Prior ATR × (n - 1)) + Current TR] / n
+    
         Args:
             df: DataFrame with OHLC data
-        
+    
         Returns:
             Series with ATR values
         """
         high = df['high']
         low = df['low']
         close = df['close']
-        
+    
         # True Range calculation
         tr1 = high - low
         tr2 = abs(high - close.shift())
         tr3 = abs(low - close.shift())
-        
+    
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        
-        # ATR is the moving average of True Range
-        atr = tr.rolling(window=self.atr_length).mean()
+    
+        # Wilder's smoothing for ATR
+        # This is equivalent to EWM with alpha = 1/n, adjust=False
+        # ATR[i] = (ATR[i-1] * (n-1) + TR[i]) / n
+        atr = tr.ewm(alpha=1/self.atr_length, adjust=False).mean()
+    
+        logger.info(f"🔍 {self.name} ATR calculation:")
+        logger.info(f"   Period: {self.atr_length}")
+        logger.info(f"   Latest TR: {tr.iloc[-1]:.2f}")
+        logger.info(f"   Latest ATR: {atr.iloc[-1]:.2f}")
         
         return atr
     
