@@ -78,9 +78,11 @@ async def lifespan(app: FastAPI):
         webhook_info = await ptb_app.bot.get_webhook_info()
         logger.info(f"📡 Webhook URL: {webhook_info.url}")
         logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
-        
-        if webhook_info.last_error_date > 0:
+
+        # Log any webhook errors (only if last_error_date exists)
+        if webhook_info.last_error_date and webhook_info.last_error_date > 0:
             logger.error(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
+
         
         # Initialize bot
         await ptb_app.initialize()
