@@ -54,50 +54,47 @@ class SuperTrend(BaseIndicator):
     def calculate(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Calculate SuperTrend indicator.
-        
-        Formula:
-        Basic Upperband = (HIGH + LOW) / 2 + (ATR × Factor)
-        Basic Lowerband = (HIGH + LOW) / 2 - (ATR × Factor)
-        
-        Final Upperband = Basic Upperband < Previous Final Upperband OR Previous Close > Previous Final Upperband
-                         ? Basic Upperband : Previous Final Upperband
-        
-        Final Lowerband = Basic Lowerband > Previous Final Lowerband OR Previous Close < Previous Final Lowerband
-                         ? Basic Lowerband : Previous Final Lowerband
-        
-        SuperTrend = Close <= Final Upperband ? Final Upperband : Final Lowerband
-        Signal = Close <= Final Upperband ? -1 (Downtrend) : 1 (Uptrend)
-        
+    
         Args:
             candles: List of OHLC candle data
-        
+    
         Returns:
             Dictionary with SuperTrend values and signal
         """
         try:
             # Convert to DataFrame
             df = self.candles_to_dataframe(candles)
-            
+        
             if len(df) < self.atr_length + 1:
                 logger.warning(f"⚠️ Not enough data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
                 return None
-            
+        
             # Calculate ATR
             atr = self.calculate_atr(df)
-            
+        
+            # Check for NaN in ATR
+            if atr.isna().any():
+                logger.warning(f"⚠️ NaN values in ATR calculation for {self.name}, dropping NaN rows")
+                # Fill NaN with forward fill then backward fill
+                atr = atr.fillna(method='ffill').fillna(method='bfill')
+        
             # Calculate basic bands
             hl_avg = (df['high'] + df['low']) / 2
             basic_upperband = hl_avg + (self.factor * atr)
             basic_lowerband = hl_avg - (self.factor * atr)
-            
+        
             # Initialize final bands
             final_upperband = pd.Series(index=df.index, dtype=float)
             final_lowerband = pd.Series(index=df.index, dtype=float)
             supertrend = pd.Series(index=df.index, dtype=float)
             signal = pd.Series(index=df.index, dtype=int)
-            
+        
             # Calculate final bands and SuperTrend
             for i in range(len(df)):
+                # Skip if we don't have ATR yet
+                if pd.isna(atr.iloc[i]):
+                    continue
+                
                 if i == 0:
                     final_upperband.iloc[i] = basic_upperband.iloc[i]
                     final_lowerband.iloc[i] = basic_lowerband.iloc[i]
@@ -107,13 +104,13 @@ class SuperTrend(BaseIndicator):
                         final_upperband.iloc[i] = basic_upperband.iloc[i]
                     else:
                         final_upperband.iloc[i] = final_upperband.iloc[i-1]
-                    
+                
                     # Final Lowerband logic
                     if (basic_lowerband.iloc[i] > final_lowerband.iloc[i-1]) or (df['close'].iloc[i-1] < final_lowerband.iloc[i-1]):
                         final_lowerband.iloc[i] = basic_lowerband.iloc[i]
                     else:
                         final_lowerband.iloc[i] = final_lowerband.iloc[i-1]
-                
+            
                 # SuperTrend and Signal
                 if i == 0:
                     supertrend.iloc[i] = final_upperband.iloc[i]
@@ -131,13 +128,24 @@ class SuperTrend(BaseIndicator):
                     elif supertrend.iloc[i-1] == final_lowerband.iloc[i-1] and df['close'].iloc[i] < final_lowerband.iloc[i]:
                         supertrend.iloc[i] = final_upperband.iloc[i]
                         signal.iloc[i] = SIGNAL_DOWNTREND
-            
+        
+            # Drop NaN rows
+            df_clean = df[~supertrend.isna()].copy()
+            supertrend_clean = supertrend[~supertrend.isna()]
+            signal_clean = signal[~signal.isna()]
+            atr_clean = atr[~atr.isna()]
+        
+            if len(df_clean) == 0:
+                logger.error(f"❌ No valid data after cleaning NaN for {self.name}")
+                return None
+        
             # Get latest values
-            latest_idx = len(df) - 1
-            latest_supertrend = float(supertrend.iloc[latest_idx])
-            latest_signal = int(signal.iloc[latest_idx])
-            latest_close = float(df['close'].iloc[latest_idx])
-            
+            latest_idx = len(df_clean) - 1
+            latest_supertrend = float(supertrend_clean.iloc[latest_idx])
+            latest_signal = int(signal_clean.iloc[latest_idx])
+            latest_close = float(df_clean['close'].iloc[latest_idx])
+            latest_atr = float(atr_clean.iloc[latest_idx])
+        
             result = {
                 "indicator_name": self.name,
                 "atr_length": self.atr_length,
@@ -146,13 +154,14 @@ class SuperTrend(BaseIndicator):
                 "supertrend_value": round(latest_supertrend, 2),
                 "signal": latest_signal,
                 "signal_text": "Uptrend" if latest_signal == SIGNAL_UPTREND else "Downtrend",
-                "atr": round(float(atr.iloc[latest_idx]), 2)
+                "atr": round(latest_atr, 2)
             }
-            
+        
             logger.info(f"✅ {self.name} calculated: Signal={result['signal_text']}, Value=${result['supertrend_value']}")
             return result
-            
+        
         except Exception as e:
             logger.error(f"❌ Failed to calculate {self.name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
-          
