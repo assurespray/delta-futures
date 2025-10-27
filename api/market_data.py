@@ -112,7 +112,7 @@ async def get_ticker(client: DeltaExchangeClient, symbol: str) -> Optional[Dict[
 
 async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                      start_time: Optional[int] = None, end_time: Optional[int] = None,
-                     limit: int = 100) -> Optional[List[Dict[str, Any]]]:
+                     limit: int = 200) -> Optional[List[Dict[str, Any]]]:
     """
     Get historical OHLC candle data.
     
@@ -122,14 +122,12 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         timeframe: Timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
         start_time: Start timestamp (Unix seconds)
         end_time: End timestamp (Unix seconds)
-        limit: Number of candles to fetch (max 500)
+        limit: Number of candles to fetch (default 200, max 500)
     
     Returns:
         List of candle data or None
     """
     try:
-        from datetime import datetime, timedelta
-        
         resolution = TIMEFRAME_MAPPING.get(timeframe, "15m")
         
         # Calculate start and end times if not provided
@@ -143,7 +141,10 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                 "1h": 3600, "4h": 14400, "1d": 86400
             }
             seconds_per_candle = timeframe_seconds.get(timeframe, 900)
-            start_time = end_time - (seconds_per_candle * limit)
+            
+            # Add 10% buffer to ensure we get enough data
+            actual_limit = int(limit * 1.1)
+            start_time = end_time - (seconds_per_candle * actual_limit)
         
         params = {
             "symbol": symbol,
@@ -151,6 +152,9 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
             "start": str(start_time),
             "end": str(end_time)
         }
+        
+        logger.info(f"🔍 Requesting {limit} candles for {symbol} ({timeframe})")
+        logger.info(f"   Time range: {datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M')} to {datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M')}")
         
         response = await client.get("/v2/history/candles", params=params)
         
@@ -169,13 +173,17 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                     "volume": float(candle.get("volume", 0))
                 })
             
-            # Sort by time
+            # Sort by time (oldest first for proper calculation)
             formatted_candles.sort(key=lambda x: x["time"])
             
-            # Limit results
+            # Limit results to requested amount (from most recent)
             formatted_candles = formatted_candles[-limit:]
             
             logger.info(f"✅ Retrieved {len(formatted_candles)} candles for {symbol} ({timeframe})")
+            if formatted_candles:
+                logger.info(f"   Oldest: {datetime.fromtimestamp(formatted_candles[0]['time']).strftime('%Y-%m-%d %H:%M')}")
+                logger.info(f"   Newest: {datetime.fromtimestamp(formatted_candles[-1]['time']).strftime('%Y-%m-%d %H:%M')}")
+            
             return formatted_candles
         
         logger.error(f"❌ Failed to get candles: {response}")
@@ -183,6 +191,8 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         
     except Exception as e:
         logger.error(f"❌ Exception getting candles: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 
@@ -209,4 +219,4 @@ async def get_latest_price(client: DeltaExchangeClient, symbol: str) -> Optional
     except Exception as e:
         logger.error(f"❌ Exception getting latest price: {e}")
         return None
-      
+                                                                 
