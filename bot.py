@@ -19,7 +19,8 @@ from handlers.orders import (
     orders_callback, order_cancel_callback, order_cancel_all_callback
 )
 from handlers.indicators import (
-    indicators_callback, indicator_select_callback, indicator_detail_callback
+    indicators_callback, indicator_select_callback, indicator_timeframe_callback,
+    indicator_asset_received, cancel_indicator, INDICATOR_ASSET
 )
 from handlers.algo_setup import (
     algo_setups_callback, algo_add_start, setup_name_received, setup_desc_received,
@@ -62,6 +63,17 @@ def create_application() -> Application:
     )
     application.add_handler(api_conv_handler)
     
+    # Indicators conversation handler (NEW: with asset input)
+    indicator_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")],
+        states={
+            INDICATOR_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, indicator_asset_received)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_indicator)],
+        per_message=False
+    )
+    application.add_handler(indicator_conv_handler)
+    
     # Algo Setup conversation handler
     algo_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(algo_add_start, pattern="^algo_add_start$")],
@@ -102,10 +114,9 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(order_cancel_callback, pattern="^order_cancel_"))
     application.add_handler(CallbackQueryHandler(order_cancel_all_callback, pattern="^order_cancel_all_"))
     
-    # Indicators handlers (NEW: with timeframe selection)
+    # Indicators handlers (non-conversation callbacks)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
     application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
-    application.add_handler(CallbackQueryHandler(indicator_detail_callback, pattern="^indicator_tf_"))
     
     # Algo Setups handlers
     application.add_handler(CallbackQueryHandler(algo_setups_callback, pattern="^menu_algo_setups$"))
