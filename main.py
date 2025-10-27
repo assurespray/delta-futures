@@ -117,12 +117,12 @@ async def lifespan(app: FastAPI):
     
     try:
         # Delete webhook on shutdown (clean exit)
-        if ptb_app:
-            try:
-                await ptb_app.bot.delete_webhook(drop_pending_updates=True)
-                logger.info("🗑️ Webhook deleted on shutdown")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not delete webhook on shutdown: {e}")
+        #if ptb_app:
+            #try:
+                #await ptb_app.bot.delete_webhook(drop_pending_updates=True)
+            #    logger.info("🗑️ Webhook deleted on shutdown")
+           # except Exception as e:
+             #   logger.warning(f"⚠️ Could not delete webhook on shutdown: {e}")
         
         # Stop scheduler
         scheduler_service.shutdown()
