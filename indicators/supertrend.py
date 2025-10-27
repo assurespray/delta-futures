@@ -36,23 +36,18 @@ class SuperTrend(BaseIndicator):
             Number of decimal places to use
         """
         if value == 0:
-            return 8  # Max precision for zero
+            return 8
         
         abs_value = abs(value)
         
-        # For very small values (like SHIB: 0.00001062)
         if abs_value < 0.0001:
             return 8
-        # For small values (like XRP: 2.65)
         elif abs_value < 1:
             return 6
-        # For medium values (like ETH: 2,850)
         elif abs_value < 100:
             return 4
-        # For large values (like BTC: 115,000)
         elif abs_value < 10000:
             return 2
-        # For very large values
         else:
             return 2
     
@@ -76,7 +71,6 @@ class SuperTrend(BaseIndicator):
         close = df['close']
         
         # True Range calculation
-        # TR = max(H-L, |H-C_prev|, |L-C_prev|)
         tr1 = high - low
         tr2 = abs(high - close.shift())
         tr3 = abs(low - close.shift())
@@ -90,7 +84,6 @@ class SuperTrend(BaseIndicator):
         atr.iloc[self.atr_length - 1] = tr.iloc[:self.atr_length].mean()
         
         # Calculate subsequent ATR values using RMA (Wilder's smoothing)
-        # RMA[i] = (RMA[i-1] * (length-1) + TR[i]) / length
         for i in range(self.atr_length, len(df)):
             atr.iloc[i] = (atr.iloc[i-1] * (self.atr_length - 1) + tr.iloc[i]) / self.atr_length
         
@@ -169,23 +162,41 @@ class SuperTrend(BaseIndicator):
                     else:
                         final_lowerband.iloc[i] = final_lowerband.iloc[i-1]
                 
-                # SuperTrend and Signal determination
+                # SuperTrend and Signal determination (FIXED LOGIC)
                 if i == 0:
-                    supertrend.iloc[i] = final_upperband.iloc[i]
-                    signal.iloc[i] = SIGNAL_DOWNTREND
+                    # Determine initial signal based on price position
+                    if df['close'].iloc[i] > final_upperband.iloc[i]:
+                        supertrend.iloc[i] = final_lowerband.iloc[i]
+                        signal.iloc[i] = SIGNAL_UPTREND
+                    else:
+                        supertrend.iloc[i] = final_upperband.iloc[i]
+                        signal.iloc[i] = SIGNAL_DOWNTREND
                 else:
-                    if supertrend.iloc[i-1] == final_upperband.iloc[i-1] and df['close'].iloc[i] <= final_upperband.iloc[i]:
-                        supertrend.iloc[i] = final_upperband.iloc[i]
-                        signal.iloc[i] = SIGNAL_DOWNTREND
-                    elif supertrend.iloc[i-1] == final_upperband.iloc[i-1] and df['close'].iloc[i] > final_upperband.iloc[i]:
-                        supertrend.iloc[i] = final_lowerband.iloc[i]
-                        signal.iloc[i] = SIGNAL_UPTREND
-                    elif supertrend.iloc[i-1] == final_lowerband.iloc[i-1] and df['close'].iloc[i] >= final_lowerband.iloc[i]:
-                        supertrend.iloc[i] = final_lowerband.iloc[i]
-                        signal.iloc[i] = SIGNAL_UPTREND
-                    elif supertrend.iloc[i-1] == final_lowerband.iloc[i-1] and df['close'].iloc[i] < final_lowerband.iloc[i]:
-                        supertrend.iloc[i] = final_upperband.iloc[i]
-                        signal.iloc[i] = SIGNAL_DOWNTREND
+                    # Trend continuation/reversal logic
+                    prev_st = supertrend.iloc[i-1]
+                    curr_close = df['close'].iloc[i]
+                    
+                    # Was in downtrend (using upper band)
+                    if prev_st == final_upperband.iloc[i-1]:
+                        if curr_close > final_upperband.iloc[i]:
+                            # Price broke above upper band -> switch to uptrend
+                            supertrend.iloc[i] = final_lowerband.iloc[i]
+                            signal.iloc[i] = SIGNAL_UPTREND
+                        else:
+                            # Continue downtrend
+                            supertrend.iloc[i] = final_upperband.iloc[i]
+                            signal.iloc[i] = SIGNAL_DOWNTREND
+                    
+                    # Was in uptrend (using lower band)
+                    else:
+                        if curr_close < final_lowerband.iloc[i]:
+                            # Price broke below lower band -> switch to downtrend
+                            supertrend.iloc[i] = final_upperband.iloc[i]
+                            signal.iloc[i] = SIGNAL_DOWNTREND
+                        else:
+                            # Continue uptrend
+                            supertrend.iloc[i] = final_lowerband.iloc[i]
+                            signal.iloc[i] = SIGNAL_UPTREND
             
             # Clean data
             valid_idx = ~supertrend.isna()
@@ -219,7 +230,7 @@ class SuperTrend(BaseIndicator):
                 "signal": latest_signal,
                 "signal_text": "Uptrend" if latest_signal == SIGNAL_UPTREND else "Downtrend",
                 "atr": round(latest_atr, atr_precision),
-                "precision": price_precision  # Store for display formatting
+                "precision": price_precision
             }
             
             logger.info(f"✅ {self.name} calculated:")
@@ -236,4 +247,4 @@ class SuperTrend(BaseIndicator):
             import traceback
             logger.error(traceback.format_exc())
             return None
-        
+                        
