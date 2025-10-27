@@ -1,9 +1,9 @@
-"""Delta Exchange API authentication and signature generation."""
+"""Authentication utilities for Delta Exchange API."""
 import hmac
 import hashlib
 import time
 import logging
-from typing import Dict
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def generate_signature(method: str, endpoint: str, api_secret: str,
         endpoint: API endpoint path
         api_secret: API secret key
         query_string: Query parameters (sorted alphabetically)
-        body: Request body (no spaces in JSON)
+        body: Request body (MUST be compact JSON with no spaces)
     
     Returns:
         Tuple of (signature, timestamp)
@@ -27,7 +27,7 @@ def generate_signature(method: str, endpoint: str, api_secret: str,
         timestamp = str(int(time.time()))
         
         # Build signature string: METHOD + TIMESTAMP + ENDPOINT + QUERY_STRING + BODY
-        signature_string = method + timestamp + endpoint
+        signature_string = method.upper() + timestamp + endpoint
         if query_string:
             signature_string += "?" + query_string
         signature_string += body
@@ -49,17 +49,17 @@ def generate_signature(method: str, endpoint: str, api_secret: str,
 
 
 def get_auth_headers(method: str, endpoint: str, api_key: str, api_secret: str,
-                    query_string: str = "", body: str = "") -> Dict[str, str]:
+                    query_string: str = "", body: str = "") -> dict:
     """
     Generate authentication headers for Delta Exchange API.
     
     Args:
         method: HTTP method
-        endpoint: API endpoint path
+        endpoint: API endpoint
         api_key: API key
         api_secret: API secret
-        query_string: Query parameters (optional)
-        body: Request body (optional)
+        query_string: Query parameters string
+        body: Request body (compact JSON)
     
     Returns:
         Dictionary of headers
@@ -67,11 +67,11 @@ def get_auth_headers(method: str, endpoint: str, api_key: str, api_secret: str,
     signature, timestamp = generate_signature(method, endpoint, api_secret, query_string, body)
     
     headers = {
-        'api-key': api_key,
-        'signature': signature,
-        'timestamp': timestamp,
-        'User-Agent': 'DeltaTradingBot/1.0',
-        'Content-Type': 'application/json'
+        "api-key": api_key,
+        "signature": signature,
+        "timestamp": timestamp,
+        "Content-Type": "application/json",
+        "User-Agent": "DeltaFuturesBot/1.0"
     }
     
     return headers
