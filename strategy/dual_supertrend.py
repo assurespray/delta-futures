@@ -46,22 +46,41 @@ class DualSuperTrendStrategy:
             Dictionary with both indicator results or None
         """
         try:
-            # Fetch candles (need enough for longest ATR period + buffer)
-            # Perusu needs 20 periods, so fetch 50 to be safe
-            required_candles = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 30
+            # CRITICAL: For accurate RMA calculation, need 3-4x the period length
+            # Perusu (20,20): 20 * 4 = 80 candles minimum
+            # Sirusu (10,10): 10 * 4 = 40 candles minimum
+            # Add 20 buffer for safety
+            base_requirement = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH)
+            required_candles = base_requirement * 4 + 20  # 20*4 + 20 = 100
+            
+            logger.info(f"📊 Fetching {required_candles} candles for {symbol} ({timeframe})")
             candles = await get_candles(client, symbol, timeframe, limit=required_candles)
         
-            if not candles or len(candles) < required_candles:
-                logger.warning(f"⚠️ Insufficient candle data for {symbol}: got {len(candles) if candles else 0}, need {required_candles}")
+            if not candles:
+                logger.error(f"❌ Failed to fetch candles for {symbol}")
                 return None
+            
+            actual_count = len(candles)
+            logger.info(f"✅ Retrieved {actual_count} candles for {symbol}")
+            
+            # Check if we have minimum required data
+            min_required = base_requirement + 10
+            if actual_count < min_required:
+                logger.error(f"❌ Insufficient data: got {actual_count}, need {min_required}")
+                return None
+            
+            if actual_count < required_candles:
+                logger.warning(f"⚠️ Got {actual_count} candles, wanted {required_candles} - may affect accuracy")
         
-            # Calculate Perusu
+            # Calculate Perusu with detailed logging
+            logger.info(f"🔵 Calculating Perusu (ATR {PERUSU_ATR_LENGTH}, Factor {PERUSU_FACTOR}) with {actual_count} candles...")
             perusu_result = self.perusu.calculate(candles)
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
         
-            # Calculate Sirusu
+            # Calculate Sirusu with detailed logging
+            logger.info(f"🔴 Calculating Sirusu (ATR {SIRUSU_ATR_LENGTH}, Factor {SIRUSU_FACTOR}) with {actual_count} candles...")
             sirusu_result = self.sirusu.calculate(candles)
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
@@ -71,18 +90,22 @@ class DualSuperTrendStrategy:
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "calculated_at": datetime.utcnow(),
+                "candles_used": actual_count,
                 "perusu": perusu_result,
                 "sirusu": sirusu_result
             }
         
             logger.info(f"✅ Indicators calculated for {symbol} ({timeframe})")
-            logger.info(f"   Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']}")
-            logger.info(f"   Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']}")
+            logger.info(f"   📊 Candles used: {actual_count}")
+            logger.info(f"   🔵 Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']:,.2f}")
+            logger.info(f"   🔴 Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']:,.2f}")
         
             return result
         
         except Exception as e:
             logger.error(f"❌ Exception calculating indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     def generate_entry_signal(self, perusu_signal: int, direction: str, 
@@ -124,8 +147,5 @@ class DualSuperTrendStrategy:
         Returns:
             Stop-loss price
         """
-        # For long positions, stop-loss is below (Sirusu lower band)
-        # For short positions, stop-loss is above (Sirusu upper band)
-        # The Sirusu value already represents the appropriate band
         return sirusu_value
-                               
+                                 
