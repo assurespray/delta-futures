@@ -53,8 +53,8 @@ class DualSuperTrendStrategy:
                 "15m": 150,
                 "30m": 200,
                 "1h": 300,
-                "4h": 400,
-                "1d": 500  # Daily needs ~500 candles for ATR(20) accuracy
+                "4h": 500,
+                "1d": 700  # Daily needs ~500 candles for ATR(20) accuracy
             }
     
             required_candles = timeframe_requirements.get(timeframe, 200)
