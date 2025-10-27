@@ -60,14 +60,16 @@ async def lifespan(app: FastAPI):
         
         # Set new webhook
         webhook_url = settings.webhook_url
+        logger.info(f"🔧 Attempting to set webhook to: {webhook_url}")
+        
         webhook_set = await ptb_app.bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=True,  # Don't process old updates
-            allowed_updates=["message", "callback_query"]  # Only process these
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
         )
         
         if webhook_set:
-            logger.info(f"✅ Webhook set to: {webhook_url}")
+            logger.info(f"✅ Webhook set successfully")
         else:
             logger.error("❌ Failed to set webhook!")
             raise RuntimeError("Webhook setup failed")
@@ -76,6 +78,9 @@ async def lifespan(app: FastAPI):
         webhook_info = await ptb_app.bot.get_webhook_info()
         logger.info(f"📡 Webhook URL: {webhook_info.url}")
         logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
+        
+        if webhook_info.last_error_date > 0:
+            logger.error(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
         
         # Initialize bot
         await ptb_app.initialize()
@@ -256,10 +261,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-    )
-
-
-@app.get("/")
-async def root():
-    """Root endpoint - returns OK for Render health checks."""
-    return {"status": "ok"}  # Simple response Render likes
+)
+    
