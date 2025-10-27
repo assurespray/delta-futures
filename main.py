@@ -257,4 +257,9 @@ if __name__ == "__main__":
         port=settings.port,
         reload=False
     )
-    
+
+
+@app.get("/")
+async def root():
+    """Root endpoint - returns OK for Render health checks."""
+    return {"status": "ok"}  # Simple response Render likes
