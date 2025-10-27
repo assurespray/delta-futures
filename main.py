@@ -48,23 +48,13 @@ async def lifespan(app: FastAPI):
         # Create Telegram bot application
         ptb_app = create_application()
         
-        # Delete old webhook (prevents conflicts)
-       # try:
-          #  await ptb_app.bot.delete_webhook(drop_pending_updates=True)
-         #   logger.info("🗑️ Old webhook deleted")
-      #  except Exception as e:
-          #  logger.warning(f"⚠️ Could not delete old webhook: {e}")
-        
-        # Wait a moment to ensure deletion is processed
-    #    await asyncio.sleep(1)
-        
-        # Set new webhook
+        # Set webhook (will update if already exists)
         webhook_url = settings.webhook_url
-        logger.info(f"🔧 Attempting to set webhook to: {webhook_url}")
+        logger.info(f"🔧 Setting webhook to: {webhook_url}")
         
         webhook_set = await ptb_app.bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=False,
+            drop_pending_updates=False,  # Keep messages sent during restart!
             allowed_updates=["message", "callback_query"]
         )
         
@@ -78,12 +68,10 @@ async def lifespan(app: FastAPI):
         webhook_info = await ptb_app.bot.get_webhook_info()
         logger.info(f"📡 Webhook URL: {webhook_info.url}")
         logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
-
+        
         # Log any webhook errors (only if last_error_date exists)
         if webhook_info.last_error_date and webhook_info.last_error_date > 0:
             logger.error(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
-
-
         
         # Initialize bot
         await ptb_app.initialize()
@@ -116,13 +104,7 @@ async def lifespan(app: FastAPI):
     logger.info("🔒 Shutting down application...")
     
     try:
-        # Delete webhook on shutdown (clean exit)
-        #if ptb_app:
-            #try:
-                #await ptb_app.bot.delete_webhook(drop_pending_updates=True)
-            #    logger.info("🗑️ Webhook deleted on shutdown")
-           # except Exception as e:
-             #   logger.warning(f"⚠️ Could not delete webhook on shutdown: {e}")
+        # Webhook stays active during restart - no deletion!
         
         # Stop scheduler
         scheduler_service.shutdown()
@@ -264,5 +246,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-)
+    )
     
