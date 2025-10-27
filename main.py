@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
         if webhook_info.last_error_date and webhook_info.last_error_date > 0:
             logger.error(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
 
+
         
         # Initialize bot
         await ptb_app.initialize()
