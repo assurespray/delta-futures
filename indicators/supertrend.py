@@ -85,8 +85,8 @@ class SuperTrend(BaseIndicator):
             # Check for NaN in ATR
             if atr.isna().any():
                 logger.warning(f"⚠️ NaN values in ATR calculation for {self.name}, dropping NaN rows")
-                # Fill NaN with forward fill then backward fill
-                atr = atr.fillna(method='ffill').fillna(method='bfill')
+                # New (pandas 2.1+ compatible):
+                atr = atr.ffill().bfill()
         
             # Calculate basic bands
             hl_avg = (df['high'] + df['low']) / 2
