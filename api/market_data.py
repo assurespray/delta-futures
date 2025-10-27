@@ -173,7 +173,16 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         
         if response and response.get("success"):
             candles = response.get("result", [])
+
+            # Calculate raw response size
+            import json
+            response_json = json.dumps(response)
+            response_size_bytes = len(response_json.encode('utf-8'))
+            response_size_kb = response_size_bytes / 1024
             
+            logger.info(f"📊 API Response size: {response_size_kb:.2f} KB ({response_size_bytes:,} bytes)")
+            logger.info(f"   Raw candles received: {len(candles)}")
+        
             # Convert to more usable format
             formatted_candles = []
             for candle in candles:
@@ -192,8 +201,17 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
             # Limit results to requested amount (from most recent)
             formatted_candles = formatted_candles[-limit:]
             
+            # Calculate formatted data size
+            formatted_json = json.dumps(formatted_candles)
+            formatted_size_bytes = len(formatted_json.encode('utf-8'))
+            formatted_size_kb = formatted_size_bytes / 1024
+            
             logger.info(f"✅ Retrieved {len(formatted_candles)} candles for {symbol} ({timeframe})")
+            logger.info(f"   Processed size: {formatted_size_kb:.2f} KB ({formatted_size_bytes:,} bytes)")
+            
             if formatted_candles:
+                avg_per_candle = formatted_size_bytes / len(formatted_candles)
+                logger.info(f"   Average per candle: {avg_per_candle:.0f} bytes")
                 logger.info(f"   Oldest: {datetime.fromtimestamp(formatted_candles[0]['time']).strftime('%Y-%m-%d %H:%M')}")
                 logger.info(f"   Newest: {datetime.fromtimestamp(formatted_candles[-1]['time']).strftime('%Y-%m-%d %H:%M')}")
             
