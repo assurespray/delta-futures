@@ -134,7 +134,30 @@ async def telegram_webhook(request: Request):
         return Response(status_code=500)
 
 
+# Root endpoint - supports both GET and HEAD for Render health checks
+@app.get("/")
+@app.head("/")
+async def root():
+    """
+    Root endpoint with health status.
+    Render.com will ping this for health checks.
+    
+    Returns:
+        JSON with status (GET) or 200 status (HEAD)
+    """
+    from datetime import datetime
+    
+    return {
+        "message": "Delta Exchange Trading Bot API",
+        "status": "running",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# Health check endpoints (UptimeRobot compatibility)
 @app.head("/universal/health")
+@app.head("/health")
 async def health_check_head():
     """
     Health check endpoint for HEAD requests (UptimeRobot).
@@ -146,6 +169,7 @@ async def health_check_head():
 
 
 @app.get("/universal/health")
+@app.get("/health")
 async def health_check_get():
     """
     Health check endpoint for GET requests.
@@ -165,7 +189,8 @@ async def health_check_get():
             "timestamp": datetime.utcnow().isoformat(),
             "active_algos": active_count,
             "scheduler_jobs": scheduler_service.get_job_count(),
-            "environment": settings.environment
+            "environment": settings.environment,
+            "version": "1.0.0"
         }
     
     except Exception as e:
@@ -175,21 +200,6 @@ async def health_check_get():
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
-
-
-@app.get("/")
-async def root():
-    """
-    Root endpoint.
-    
-    Returns:
-        Welcome message
-    """
-    return {
-        "message": "Delta Exchange Trading Bot API",
-        "status": "running",
-        "version": "1.0.0"
-    }
 
 
 async def health_check_task():
@@ -214,5 +224,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-    )
-  
+        )
+    
