@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
         
         webhook_set = await ptb_app.bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=True,
+            drop_pending_updates=False,
             allowed_updates=["message", "callback_query"]
         )
         
