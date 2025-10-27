@@ -70,9 +70,10 @@ class DualSuperTrendStrategy:
             logger.info(f"✅ Retrieved {actual_count} candles for {symbol}")
             
             # Check if we have minimum required data
-            min_required = base_requirement + 10
+            # Need at least ATR period + 10 buffer
+            min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
             if actual_count < min_required:
-                logger.error(f"❌ Insufficient data: got {actual_count}, need {min_required}")
+                logger.error(f"❌ Insufficient data: got {actual_count}, need at least {min_required}")
                 return None
             
             if actual_count < required_candles:
@@ -154,4 +155,4 @@ class DualSuperTrendStrategy:
             Stop-loss price
         """
         return sirusu_value
-                                 
+        
