@@ -128,17 +128,29 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         List of candle data or None
     """
     try:
+        from datetime import datetime, timedelta
+        
         resolution = TIMEFRAME_MAPPING.get(timeframe, "15m")
+        
+        # Calculate start and end times if not provided
+        if not end_time:
+            end_time = int(datetime.utcnow().timestamp())
+        
+        if not start_time:
+            # Calculate based on timeframe and limit
+            timeframe_seconds = {
+                "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                "1h": 3600, "4h": 14400, "1d": 86400
+            }
+            seconds_per_candle = timeframe_seconds.get(timeframe, 900)
+            start_time = end_time - (seconds_per_candle * limit)
         
         params = {
             "symbol": symbol,
-            "resolution": resolution
+            "resolution": resolution,
+            "start": str(start_time),
+            "end": str(end_time)
         }
-        
-        if start_time:
-            params["start"] = start_time
-        if end_time:
-            params["end"] = end_time
         
         response = await client.get("/v2/history/candles", params=params)
         
