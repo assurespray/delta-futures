@@ -46,12 +46,18 @@ class DualSuperTrendStrategy:
             Dictionary with both indicator results or None
         """
         try:
-            # CRITICAL: For accurate RMA calculation, need 3-4x the period length
-            # Perusu (20,20): 20 * 4 = 80 candles minimum
-            # Sirusu (10,10): 10 * 4 = 40 candles minimum
-            # Add 20 buffer for safety
-            base_requirement = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH)
-            required_candles = base_requirement * 4 + 20  # 20*4 + 20 = 100
+            # Scale candle requirements by timeframe
+            timeframe_requirements = {
+                "1m": 100,
+                "5m": 150,
+                "15m": 150,
+                "30m": 200,
+                "1h": 300,
+                "4h": 400,
+                "1d": 500  # Daily needs ~500 candles for ATR(20) accuracy
+            }
+    
+            required_candles = timeframe_requirements.get(timeframe, 200)
             
             logger.info(f"📊 Fetching {required_candles} candles for {symbol} ({timeframe})")
             candles = await get_candles(client, symbol, timeframe, limit=required_candles)
