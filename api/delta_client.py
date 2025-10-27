@@ -1,6 +1,7 @@
 """Delta Exchange API client with rate limiting and retry logic."""
 import asyncio
 import logging
+import json  # ← MISSING IMPORT!
 from typing import Dict, Any, Optional
 import httpx
 from config.settings import settings
