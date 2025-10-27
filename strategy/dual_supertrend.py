@@ -48,11 +48,11 @@ class DualSuperTrendStrategy:
         try:
             # Scale candle requirements by timeframe
             timeframe_requirements = {
-                "1m": 100,
-                "5m": 150,
-                "15m": 150,
-                "30m": 200,
-                "1h": 300,
+                "1m": 300,
+                "5m": 350,
+                "15m": 350,
+                "30m": 350,
+                "1h": 400,
                 "4h": 500,
                 "1d": 700  # Daily needs ~500 candles for ATR(20) accuracy
             }
