@@ -18,7 +18,9 @@ from handlers.positions import positions_callback
 from handlers.orders import (
     orders_callback, order_cancel_callback, order_cancel_all_callback
 )
-from handlers.indicators import indicators_callback, indicator_detail_callback
+from handlers.indicators import (
+    indicators_callback, indicator_select_callback, indicator_detail_callback
+)
 from handlers.algo_setup import (
     algo_setups_callback, algo_add_start, setup_name_received, setup_desc_received,
     setup_api_selected, setup_indicator_selected, setup_direction_selected,
@@ -55,7 +57,8 @@ def create_application() -> Application:
             API_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, api_key_received)],
             API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, api_secret_received)]
         },
-        fallbacks=[CommandHandler("cancel", cancel_conversation)]
+        fallbacks=[CommandHandler("cancel", cancel_conversation)],
+        per_message=False
     )
     application.add_handler(api_conv_handler)
     
@@ -74,7 +77,8 @@ def create_application() -> Application:
             SETUP_PROTECTION: [CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_")],
             SETUP_CONFIRM: [CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_algo_setup)]
+        fallbacks=[CommandHandler("cancel", cancel_algo_setup)],
+        per_message=False
     )
     application.add_handler(algo_conv_handler)
     
@@ -98,9 +102,10 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(order_cancel_callback, pattern="^order_cancel_"))
     application.add_handler(CallbackQueryHandler(order_cancel_all_callback, pattern="^order_cancel_all_"))
     
-    # Indicators handlers
+    # Indicators handlers (NEW: with timeframe selection)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
-    application.add_handler(CallbackQueryHandler(indicator_detail_callback, pattern="^indicator_"))
+    application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
+    application.add_handler(CallbackQueryHandler(indicator_detail_callback, pattern="^indicator_tf_"))
     
     # Algo Setups handlers
     application.add_handler(CallbackQueryHandler(algo_setups_callback, pattern="^menu_algo_setups$"))
@@ -115,4 +120,4 @@ def create_application() -> Application:
     logger.info("✅ Bot handlers registered")
     
     return application
-  
+    
