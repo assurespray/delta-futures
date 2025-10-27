@@ -112,9 +112,9 @@ async def get_ticker(client: DeltaExchangeClient, symbol: str) -> Optional[Dict[
 
 async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                      start_time: Optional[int] = None, end_time: Optional[int] = None,
-                     limit: int = 200) -> Optional[List[Dict[str, Any]]]:
+                     limit: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
     """
-    Get historical OHLC candle data.
+    Get historical OHLC candle data (auto-scaled by timeframe).
     
     Args:
         client: Delta Exchange client instance
@@ -122,13 +122,26 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         timeframe: Timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
         start_time: Start timestamp (Unix seconds)
         end_time: End timestamp (Unix seconds)
-        limit: Number of candles to fetch (default 200, max 500)
+        limit: Number of candles (auto-scaled if None)
     
     Returns:
         List of candle data or None
     """
     try:
         resolution = TIMEFRAME_MAPPING.get(timeframe, "15m")
+        
+        # Auto-scale candles based on timeframe if not specified
+        if limit is None:
+            timeframe_candle_count = {
+                "1m": 100,
+                "5m": 150,
+                "15m": 150,
+                "30m": 200,
+                "1h": 250,
+                "4h": 400,  # ← Key change!
+                "1d": 500
+            }
+            limit = timeframe_candle_count.get(timeframe, 200)
         
         # Calculate start and end times if not provided
         if not end_time:
@@ -194,7 +207,7 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         import traceback
         logger.error(traceback.format_exc())
         return None
-
+            
 
 async def get_latest_price(client: DeltaExchangeClient, symbol: str) -> Optional[float]:
     """
