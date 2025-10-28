@@ -1,4 +1,5 @@
 """Pydantic models for database schemas."""
+
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
@@ -25,6 +26,7 @@ class PyObjectId(ObjectId):
 
 class APICredential(BaseModel):
     """Model for storing API credentials."""
+    
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
     api_name: str
@@ -40,6 +42,7 @@ class APICredential(BaseModel):
 
 class AlgoSetup(BaseModel):
     """Model for algo trading setup configuration."""
+    
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
     setup_name: str
@@ -57,6 +60,12 @@ class AlgoSetup(BaseModel):
     current_position: Optional[str] = None  # "long", "short", None
     last_entry_price: Optional[float] = None
     last_signal_time: Optional[datetime] = None
+    
+    # ✅ NEW: Track last Perusu signal state
+    last_perusu_signal: Optional[int] = None  # 1=uptrend, -1=downtrend
+    pending_entry_order_id: Optional[int] = None  # Stop-market entry order ID
+    entry_trigger_price: Optional[float] = None  # Breakout trigger price
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
@@ -68,6 +77,7 @@ class AlgoSetup(BaseModel):
 
 class AlgoActivity(BaseModel):
     """Model for trade activity logs."""
+    
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
     algo_setup_id: str
@@ -86,6 +96,9 @@ class AlgoActivity(BaseModel):
     trade_date: str  # YYYY-MM-DD format
     is_closed: bool = False
     
+    # ✅ NEW: Track entry trigger price
+    entry_trigger_price: Optional[float] = None
+    
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
@@ -94,6 +107,7 @@ class AlgoActivity(BaseModel):
 
 class IndicatorCache(BaseModel):
     """Model for caching indicator values."""
+    
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     algo_setup_id: str
     indicator_name: str  # "perusu" or "sirusu"
@@ -107,4 +121,4 @@ class IndicatorCache(BaseModel):
         populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
-      
+        
