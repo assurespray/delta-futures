@@ -188,7 +188,7 @@ class DualSuperTrendStrategy:
         return False
     
     # ✅ FIXED METHOD SIGNATURES (added 'setup' parameter)
-    def generate_entry_signal(self, setup: Dict[str, Any], 
+    def generate_entry_signal(self, algo_setup_id: str, 
                              indicators_data: Dict[str, Any],
                              last_perusu_signal: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
