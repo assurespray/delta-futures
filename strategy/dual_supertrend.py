@@ -187,12 +187,15 @@ class DualSuperTrendStrategy:
         
         return False
     
-    def generate_entry_signal(self, indicators_data: Dict[str, Any],
+    # ✅ FIXED METHOD SIGNATURES (added 'setup' parameter)
+    def generate_entry_signal(self, setup: Dict[str, Any], 
+                             indicators_data: Dict[str, Any],
                              last_perusu_signal: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Generate entry signal based on Perusu flip + breakout logic.
         
         Args:
+            setup: Algo setup dictionary (from database)
             indicators_data: Dict from calculate_indicators()
             last_perusu_signal: Last known Perusu signal state
         
@@ -240,12 +243,14 @@ class DualSuperTrendStrategy:
             logger.error(traceback.format_exc())
             return None
     
-    def generate_exit_signal(self, indicators_data: Dict[str, Any],
+    def generate_exit_signal(self, setup: Dict[str, Any],
+                            indicators_data: Dict[str, Any],
                             position_side: str) -> bool:
         """
         Generate exit signal based on Sirusu flip.
         
         Args:
+            setup: Algo setup dictionary (from database)
             indicators_data: Dict from calculate_indicators()
             position_side: Current position ("long" or "short")
         
@@ -276,4 +281,4 @@ class DualSuperTrendStrategy:
             import traceback
             logger.error(traceback.format_exc())
             return False
-            
+    
