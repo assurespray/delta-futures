@@ -97,31 +97,35 @@ class AlgoEngine:
             
             # Cache indicator values
             await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
-            
+
             # Check for entry signal (only if not in position)
             if not current_position:
+                # Get last Perusu signal from cache
+                cached_perusu = await get_indicator_cache(setup_id, "perusu")
+                last_perusu_signal = cached_perusu.get('last_signal') if cached_perusu else None
+    
                 entry_signal = self.strategy.generate_entry_signal(
-                    perusu_data['signal'],
-                    direction,
-                    current_position
+                    setup_id,              # ← Algo setup ID
+                    last_perusu_signal,    # ← Last cached Perusu signal
+                    indicator_result       # ← Full indicator data dict
                 )
-                
+    
                 if entry_signal:
-                    logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal.upper()}")
-                    
+                    logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
+        
                     # Execute entry
                     success = await self.position_manager.execute_entry(
                         client=client,
                         algo_setup=algo_setup,
-                        entry_side=entry_signal,
+                        entry_side=entry_signal['side'],
                         sirusu_value=sirusu_data['supertrend_value']
                     )
-                    
+        
                     if success:
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
-                            direction=entry_signal,
+                            direction=entry_signal['side'],
                             entry_price=perusu_data['latest_close'],
                             lot_size=algo_setup['lot_size'],
                             perusu_signal=perusu_data['signal_text'],
@@ -131,24 +135,25 @@ class AlgoEngine:
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
                         )
-            
+
             # Check for exit signal (only if in position)
             elif current_position:
                 exit_signal = self.strategy.generate_exit_signal(
-                    sirusu_data['signal'],
-                    current_position
+                    setup_id,           # ← Algo setup ID
+                    current_position,   # ← Position side ('long' or 'short')
+                    indicator_result    # ← Full indicator data dict
                 )
-                
+    
                 if exit_signal:
                     logger.info(f"🚪 Exit signal detected for {setup_name}")
-                    
+        
                     # Execute exit
                     success = await self.position_manager.execute_exit(
                         client=client,
                         algo_setup=algo_setup,
                         sirusu_signal_text=sirusu_data['signal_text']
                     )
-                    
+        
                     if success:
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
@@ -160,6 +165,7 @@ class AlgoEngine:
                         await self.logger_bot.send_error(
                             f"Failed to execute exit for {setup_name}"
                         )
+                
             
             await client.close()
             
