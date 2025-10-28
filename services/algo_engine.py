@@ -11,6 +11,11 @@ from api.delta_client import DeltaExchangeClient
 from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from services.logger_bot import LoggerBot
+from utils.timeframe import (
+    is_at_candle_boundary,
+    get_next_boundary_time,
+    get_timeframe_display_name
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,22 @@ class AlgoEngine:
         timeframe = algo_setup['timeframe']
         direction = algo_setup['direction']
         current_position = algo_setup.get('current_position')
+        
+        # ✅ CRITICAL: CHECK IF AT CANDLE BOUNDARY
+        now = datetime.utcnow()
+        if not is_at_candle_boundary(timeframe, now):
+            next_boundary = get_next_boundary_time(timeframe, now)
+            time_until = int((next_boundary - now).total_seconds())
+            
+            logger.debug(
+                f"⏭️ [{setup_name}] Not at {timeframe} boundary - "
+                f"Next check in {time_until}s at {next_boundary.strftime('%H:%M:%S')} UTC"
+            )
+            return
+        
+        # Log that we're at a boundary
+        tf_display = get_timeframe_display_name(timeframe)
+        logger.info(f"✅ [{setup_name}] At {tf_display} boundary - Processing {asset}")
         
         try:
             # Get API credentials
@@ -144,6 +165,8 @@ class AlgoEngine:
             
         except Exception as e:
             logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             await self.logger_bot.send_error(
                 f"Exception in {setup_name}: {str(e)[:200]}"
             )
@@ -200,11 +223,11 @@ class AlgoEngine:
                 active_setups = await get_all_active_algo_setups()
                 
                 if not active_setups:
-                    logger.info("ℹ️ No active algo setups found")
+                    logger.debug("ℹ️ No active algo setups found")
                     await asyncio.sleep(60)  # Check again in 1 minute
                     continue
                 
-                logger.info(f"📊 Processing {len(active_setups)} active algo setup(s)")
+                logger.debug(f"📊 Checking {len(active_setups)} active algo setup(s)")
                 
                 # Process each setup
                 tasks = []
@@ -213,14 +236,22 @@ class AlgoEngine:
                     tasks.append(task)
                 
                 # Wait for all processing to complete
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
                 
-                # Sleep for 30 seconds before next cycle
-                # Individual setups are monitored based on their timeframes
-                await asyncio.sleep(30)
+                # Log any exceptions
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        setup_name = active_setups[i].get('setup_name', 'Unknown')
+                        logger.error(f"❌ Error processing {setup_name}: {result}")
+                
+                # Sleep for 60 seconds before next cycle
+                # Boundary checks ensure we only trade at proper candle closes
+                await asyncio.sleep(60)
                 
             except Exception as e:
                 logger.error(f"❌ Exception in continuous monitoring: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
                 await asyncio.sleep(60)  # Wait before retrying
-      
+            
