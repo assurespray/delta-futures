@@ -66,17 +66,17 @@ async def indicator_select_callback(update: Update, context: ContextTypes.DEFAUL
     
     keyboard = [
         [
-            InlineKeyboardButton("1m", callback_data=f"indicator_tf_1m"),
-            InlineKeyboardButton("5m", callback_data=f"indicator_tf_5m"),
-            InlineKeyboardButton("15m", callback_data=f"indicator_tf_15m")
+            InlineKeyboardButton("1m", callback_data="indicator_tf_1m"),
+            InlineKeyboardButton("5m", callback_data="indicator_tf_5m"),
+            InlineKeyboardButton("15m", callback_data="indicator_tf_15m")
         ],
         [
-            InlineKeyboardButton("30m", callback_data=f"indicator_tf_30m"),
-            InlineKeyboardButton("1h", callback_data=f"indicator_tf_1h"),
-            InlineKeyboardButton("4h", callback_data=f"indicator_tf_4h")
+            InlineKeyboardButton("30m", callback_data="indicator_tf_30m"),
+            InlineKeyboardButton("1h", callback_data="indicator_tf_1h"),
+            InlineKeyboardButton("4h", callback_data="indicator_tf_4h")
         ],
         [
-            InlineKeyboardButton("1d", callback_data=f"indicator_tf_1d")
+            InlineKeyboardButton("1d", callback_data="indicator_tf_1d")
         ],
         [InlineKeyboardButton("🔙 Back to Indicators", callback_data="menu_indicators")]
     ]
@@ -105,7 +105,7 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     # Get indicator type
     indicator_type = context.user_data.get('selected_indicator', 'perusu')
     
-    await query.answer(f"Enter asset symbol")
+    await query.answer(f"Selected {timeframe} timeframe")
     
     message = f"**{'🟢 Perusu' if indicator_type == 'perusu' else '🔴 Sirusu'} Indicator**\n\n"
     message += f"**Timeframe:** {timeframe}\n\n"
@@ -127,8 +127,6 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     return INDICATOR_ASSET
 
 
-# Update the indicator_asset_received function to use dynamic precision
-
 async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Calculate and display indicator after receiving asset symbol."""
     asset = update.message.text.strip().upper()
@@ -137,13 +135,59 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
     indicator_type = context.user_data.get('selected_indicator', 'perusu')
     timeframe = context.user_data.get('selected_timeframe', '15m')
     
+    # Store asset for refresh
+    context.user_data['selected_asset'] = asset
+    
     # Send processing message
     processing_msg = await update.message.reply_text(
         f"⏳ Calculating {indicator_type} for {asset} on {timeframe}...\n\n"
         "This may take a few seconds."
     )
     
-    user_id = str(update.message.from_user.id)
+    # Calculate and display
+    await _calculate_and_display_indicator(
+        processing_msg, context, asset, indicator_type, timeframe
+    )
+    
+    return ConversationHandler.END
+
+
+async def indicator_refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Refresh indicator calculation."""
+    query = update.callback_query
+    await query.answer("Refreshing indicator...")
+    
+    # Get stored context
+    indicator_type = context.user_data.get('selected_indicator', 'perusu')
+    timeframe = context.user_data.get('selected_timeframe', '15m')
+    asset = context.user_data.get('selected_asset', 'BTCUSD')
+    
+    # Update message to show loading
+    await query.edit_message_text(
+        f"⏳ Refreshing {indicator_type} for {asset} on {timeframe}...\n\n"
+        "This may take a few seconds.",
+        parse_mode="Markdown"
+    )
+    
+    # Calculate and display
+    await _calculate_and_display_indicator(
+        query.message, context, asset, indicator_type, timeframe, is_refresh=True
+    )
+
+
+async def _calculate_and_display_indicator(message, context, asset, indicator_type, timeframe, is_refresh=False):
+    """
+    Helper function to calculate and display indicator.
+    
+    Args:
+        message: Telegram message object to edit
+        context: Callback context
+        asset: Trading symbol
+        indicator_type: 'perusu' or 'sirusu'
+        timeframe: Timeframe string
+        is_refresh: Whether this is a refresh operation
+    """
+    user_id = str(message.chat.id) if hasattr(message, 'chat') else str(context._user_id)
     
     # Get first API for calculation
     credentials = await get_api_credentials_by_user(user_id)
@@ -152,12 +196,12 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_indicators")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await processing_msg.edit_text(
+        await message.edit_text(
             "ℹ️ No API credentials stored.\n\n"
             "Please add API credentials first to view indicator signals.",
             reply_markup=reply_markup
         )
-        return ConversationHandler.END
+        return
     
     # Use first API
     cred = credentials[0]
@@ -172,11 +216,11 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
             keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_indicators")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await processing_msg.edit_text(
+            await message.edit_text(
                 "❌ Failed to load API credentials.",
                 reply_markup=reply_markup
             )
-            return ConversationHandler.END
+            return
         
         # Create client
         client = DeltaExchangeClient(
@@ -192,63 +236,63 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
         if result:
             if indicator_type == "perusu":
                 indicator_data = result['perusu']
-                message = f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
+                msg = f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
             else:  # sirusu
                 indicator_data = result['sirusu']
-                message = f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
+                msg = f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
             
             # Get precision for formatting
             precision = indicator_data.get('precision', 2)
             
-            message += f"**Symbol:** {asset}\n"
-            message += f"**Timeframe:** {timeframe}\n"
-            message += f"**API Account:** {api_name}\n"
-            message += f"**Candles Used:** {result.get('candles_used', 100)}\n\n"
-            message += f"**Details:**\n"
-            message += f"├ ATR Length: {indicator_data['atr_length']}\n"
-            message += f"├ Factor: {indicator_data['factor']}\n"
-            message += f"├ ATR Value: {indicator_data['atr']}\n"
-            message += f"└ Current Price: ${indicator_data['latest_close']}\n\n"
+            msg += f"**Symbol:** {asset}\n"
+            msg += f"**Timeframe:** {timeframe}\n"
+            msg += f"**API Account:** {api_name}\n"
+            msg += f"**Candles Used:** {result.get('candles_used', 100)}\n\n"
+            msg += f"**Details:**\n"
+            msg += f"├ ATR Length: {indicator_data['atr_length']}\n"
+            msg += f"├ Factor: {indicator_data['factor']}\n"
+            msg += f"├ ATR Value: {indicator_data['atr']}\n"
+            msg += f"└ Current Price: ${indicator_data['latest_close']}\n\n"
             
             signal_emoji = "📈" if indicator_data['signal'] == 1 else "📉"
-            message += f"**Signal:** {signal_emoji} **{indicator_data['signal_text']}**\n"
-            message += f"**SuperTrend Value:** ${indicator_data['supertrend_value']}\n\n"
+            msg += f"**Signal:** {signal_emoji} **{indicator_data['signal_text']}**\n"
+            msg += f"**SuperTrend Value:** ${indicator_data['supertrend_value']}\n\n"
             
             if indicator_data['signal'] == 1:
-                message += f"💡 Price is above SuperTrend line (Uptrend)\n"
+                msg += f"💡 Price is above SuperTrend line (Uptrend)\n"
             else:
-                message += f"💡 Price is below SuperTrend line (Downtrend)\n"
+                msg += f"💡 Price is below SuperTrend line (Downtrend)\n"
             
-            message += f"\n📋 **Compare with TradingView:**\n"
-            message += f"1. Open {asset} chart on {timeframe} timeframe\n"
-            message += f"2. Add SuperTrend indicator\n"
-            message += f"3. Set ATR: {indicator_data['atr_length']}, Factor: {indicator_data['factor']}\n"
-            message += f"4. Compare values!"
+            msg += f"\n📋 **Compare with TradingView:**\n"
+            msg += f"1. Open {asset} chart on {timeframe} timeframe\n"
+            msg += f"2. Add SuperTrend indicator\n"
+            msg += f"3. Set ATR: {indicator_data['atr_length']}, Factor: {indicator_data['factor']}\n"
+            msg += f"4. Compare values!"
         else:
-            message = f"❌ Failed to calculate {indicator_type} indicator for {asset}.\n\n"
-            message += "**Possible reasons:**\n"
-            message += "• Invalid symbol (check Delta Exchange product list)\n"
-            message += "• Insufficient market data\n"
-            message += "• API connection issues\n\n"
-            message += "💡 Try a different symbol or timeframe"
+            msg = f"❌ Failed to calculate {indicator_type} indicator for {asset}.\n\n"
+            msg += "**Possible reasons:**\n"
+            msg += "• Invalid symbol (check Delta Exchange product list)\n"
+            msg += "• Insufficient market data\n"
+            msg += "• API connection issues\n\n"
+            msg += "💡 Try a different symbol or timeframe"
     
     except Exception as e:
         logger.error(f"❌ Error calculating indicator: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        message = f"❌ Error calculating indicator for {asset}:\n\n{str(e)[:200]}\n\n"
-        message += "Please check if the symbol is valid on Delta Exchange."
+        msg = f"❌ Error calculating indicator for {asset}:\n\n{str(e)[:200]}\n\n"
+        msg += "Please check if the symbol is valid on Delta Exchange."
     
+    # Add refresh button
     keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data="indicator_refresh")],
         [InlineKeyboardButton("🔄 Try Another Asset", callback_data=f"indicator_select_{indicator_type}")],
         [InlineKeyboardButton("🔙 Back to Indicators", callback_data="menu_indicators")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await processing_msg.edit_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-    
-    return ConversationHandler.END
+    await message.edit_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
 
 
 async def cancel_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,4 +306,3 @@ async def cancel_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     return ConversationHandler.END
-    
