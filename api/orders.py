@@ -277,3 +277,43 @@ async def get_order_by_id(client: DeltaExchangeClient, order_id: int) -> Optiona
     except Exception as e:
         logger.error(f"❌ Exception getting order: {e}")
         return None
+
+
+async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Format orders for display in Telegram.
+    
+    Args:
+        orders: List of raw order data
+    
+    Returns:
+        List of formatted order data
+    """
+    formatted = []
+    
+    for order in orders:
+        try:
+            product = order.get("product", {})
+            symbol = product.get("symbol", "Unknown")
+            
+            formatted_order = {
+                "order_id": order.get("id"),
+                "symbol": symbol,
+                "side": order.get("side", "").capitalize(),
+                "size": order.get("size", 0),
+                "order_type": order.get("order_type", "").replace("_", " ").title(),
+                "limit_price": round(float(order.get("limit_price", 0)), 2) if order.get("limit_price") else None,
+                "stop_price": round(float(order.get("stop_price", 0)), 2) if order.get("stop_price") else None,
+                "filled": order.get("unfilled_size", 0),
+                "status": order.get("state", "").capitalize(),
+                "reduce_only": order.get("reduce_only", False)
+            }
+            
+            formatted.append(formatted_order)
+            
+        except Exception as e:
+            logger.error(f"❌ Error formatting order: {e}")
+            continue
+    
+    return formatted
+    
