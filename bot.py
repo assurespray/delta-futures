@@ -20,7 +20,7 @@ from handlers.orders import (
 )
 from handlers.indicators import (
     indicators_callback, indicator_select_callback, indicator_timeframe_callback,
-    indicator_asset_received, cancel_indicator, INDICATOR_ASSET
+    indicator_asset_received, indicator_refresh_callback, cancel_indicator, INDICATOR_ASSET
 )
 from handlers.algo_setup import (
     algo_setups_callback, algo_add_start, setup_name_received, setup_desc_received,
@@ -63,13 +63,21 @@ def create_application() -> Application:
     )
     application.add_handler(api_conv_handler)
     
-    # Indicators conversation handler (NEW: with asset input)
+    # ✅ FIX: Indicators conversation handler (CORRECTED ENTRY POINT)
     indicator_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")],
+        entry_points=[
+            CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")
+        ],
         states={
-            INDICATOR_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, indicator_asset_received)]
+            INDICATOR_ASSET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, indicator_asset_received),
+                CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
+            ]
         },
-        fallbacks=[CommandHandler("cancel", cancel_indicator)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_indicator),
+            CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
+        ],
         per_message=False
     )
     application.add_handler(indicator_conv_handler)
@@ -94,7 +102,11 @@ def create_application() -> Application:
     )
     application.add_handler(algo_conv_handler)
     
-    # Callback query handlers
+    # ============================================================
+    # CALLBACK QUERY HANDLERS (Order matters - most specific first)
+    # ============================================================
+    
+    # Main menu
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     application.add_handler(CallbackQueryHandler(help_callback, pattern="^menu_help$"))
     
@@ -114,9 +126,11 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(order_cancel_callback, pattern="^order_cancel_"))
     application.add_handler(CallbackQueryHandler(order_cancel_all_callback, pattern="^order_cancel_all_"))
     
-    # Indicators handlers (non-conversation callbacks)
+    # ✅ Indicators handlers (ALL handlers needed)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
     application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
+    application.add_handler(CallbackQueryHandler(indicator_refresh_callback, pattern="^indicator_refresh$"))
+    # Note: indicator_timeframe_callback is handled by ConversationHandler entry point above
     
     # Algo Setups handlers
     application.add_handler(CallbackQueryHandler(algo_setups_callback, pattern="^menu_algo_setups$"))
