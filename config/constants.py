@@ -11,6 +11,11 @@ TIMEFRAME_MAPPING = {
     "1d": "1d"
 }
 
+# Time in force
+TIME_IN_FORCE_GTC = "gtc"
+TIME_IN_FORCE_IOC = "ioc"
+TIME_IN_FORCE_FOK = "fok"
+
 # Timeframe in seconds for scheduler
 TIMEFRAME_SECONDS = {
     "1m": 60,
@@ -36,6 +41,8 @@ DIRECTION_SHORT_ONLY = "short_only"
 # Order types
 ORDER_TYPE_MARKET = "market_order"
 ORDER_TYPE_LIMIT = "limit_order"
+ORDER_TYPE_STOP_LIMIT = "stop_limit_order"
+ORDER_TYPE_STOP_MARKET = "stop_market_order"  # ← NEW
 
 # Order sides
 ORDER_SIDE_BUY = "buy"
@@ -63,3 +70,6 @@ SELF_PING_FAIL_THRESHOLD = 3
 
 # Cache expiry
 PRODUCT_CACHE_EXPIRY = 86400  # 24 hours
+
+# Breakout offset (1 pip = 0.0001 for most USD pairs)
+BREAKOUT_PIP_OFFSET = 0.0001  # ← NEW
