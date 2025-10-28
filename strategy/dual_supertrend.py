@@ -186,4 +186,94 @@ class DualSuperTrendStrategy:
                 return True
         
         return False
-                               
+    
+    def generate_entry_signal(self, indicators_data: Dict[str, Any],
+                             last_perusu_signal: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """
+        Generate entry signal based on Perusu flip + breakout logic.
+        
+        Args:
+            indicators_data: Dict from calculate_indicators()
+            last_perusu_signal: Last known Perusu signal state
+        
+        Returns:
+            Entry signal dict or None
+        """
+        try:
+            perusu = indicators_data.get("perusu")
+            prev_high = indicators_data.get("previous_candle_high")
+            prev_low = indicators_data.get("previous_candle_low")
+            
+            if not perusu or not prev_high or not prev_low:
+                logger.error("❌ Missing indicator data for entry signal")
+                return None
+            
+            current_signal = perusu.get("signal")
+            
+            # Detect signal flip
+            entry_side = self.detect_signal_flip(current_signal, last_perusu_signal)
+            
+            if not entry_side:
+                # No flip detected
+                return None
+            
+            # Calculate breakout trigger price
+            breakout_price = self.calculate_breakout_price(entry_side, prev_high, prev_low)
+            
+            logger.info(f"🎯 Entry signal generated:")
+            logger.info(f"   Side: {entry_side.upper()}")
+            logger.info(f"   Breakout trigger: ${breakout_price:.5f}")
+            logger.info(f"   Perusu value: ${perusu['supertrend_value']:.5f}")
+            
+            return {
+                "side": entry_side,
+                "trigger_price": breakout_price,
+                "perusu_signal": current_signal,
+                "perusu_value": perusu['supertrend_value'],
+                "prev_high": prev_high,
+                "prev_low": prev_low
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Exception generating entry signal: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+    
+    def generate_exit_signal(self, indicators_data: Dict[str, Any],
+                            position_side: str) -> bool:
+        """
+        Generate exit signal based on Sirusu flip.
+        
+        Args:
+            indicators_data: Dict from calculate_indicators()
+            position_side: Current position ("long" or "short")
+        
+        Returns:
+            True if should exit, False otherwise
+        """
+        try:
+            sirusu = indicators_data.get("sirusu")
+            
+            if not sirusu:
+                logger.error("❌ Missing Sirusu data for exit signal")
+                return False
+            
+            current_signal = sirusu.get("signal")
+            
+            should_exit = self.should_exit_position(current_signal, position_side)
+            
+            if should_exit:
+                logger.info(f"🚪 Exit signal generated:")
+                logger.info(f"   Position: {position_side.upper()}")
+                logger.info(f"   Sirusu signal: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
+                logger.info(f"   Sirusu value: ${sirusu['supertrend_value']:.5f}")
+            
+            return should_exit
+            
+        except Exception as e:
+            logger.error(f"❌ Exception generating exit signal: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+            
