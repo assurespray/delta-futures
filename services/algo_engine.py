@@ -1,6 +1,7 @@
-"""Core trading engine for algo execution."""
+"""Core trading engine for algo execution - ENHANCED FOR TESTING."""
 import logging
 import asyncio
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 from database.crud import (
@@ -21,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class AlgoEngine:
-    """Main trading engine for executing algo strategies."""
+    """Main trading engine for executing algo strategies - ENHANCED FOR TESTING."""
     
     def __init__(self, logger_bot: LoggerBot):
         """
-        Initialize algo engine.
+        Initialize algo engine with testing instrumentation.
         
         Args:
             logger_bot: Logger bot instance for notifications
@@ -34,93 +35,171 @@ class AlgoEngine:
         self.position_manager = PositionManager()
         self.logger_bot = logger_bot
         self.running_tasks = {}
+        
+        # ✅ TESTING: Signal counters
+        self.signal_counts = {
+            "total_checks": 0,
+            "boundary_hits": 0,
+            "entry_signals": 0,
+            "exit_signals": 0,
+            "successful_entries": 0,
+            "successful_exits": 0,
+            "failed_entries": 0,
+            "failed_exits": 0,
+            "no_signals": 0,
+            "errors": 0
+        }
+        
+        # ✅ TESTING: Performance tracking
+        self.performance_stats = {
+            "total_processing_time": 0.0,
+            "avg_processing_time": 0.0,
+            "min_processing_time": float('inf'),
+            "max_processing_time": 0.0,
+            "api_calls": 0,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
     
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         """
-        Process a single algo setup - calculate indicators and execute trades.
-    
-    Args:
+        Process a single algo setup with detailed logging and timing.
+        
+        Args:
             algo_setup: Algo setup configuration
         """
+        # ✅ TESTING: Start performance timer
+        start_time = time.time()
+        
         setup_id = str(algo_setup['_id'])
         setup_name = algo_setup['setup_name']
         asset = algo_setup['asset']
         timeframe = algo_setup['timeframe']
         direction = algo_setup['direction']
         current_position = algo_setup.get('current_position')
-    
+        
+        # Increment total checks
+        self.signal_counts["total_checks"] += 1
+        
         # ✅ CRITICAL: CHECK IF AT CANDLE BOUNDARY
         now = datetime.utcnow()
         if not is_at_candle_boundary(timeframe, now):
             next_boundary = get_next_boundary_time(timeframe, now)
             time_until = int((next_boundary - now).total_seconds())
-        
+            
             logger.debug(
                 f"⏭️ [{setup_name}] Not at {timeframe} boundary - "
                 f"Next check in {time_until}s at {next_boundary.strftime('%H:%M:%S')} UTC"
             )
             return
-    
-        # Log that we're at a boundary
+        
+        # ✅ TESTING: Log boundary hit
+        self.signal_counts["boundary_hits"] += 1
         tf_display = get_timeframe_display_name(timeframe)
         logger.info(f"✅ [{setup_name}] At {tf_display} boundary - Processing {asset}")
-    
+        logger.info(f"📊 [TEST] Session stats: {self._format_stats()}")
+        
         try:
             # Get API credentials
             api_id = algo_setup['api_id']
             cred = await get_api_credential_by_id(api_id, decrypt=True)
-        
+            
             if not cred:
                 logger.error(f"❌ Failed to load credentials for setup {setup_name}")
+                self.signal_counts["errors"] += 1
                 await self.logger_bot.send_error(
                     f"Failed to load API credentials for setup: {setup_name}"
                 )
                 return
-        
+            
             # Create Delta Exchange client
             client = DeltaExchangeClient(
                 api_key=cred['api_key'],
                 api_secret=cred['api_secret']
             )
-        
+            
+            # ✅ TESTING: Track API call
+            self.performance_stats["api_calls"] += 1
+            
             # Calculate indicators
             logger.info(f"🔄 Processing {setup_name} ({asset} {timeframe})")
+            indicator_start = time.time()
             indicator_result = await self.strategy.calculate_indicators(client, asset, timeframe)
-        
+            indicator_time = time.time() - indicator_start
+            
+            # ✅ TESTING: Log indicator calculation time
+            logger.info(f"⏱️ [TEST] Indicator calculation: {indicator_time:.3f}s")
+            
             if not indicator_result:
                 logger.warning(f"⚠️ Failed to calculate indicators for {setup_name}")
+                self.signal_counts["errors"] += 1
                 await client.close()
                 return
-        
+            
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
-        
+            
+            # ✅ TESTING: Log indicator details
+            logger.info(f"📈 [TEST] Indicator Details:")
+            logger.info(f"   Perusu: {perusu_data['signal_text']} (Value: ${perusu_data['supertrend_value']:.5f})")
+            logger.info(f"   Sirusu: {sirusu_data['signal_text']} (Value: ${sirusu_data['supertrend_value']:.5f})")
+            logger.info(f"   Price: ${perusu_data['latest_close']:.5f}")
+            logger.info(f"   ATR: {perusu_data['atr']:.6f}")
+            
             # ✅ CHECK SIGNALS BEFORE CACHING
-        
+            
             # Check for entry signal (only if not in position)
             if not current_position:
                 # Get last Perusu signal from cache BEFORE updating
+                cache_start = time.time()
                 cached_perusu = await get_indicator_cache(setup_id, "perusu")
+                cache_time = time.time() - cache_start
+                
                 last_perusu_signal = cached_perusu.get('last_signal') if cached_perusu else None
-            
+                
+                # ✅ TESTING: Track cache hit/miss
+                if cached_perusu:
+                    self.performance_stats["cache_hits"] += 1
+                    logger.info(f"💾 [TEST] Cache HIT - Last signal: {last_perusu_signal} ({cache_time:.3f}s)")
+                else:
+                    self.performance_stats["cache_misses"] += 1
+                    logger.info(f"💾 [TEST] Cache MISS - First run ({cache_time:.3f}s)")
+                
                 entry_signal = self.strategy.generate_entry_signal(
                     setup_id,
                     last_perusu_signal,
                     indicator_result
                 )
-            
-                if entry_signal:
-                    logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
                 
+                if entry_signal:
+                    self.signal_counts["entry_signals"] += 1
+                    logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
+                    
+                    # ✅ TESTING: Detailed entry signal log
+                    logger.info(f"🎯 [TEST] Entry Signal Details:")
+                    logger.info(f"   Side: {entry_signal['side'].upper()}")
+                    logger.info(f"   Trigger: Perusu flip from {last_perusu_signal} to {perusu_data['signal']}")
+                    logger.info(f"   Entry Price: ${perusu_data['latest_close']:.5f}")
+                    logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
+                    logger.info(f"   Lot Size: {algo_setup['lot_size']}")
+                    
                     # Execute entry
+                    entry_start = time.time()
                     success = await self.position_manager.execute_entry(
                         client=client,
                         algo_setup=algo_setup,
                         entry_side=entry_signal['side'],
                         sirusu_value=sirusu_data['supertrend_value']
                     )
-                
+                    entry_time = time.time() - entry_start
+                    
+                    # ✅ TESTING: Log entry execution time
+                    logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
+                    
                     if success:
+                        self.signal_counts["successful_entries"] += 1
+                        logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
+                        
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
@@ -131,29 +210,54 @@ class AlgoEngine:
                             sirusu_sl=sirusu_data['supertrend_value']
                         )
                     else:
+                        self.signal_counts["failed_entries"] += 1
+                        logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
+                        
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
                         )
+                else:
+                    self.signal_counts["no_signals"] += 1
+                    logger.info(f"⏭️ [TEST] No entry signal - Waiting for Perusu flip")
+                    logger.info(f"   Current: {perusu_data['signal_text']} ({perusu_data['signal']})")
+                    logger.info(f"   Cached: {last_perusu_signal}")
             
             # Check for exit signal (only if in position)
             elif current_position:
+                logger.info(f"📍 [TEST] In position: {current_position.upper()} - Checking exit conditions")
+                
                 exit_signal = self.strategy.generate_exit_signal(
                     setup_id,
                     current_position,
                     indicator_result
                 )
-            
-                if exit_signal:
-                    logger.info(f"🚪 Exit signal detected for {setup_name}")
                 
+                if exit_signal:
+                    self.signal_counts["exit_signals"] += 1
+                    logger.info(f"🚪 Exit signal detected for {setup_name}")
+                    
+                    # ✅ TESTING: Detailed exit signal log
+                    logger.info(f"🎯 [TEST] Exit Signal Details:")
+                    logger.info(f"   Position: {current_position.upper()}")
+                    logger.info(f"   Trigger: Sirusu flip ({sirusu_data['signal_text']})")
+                    logger.info(f"   Exit Price: ${sirusu_data['supertrend_value']:.5f}")
+                    
                     # Execute exit
+                    exit_start = time.time()
                     success = await self.position_manager.execute_exit(
                         client=client,
                         algo_setup=algo_setup,
                         sirusu_signal_text=sirusu_data['signal_text']
                     )
-                
+                    exit_time = time.time() - exit_start
+                    
+                    # ✅ TESTING: Log exit execution time
+                    logger.info(f"⏱️ [TEST] Exit execution: {exit_time:.3f}s")
+                    
                     if success:
+                        self.signal_counts["successful_exits"] += 1
+                        logger.info(f"✅ [TEST] Exit successful! Total exits: {self.signal_counts['successful_exits']}")
+                        
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
                             asset=asset,
@@ -161,22 +265,78 @@ class AlgoEngine:
                             sirusu_signal=sirusu_data['signal_text']
                         )
                     else:
+                        self.signal_counts["failed_exits"] += 1
+                        logger.error(f"❌ [TEST] Exit failed! Total failures: {self.signal_counts['failed_exits']}")
+                        
                         await self.logger_bot.send_error(
-                        f"Failed to execute exit for {setup_name}"
+                            f"Failed to execute exit for {setup_name}"
                         )
-        
+                else:
+                    logger.info(f"⏭️ [TEST] No exit signal - Holding {current_position.upper()} position")
+                    logger.info(f"   Sirusu: {sirusu_data['signal_text']} (waiting for flip)")
+            
             # ✅ Cache indicator values AFTER signal detection
             await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
-        
+            
             await client.close()
-        
+            
+            # ✅ TESTING: Calculate and log total processing time
+            elapsed = time.time() - start_time
+            self._update_performance_stats(elapsed)
+            
+            logger.info(f"⏱️ [TEST] Total processing time: {elapsed:.3f}s")
+            logger.info(f"📊 [TEST] Performance stats: {self._format_performance()}")
+            
         except Exception as e:
+            self.signal_counts["errors"] += 1
+            elapsed = time.time() - start_time
+            
             logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
+            logger.error(f"⏱️ [TEST] Failed after {elapsed:.3f}s")
             import traceback
             logger.error(traceback.format_exc())
             await self.logger_bot.send_error(
                 f"Exception in {setup_name}: {str(e)[:200]}"
             )
+    
+    def _update_performance_stats(self, elapsed: float):
+        """Update performance statistics."""
+        self.performance_stats["total_processing_time"] += elapsed
+        self.performance_stats["min_processing_time"] = min(
+            self.performance_stats["min_processing_time"], 
+            elapsed
+        )
+        self.performance_stats["max_processing_time"] = max(
+            self.performance_stats["max_processing_time"], 
+            elapsed
+        )
+        
+        # Calculate average
+        if self.signal_counts["boundary_hits"] > 0:
+            self.performance_stats["avg_processing_time"] = (
+                self.performance_stats["total_processing_time"] / 
+                self.signal_counts["boundary_hits"]
+            )
+    
+    def _format_stats(self) -> str:
+        """Format signal statistics for logging."""
+        return (
+            f"Checks: {self.signal_counts['total_checks']} | "
+            f"Boundaries: {self.signal_counts['boundary_hits']} | "
+            f"Entry signals: {self.signal_counts['entry_signals']} | "
+            f"Exit signals: {self.signal_counts['exit_signals']} | "
+            f"Successful: {self.signal_counts['successful_entries']}E/{self.signal_counts['successful_exits']}X | "
+            f"Errors: {self.signal_counts['errors']}"
+        )
+    
+    def _format_performance(self) -> str:
+        """Format performance statistics for logging."""
+        return (
+            f"Avg: {self.performance_stats['avg_processing_time']:.3f}s | "
+            f"Min: {self.performance_stats['min_processing_time']:.3f}s | "
+            f"Max: {self.performance_stats['max_processing_time']:.3f}s | "
+            f"Cache: {self.performance_stats['cache_hits']}H/{self.performance_stats['cache_misses']}M"
+        )
     
     async def _cache_indicators(self, setup_id: str, perusu_data: Dict[str, Any],
                                 sirusu_data: Dict[str, Any], asset: str, timeframe: str):
@@ -191,6 +351,8 @@ class AlgoEngine:
             timeframe: Timeframe
         """
         try:
+            cache_start = time.time()
+            
             # Cache Perusu
             await upsert_indicator_cache({
                 "algo_setup_id": setup_id,
@@ -213,28 +375,37 @@ class AlgoEngine:
                 "calculated_at": datetime.utcnow()
             })
             
+            cache_time = time.time() - cache_start
+            logger.info(f"💾 [TEST] Cache update completed ({cache_time:.3f}s)")
+            
         except Exception as e:
             logger.error(f"❌ Failed to cache indicators: {e}")
     
     async def run_continuous_monitoring(self):
         """
         Run continuous monitoring loop for all active algo setups.
-        This is the main 24/7 trading loop.
+        This is the main 24/7 trading loop with testing instrumentation.
         """
         logger.info("🚀 Starting continuous algo monitoring...")
-        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups")
+        logger.info(f"📊 [TEST] Testing mode enabled with detailed logging")
+        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups (TEST MODE)")
+        
+        loop_count = 0
         
         while True:
             try:
+                loop_count += 1
+                loop_start = time.time()
+                
                 # Get all active algo setups
                 active_setups = await get_all_active_algo_setups()
                 
                 if not active_setups:
                     logger.debug("ℹ️ No active algo setups found")
-                    await asyncio.sleep(60)  # Check again in 1 minute
+                    await asyncio.sleep(60)
                     continue
                 
-                logger.debug(f"📊 Checking {len(active_setups)} active algo setup(s)")
+                logger.debug(f"📊 [Loop {loop_count}] Checking {len(active_setups)} active algo setup(s)")
                 
                 # Process each setup
                 tasks = []
@@ -251,8 +422,16 @@ class AlgoEngine:
                         setup_name = active_setups[i].get('setup_name', 'Unknown')
                         logger.error(f"❌ Error processing {setup_name}: {result}")
                 
+                loop_time = time.time() - loop_start
+                logger.debug(f"⏱️ [TEST] Loop {loop_count} completed in {loop_time:.3f}s")
+                
+                # Log summary every 10 loops
+                if loop_count % 10 == 0:
+                    logger.info(f"📊 [TEST] Summary after {loop_count} loops:")
+                    logger.info(f"   {self._format_stats()}")
+                    logger.info(f"   {self._format_performance()}")
+                
                 # Sleep for 60 seconds before next cycle
-                # Boundary checks ensure we only trade at proper candle closes
                 await asyncio.sleep(60)
                 
             except Exception as e:
@@ -260,5 +439,5 @@ class AlgoEngine:
                 import traceback
                 logger.error(traceback.format_exc())
                 await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
-                await asyncio.sleep(60)  # Wait before retrying
-            
+                await asyncio.sleep(60)
+                        
