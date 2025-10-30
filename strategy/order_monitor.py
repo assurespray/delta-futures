@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from api.delta_client import DeltaExchangeClient
-from api.orders import get_order_by_id, cancel_order
+from api.orders import get_order_by_id, cancel_order, place_stop_loss_order
 from database.crud import update_algo_setup, create_algo_activity
 
 logger = logging.getLogger(__name__)
@@ -220,11 +220,10 @@ class OrderMonitor:
             
             # Send Telegram notification
             if logger_bot:
-                await logger_bot.send_info(
-                    f"⚠️ Order Cancelled - {setup_name}\n\n"
-                    f"Reason: Perusu signal reversed before entry\n"
-                    f"Old signal: {'Uptrend' if old_signal == 1 else 'Downtrend'}\n"
-                    f"New signal: {'Uptrend' if new_signal == 1 else 'Downtrend'}"
+                old_signal_text = "Uptrend" if old_signal == 1 else "Downtrend"
+                new_signal_text = "Uptrend" if new_signal == 1 else "Downtrend"
+                await logger_bot.send_order_cancelled(
+                    setup_name, old_signal_text, new_signal_text
                 )
         else:
             logger.error(f"❌ [MONITOR] Failed to cancel pending order")
@@ -245,8 +244,6 @@ class OrderMonitor:
             position_side: "long" or "short"
             stop_price: Stop-loss trigger price (Sirusu value)
         """
-        from api.orders import place_stop_loss_order
-        
         product_id = algo_setup.get("product_id")
         lot_size = algo_setup["lot_size"]
         
@@ -277,4 +274,4 @@ class OrderMonitor:
             "pending_entry_direction_signal": None
         })
         logger.info(f"🧹 [MONITOR] Pending order data cleaned")
-  
+        
