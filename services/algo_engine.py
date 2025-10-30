@@ -214,8 +214,10 @@ class AlgoEngine:
                         algo_setup=algo_setup,
                         entry_side=entry_signal['side'],
                         breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),
-                        sirusu_value=sirusu_data['supertrend_value']
+                        sirusu_value=sirusu_data['supertrend_value'],
+                        immediate=entry_signal.get('immediate', False)  # ← ADD THIS LINE
                     )
+
                     entry_time = time.time() - entry_start
                     
                     # ✅ TESTING: Log entry execution time
