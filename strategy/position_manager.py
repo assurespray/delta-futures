@@ -60,7 +60,12 @@ class PositionManager:
                     logger.error(f"❌ Product not found: {symbol}")
                     return False
                 product_id = product["id"]
-                await update_algo_setup(setup_id, {"product_id": product_id})
+                await update_algo_setup(setup_id, {
+                    "pending_entry_order_id": entry_order_id,
+                    "entry_trigger_price": breakout_price,
+                    "pending_entry_direction_signal": 1 if entry_side == "long" else -1,  # ← ADD THIS LINE
+                    "last_signal_time": datetime.utcnow()
+                })
             
             # Determine order side
             order_side = "buy" if entry_side == "long" else "sell"
