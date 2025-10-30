@@ -10,8 +10,8 @@ from database.crud import (
 )
 from api.delta_client import DeltaExchangeClient
 from strategy.dual_supertrend import DualSuperTrendStrategy
-from strategy.order_monitor import OrderMonitor
 from strategy.position_manager import PositionManager
+from strategy.order_monitor import OrderMonitor
 from services.logger_bot import LoggerBot
 from utils.timeframe import (
     is_at_candle_boundary,
@@ -34,6 +34,7 @@ class AlgoEngine:
         """
         self.strategy = DualSuperTrendStrategy()
         self.position_manager = PositionManager()
+        self.order_monitor = OrderMonitor()  # ← ADD THIS
         self.logger_bot = logger_bot
         self.running_tasks = {}
         
