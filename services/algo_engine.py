@@ -10,6 +10,7 @@ from database.crud import (
 )
 from api.delta_client import DeltaExchangeClient
 from strategy.dual_supertrend import DualSuperTrendStrategy
+from strategy.order_monitor import OrderMonitor
 from strategy.position_manager import PositionManager
 from services.logger_bot import LoggerBot
 from utils.timeframe import (
