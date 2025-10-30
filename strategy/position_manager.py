@@ -83,14 +83,15 @@ class PositionManager:
             
             entry_order_id = entry_order.get("id")
             logger.info(f"✅ Breakout entry order placed: ID {entry_order_id}")
-            
+            # Around line 60, after placing order successfully
             # Update algo setup with pending order info
             await update_algo_setup(setup_id, {
                 "pending_entry_order_id": entry_order_id,
                 "entry_trigger_price": breakout_price,
+                "pending_entry_direction_signal": 1 if entry_side == "long" else -1,  # ← ADD THIS
                 "last_signal_time": datetime.utcnow()
             })
-            
+      
             return True
             
         except Exception as e:
