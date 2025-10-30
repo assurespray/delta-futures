@@ -136,6 +136,25 @@ class LoggerBot:
         from datetime import datetime
         return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    async def send_order_cancelled(self, setup_name: str, old_signal: str, new_signal: str):
+        """
+        Send order cancellation notification.
+    
+        Args:
+            setup_name: Algo setup name
+            old_signal: Original signal
+            new_signal: New signal
+        """
+        message = (
+            f"⚠️ *ORDER CANCELLED*\n\n"
+            f"Setup: `{setup_name}`\n"
+            f"Reason: Perusu signal reversed\n\n"
+            f"Old signal: {old_signal}\n"
+            f"New signal: {new_signal}\n\n"
+            f"_No bad trade - signal protection active!_"
+        )
+        await self.send_message(message)
+    
 
 # Global logger bot instance
 logger_bot = LoggerBot()
