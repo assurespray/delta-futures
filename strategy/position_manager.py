@@ -33,7 +33,9 @@ class PositionManager:
                                         algo_setup: Dict[str, Any],
                                         entry_side: str, 
                                         breakout_price: float,
-                                        sirusu_value: float) -> bool:
+                                        sirusu_value: float,
+                                        immediate: bool = False) -> bool:  # ← ADD THIS
+
         """
         Place breakout entry order (stop-market at candle high/low + 1 pip).
         
@@ -60,20 +62,66 @@ class PositionManager:
                     logger.error(f"❌ Product not found: {symbol}")
                     return False
                 product_id = product["id"]
-                await update_algo_setup(setup_id, {
-                    "pending_entry_order_id": entry_order_id,
-                    "entry_trigger_price": breakout_price,
-                    "pending_entry_direction_signal": 1 if entry_side == "long" else -1,  # ← ADD THIS LINE
-                    "last_signal_time": datetime.utcnow()
-                })
-            
+                await update_algo_setup(setup_id, {"product_id": product_id})  # ← Just save product_id
+
             # Determine order side
             order_side = "buy" if entry_side == "long" else "sell"
-            
+
             # Cancel any existing orders first
             await cancel_all_orders(client, product_id)
-            
-            # Place stop-market entry order
+
+            # ✅ CHECK IF IMMEDIATE EXECUTION NEEDED
+            if immediate:
+                logger.info(f"🎯 Placing immediate MARKET {entry_side.upper()} for {symbol}")
+                logger.info(f"   Entry price: ${breakout_price:.5f}")
+                logger.info(f"   Lot size: {lot_size}")
+    
+                entry_order = await place_market_order(
+                    client, product_id, lot_size, order_side
+                )
+    
+                if not entry_order:
+                    logger.error(f"❌ Failed to place market entry order for {symbol}")
+                    return False
+    
+                # Market orders fill immediately
+                entry_price = float(entry_order.get("average_fill_price", breakout_price))
+    
+                logger.info(f"✅ Immediate market entry: {entry_side.upper()} @ ${entry_price:.5f}")
+    
+                # Create activity record immediately
+                activity_data = {
+                    "user_id": algo_setup["user_id"],
+                    "algo_setup_id": setup_id,
+                    "algo_setup_name": algo_setup["setup_name"],
+                    "entry_time": datetime.utcnow(),
+                    "entry_price": entry_price,
+                    "direction": entry_side,
+                    "lot_size": lot_size,
+                    "asset": symbol,
+                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
+                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "is_closed": False
+                }
+    
+                await create_algo_activity(activity_data)
+    
+                # Update algo setup - position is now open
+                await update_algo_setup(setup_id, {
+                    "current_position": entry_side,
+                    "last_entry_price": entry_price,
+                    "last_signal_time": datetime.utcnow()
+                })
+    
+                # Place stop-loss if enabled
+                if algo_setup.get("additional_protection", False):
+                    await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, sirusu_value
+                    )
+    
+                return True
+
+            # Otherwise, place stop order as normal
             logger.info(f"🎯 Placing breakout {entry_side.upper()} order for {symbol}")
             logger.info(f"   Breakout trigger: ${breakout_price:.5f}")
             logger.info(f"   Lot size: {lot_size}")
