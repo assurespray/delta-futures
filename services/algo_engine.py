@@ -34,7 +34,7 @@ class AlgoEngine:
         """
         self.strategy = DualSuperTrendStrategy()
         self.position_manager = PositionManager()
-        self.order_monitor = OrderMonitor()  # ← ADD THIS
+        self.order_monitor = OrderMonitor()
         self.logger_bot = logger_bot
         self.running_tasks = {}
         
@@ -148,10 +148,31 @@ class AlgoEngine:
             logger.info(f"   Price: ${perusu_data['latest_close']:.5f}")
             logger.info(f"   ATR: {perusu_data['atr']:.6f}")
             
-            # ✅ CHECK SIGNALS BEFORE CACHING
-            
-            # Check for entry signal (only if not in position)
+            # ✅ CHECK PENDING ENTRY ORDER (if not in position)
             if not current_position:
+                pending_order_status = await self.order_monitor.check_pending_entry_order(
+                    client=client,
+                    algo_setup=algo_setup,
+                    current_perusu_signal=perusu_data['signal'],
+                    sirusu_value=sirusu_data['supertrend_value'],
+                    logger_bot=self.logger_bot
+                )
+                
+                # ✅ TESTING: Log pending order status
+                if pending_order_status:
+                    logger.info(f"📋 [TEST] Pending order status: {pending_order_status}")
+                
+                # If order was just filled, position is now open
+                if pending_order_status == "filled":
+                    logger.info(f"✅ [TEST] Position opened via pending order - skipping entry check")
+                    current_position = "long"  # Will be updated in DB, but set for exit check
+                
+                # If order was cancelled due to reversal, continue to check for new signal
+                elif pending_order_status == "reversed":
+                    logger.info(f"🔄 [TEST] Order cancelled - checking for new entry signal")
+            
+            # ✅ CHECK FOR ENTRY SIGNAL (only if no position AND no pending order)
+            if not current_position and not algo_setup.get('pending_entry_order_id'):
                 # Get last Perusu signal from cache BEFORE updating
                 cache_start = time.time()
                 cached_perusu = await get_indicator_cache(setup_id, "perusu")
@@ -176,34 +197,34 @@ class AlgoEngine:
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
-                                
+                    
                     # ✅ TESTING: Detailed entry signal log
                     logger.info(f"🎯 [TEST] Entry Signal Details:")
                     logger.info(f"   Side: {entry_signal['side'].upper()}")
                     logger.info(f"   Trigger: Perusu flip from {last_perusu_signal} to {perusu_data['signal']}")
                     logger.info(f"   Entry Price: ${perusu_data['latest_close']:.5f}")
-                    logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")  # ← FIXED!
+                    logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")
                     logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
                     logger.info(f"   Lot Size: {algo_setup['lot_size']}")
-                
-                    # Execute entry - CORRECT METHOD NAME + CORRECT KEY
+                    
+                    # Execute entry
                     entry_start = time.time()
                     success = await self.position_manager.place_breakout_entry_order(
                         client=client,
                         algo_setup=algo_setup,
                         entry_side=entry_signal['side'],
-                        breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),  # ← FIXED!
+                        breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),
                         sirusu_value=sirusu_data['supertrend_value']
                     )
                     entry_time = time.time() - entry_start
-
+                    
                     # ✅ TESTING: Log entry execution time
                     logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
-
+                    
                     if success:
                         self.signal_counts["successful_entries"] += 1
                         logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
-
+                        
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
@@ -216,18 +237,18 @@ class AlgoEngine:
                     else:
                         self.signal_counts["failed_entries"] += 1
                         logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
-
+                        
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
                         )
-
+                
                 else:
                     self.signal_counts["no_signals"] += 1
                     logger.info(f"⏭️ [TEST] No entry signal - Waiting for Perusu flip")
                     logger.info(f"   Current: {perusu_data['signal_text']} ({perusu_data['signal']})")
                     logger.info(f"   Cached: {last_perusu_signal}")
             
-            # Check for exit signal (only if in position)
+            # ✅ CHECK FOR EXIT SIGNAL (only if in position)
             elif current_position:
                 logger.info(f"📍 [TEST] In position: {current_position.upper()} - Checking exit conditions")
                 
@@ -445,4 +466,3 @@ class AlgoEngine:
                 logger.error(traceback.format_exc())
                 await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
                 await asyncio.sleep(60)
-                        
