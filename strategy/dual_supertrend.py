@@ -195,50 +195,96 @@ class DualSuperTrendStrategy:
                              indicators_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Generate entry signal based on Perusu flip + breakout logic.
-        
+        ✅ FIXED: Handles immediate execution when price already broke through.
+    
         Args:
-            setup: Algo setup dictionary (from database)
-            indicators_data: Dict from calculate_indicators()
+            algo_setup_id: Algo setup ID
             last_perusu_signal: Last known Perusu signal state
-        
+            indicators_data: Dict from calculate_indicators()
+    
         Returns:
-            Entry signal dict or None
+            Entry signal dict with 'immediate' flag, or None
         """
         try:
             perusu = indicators_data.get("perusu")
-            prev_high = indicators_data.get("previous_candle_high")
-            prev_low = indicators_data.get("previous_candle_low")
-            
-            if not perusu or not prev_high or not prev_low:
+            previous_candle = indicators_data.get("previous_candle", {})
+            current_price = indicators_data.get("current_price")
+        
+            if not perusu or not previous_candle or not current_price:
                 logger.error("❌ Missing indicator data for entry signal")
                 return None
-            
+        
+            prev_high = previous_candle.get("high")
+            prev_low = previous_candle.get("low")
+        
+            if not prev_high or not prev_low:
+                logger.error("❌ Missing previous candle high/low")
+                return None
+        
             current_signal = perusu.get("signal")
-            
+        
             # Detect signal flip
             entry_side = self.detect_signal_flip(current_signal, last_perusu_signal)
-            
+        
             if not entry_side:
                 # No flip detected
                 return None
-            
+        
             # Calculate breakout trigger price
-            breakout_price = self.calculate_breakout_price(entry_side, prev_high, prev_low)
+            if entry_side == "long":
+                # LONG: Break above previous candle high
+                trigger_price = prev_high + BREAKOUT_PIP_OFFSET
             
+                # Check if price already broke through
+                if current_price >= trigger_price:
+                    logger.warning(f"⚠️ Price already above breakout level!")
+                    logger.warning(f"   Current: ${current_price:.5f}")
+                    logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    logger.warning(f"   → Using MARKET order (immediate execution)")
+                
+                    return {
+                        'side': 'long',
+                        'trigger_price': current_price,
+                        'immediate': True,
+                        'entry_reason': 'Perusu flip to uptrend (immediate)'
+                    }
+        
+            else:  # entry_side == "short"
+                # SHORT: Break below previous candle low
+                trigger_price = prev_low - BREAKOUT_PIP_OFFSET
+                
+                # Check if price already broke through
+                if current_price <= trigger_price:
+                    logger.warning(f"⚠️ Price already below breakout level!")
+                    logger.warning(f"   Current: ${current_price:.5f}")
+                    logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    logger.warning(f"   → Using MARKET order (immediate execution)")
+                
+                    return {
+                        'side': 'short',
+                        'trigger_price': current_price,
+                        'immediate': True,
+                        'entry_reason': 'Perusu flip to downtrend (immediate)'
+                    }
+        
+            # Price hasn't broken through yet - use stop order
             logger.info(f"🎯 Entry signal generated:")
             logger.info(f"   Side: {entry_side.upper()}")
-            logger.info(f"   Breakout trigger: ${breakout_price:.5f}")
+            logger.info(f"   Breakout trigger: ${trigger_price:.5f}")
+            logger.info(f"   Current price: ${current_price:.5f}")
             logger.info(f"   Perusu value: ${perusu['supertrend_value']:.5f}")
-            
+        
             return {
                 "side": entry_side,
-                "trigger_price": breakout_price,
+                "trigger_price": trigger_price,
+                "immediate": False,
                 "perusu_signal": current_signal,
                 "perusu_value": perusu['supertrend_value'],
                 "prev_high": prev_high,
-                "prev_low": prev_low
+                "prev_low": prev_low,
+                "entry_reason": f"Perusu flip to {'uptrend' if entry_side == 'long' else 'downtrend'}"
             }
-            
+        
         except Exception as e:
             logger.error(f"❌ Exception generating entry signal: {e}")
             import traceback
