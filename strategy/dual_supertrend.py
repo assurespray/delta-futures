@@ -96,8 +96,10 @@ class DualSuperTrendStrategy:
             return {
                 "perusu": perusu_result,
                 "sirusu": sirusu_result,
-                "previous_candle_high": prev_high,
-                "previous_candle_low": prev_low,
+                "previous_candle": {
+                    "high": prev_high,
+                    "low": prev_low
+                },
                 "current_price": perusu_result['latest_close']
             }
             
