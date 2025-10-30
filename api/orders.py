@@ -15,6 +15,7 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
                      side: str, order_type: str = ORDER_TYPE_MARKET,
                      limit_price: Optional[float] = None, 
                      stop_price: Optional[float] = None,
+                     stop_order_type: Optional[str] = None,  # ← ADDED
                      reduce_only: bool = False) -> Optional[Dict[str, Any]]:
     """
     Place an order on Delta Exchange.
@@ -24,9 +25,10 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
         product_id: Product ID from Delta Exchange
         size: Order size (number of contracts)
         side: "buy" or "sell"
-        order_type: "market_order", "limit_order", "stop_limit_order", or "stop_market_order"
-        limit_price: Limit price (required for limit/stop-limit orders)
-        stop_price: Stop trigger price (required for stop orders)
+        order_type: "market_order" or "limit_order"
+        limit_price: Limit price (required for limit orders)
+        stop_price: Stop trigger price (for stop orders)
+        stop_order_type: "stop_loss_order" for stop orders
         reduce_only: Whether order is reduce-only (for stop-loss)
     
     Returns:
@@ -42,13 +44,14 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
             "reduce_only": reduce_only
         }
         
-        # Add limit price for limit and stop-limit orders
-        if order_type in [ORDER_TYPE_LIMIT, ORDER_TYPE_STOP_LIMIT] and limit_price:
+        # Add limit price for limit orders
+        if order_type == ORDER_TYPE_LIMIT and limit_price:
             order_data["limit_price"] = str(limit_price)
         
-        # Add stop price for stop orders
-        if order_type in [ORDER_TYPE_STOP_LIMIT, ORDER_TYPE_STOP_MARKET] and stop_price:
+        # Add stop parameters for stop orders
+        if stop_price and stop_order_type:
             order_data["stop_price"] = str(stop_price)
+            order_data["stop_order_type"] = stop_order_type
         
         response = await client.post("/v2/orders", order_data)
         
@@ -93,6 +96,7 @@ async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id:
                                         stop_price: float) -> Optional[Dict[str, Any]]:
     """
     Place a stop-market order for breakout entry.
+    ✅ FIXED: Uses correct Delta Exchange format.
     
     Args:
         client: Delta Exchange client instance
@@ -106,14 +110,57 @@ async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id:
     """
     logger.info(f"🎯 Placing breakout entry: {side.upper()} stop-market @ ${stop_price}")
     
+    # ✅ FIXED: Correct Delta Exchange stop order format
     return await place_order(
         client=client,
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_STOP_MARKET,
+        order_type=ORDER_TYPE_MARKET,  # ← Use "market_order"
         stop_price=stop_price,
+        stop_order_type="stop_loss_order",  # ← Add stop_order_type
         reduce_only=False  # This opens a new position
+    )
+
+
+async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: int,
+                                      size: int, side: str, 
+                                      stop_price: float,
+                                      slippage_pct: float = 0.005) -> Optional[Dict[str, Any]]:
+    """
+    Place a stop-limit order for breakout entry (alternative to stop-market).
+    
+    Args:
+        client: Delta Exchange client instance
+        product_id: Product ID
+        size: Order size
+        side: "buy" for long breakout, "sell" for short breakout
+        stop_price: Breakout trigger price
+        slippage_pct: Allowed slippage percentage (default 0.5%)
+    
+    Returns:
+        Order response or None
+    """
+    # Calculate limit price with slippage buffer
+    if side == "buy":
+        limit_price = stop_price * (1 + slippage_pct)
+    else:
+        limit_price = stop_price * (1 - slippage_pct)
+    
+    logger.info(f"🎯 Placing breakout entry: {side.upper()} stop-limit")
+    logger.info(f"   Stop: ${stop_price:.5f}")
+    logger.info(f"   Limit: ${limit_price:.5f}")
+    
+    return await place_order(
+        client=client,
+        product_id=product_id,
+        size=size,
+        side=side,
+        order_type=ORDER_TYPE_LIMIT,  # ← Use "limit_order"
+        limit_price=limit_price,
+        stop_price=stop_price,
+        stop_order_type="stop_loss_order",  # ← Add stop_order_type
+        reduce_only=False
     )
 
 
@@ -122,6 +169,7 @@ async def place_stop_loss_order(client: DeltaExchangeClient, product_id: int,
                                 use_stop_market: bool = True) -> Optional[Dict[str, Any]]:
     """
     Place a reduce-only stop-loss order (STOP-MARKET or STOP-LIMIT).
+    ✅ FIXED: Uses correct Delta Exchange format.
     
     Args:
         client: Delta Exchange client instance
@@ -137,25 +185,28 @@ async def place_stop_loss_order(client: DeltaExchangeClient, product_id: int,
     if use_stop_market:
         logger.info(f"🛡️ Placing stop-loss: {side.upper()} stop-market @ ${stop_price}")
         
+        # ✅ FIXED: Correct format
         return await place_order(
             client=client,
             product_id=product_id,
             size=size,
             side=side,
-            order_type=ORDER_TYPE_STOP_MARKET,
+            order_type=ORDER_TYPE_MARKET,  # ← Use "market_order"
             stop_price=stop_price,
+            stop_order_type="stop_loss_order",  # ← Add stop_order_type
             reduce_only=True
         )
     else:
-        # Stop-limit fallback (less reliable)
+        # Stop-limit fallback
         return await place_order(
             client=client,
             product_id=product_id,
             size=size,
             side=side,
-            order_type=ORDER_TYPE_STOP_LIMIT,
+            order_type=ORDER_TYPE_LIMIT,  # ← Use "limit_order"
             limit_price=stop_price,
             stop_price=stop_price,
+            stop_order_type="stop_loss_order",  # ← Add stop_order_type
             reduce_only=True
         )
 
@@ -316,4 +367,3 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
             continue
     
     return formatted
-    
