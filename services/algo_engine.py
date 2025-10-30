@@ -174,34 +174,34 @@ class AlgoEngine:
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
-    
+                                
                     # ✅ TESTING: Detailed entry signal log
                     logger.info(f"🎯 [TEST] Entry Signal Details:")
                     logger.info(f"   Side: {entry_signal['side'].upper()}")
                     logger.info(f"   Trigger: Perusu flip from {last_perusu_signal} to {perusu_data['signal']}")
                     logger.info(f"   Entry Price: ${perusu_data['latest_close']:.5f}")
-                    logger.info(f"   Breakout Trigger: ${entry_signal.get('breakout_trigger', 0):.5f}")
+                    logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")  # ← FIXED!
                     logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
                     logger.info(f"   Lot Size: {algo_setup['lot_size']}")
-    
-                    # Execute entry - CORRECT METHOD NAME
+                
+                    # Execute entry - CORRECT METHOD NAME + CORRECT KEY
                     entry_start = time.time()
                     success = await self.position_manager.place_breakout_entry_order(
                         client=client,
                         algo_setup=algo_setup,
                         entry_side=entry_signal['side'],
-                        breakout_price=entry_signal.get('breakout_trigger', perusu_data['latest_close']),
+                        breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),  # ← FIXED!
                         sirusu_value=sirusu_data['supertrend_value']
                     )
                     entry_time = time.time() - entry_start
-    
+
                     # ✅ TESTING: Log entry execution time
                     logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
-    
+
                     if success:
                         self.signal_counts["successful_entries"] += 1
                         logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
-        
+
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
@@ -214,7 +214,7 @@ class AlgoEngine:
                     else:
                         self.signal_counts["failed_entries"] += 1
                         logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
-        
+
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
                         )
