@@ -325,4 +325,104 @@ async def get_indicator_cache(algo_setup_id: str, indicator_name: str) -> Option
     except Exception as e:
         logger.error(f"❌ Failed to get indicator cache: {e}")
         return None
+
+# ==================== Screener Setups CRUD ====================
+
+async def create_screener_setup(setup_data: Dict[str, Any]) -> str:
+    """Create new screener setup."""
+    try:
+        result = await mongodb.get_db().screener_setups.insert_one(setup_data)
+        logger.info(f"✅ Screener setup created: {setup_data['setup_name']}")
+        return str(result.inserted_id)
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create screener setup: {e}")
+        raise
+
+
+async def get_screener_setups_by_user(user_id: str, active_only: bool = False) -> List[Dict[str, Any]]:
+    """Get all screener setups for a user."""
+    try:
+        query = {"user_id": user_id}
+        if active_only:
+            query["is_active"] = True
+        
+        cursor = mongodb.get_db().screener_setups.find(query)
+        setups = await cursor.to_list(length=100)
+        
+        for setup in setups:
+            setup["_id"] = str(setup["_id"])
+        
+        return setups
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get screener setups: {e}")
+        return []
+
+
+async def get_screener_setup_by_id(setup_id: str) -> Optional[Dict[str, Any]]:
+    """Get screener setup by ID."""
+    try:
+        setup = await mongodb.get_db().screener_setups.find_one({"_id": ObjectId(setup_id)})
+        
+        if setup:
+            setup["_id"] = str(setup["_id"])
+        
+        return setup
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get screener setup by ID: {e}")
+        return None
+
+
+async def update_screener_setup(setup_id: str, update_data: Dict[str, Any]) -> bool:
+    """Update screener setup."""
+    try:
+        update_data["updated_at"] = datetime.utcnow()
+        
+        result = await mongodb.get_db().screener_setups.update_one(
+            {"_id": ObjectId(setup_id)},
+            {"$set": update_data}
+        )
+        
+        return result.modified_count > 0
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to update screener setup: {e}")
+        return False
+
+
+async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
+    """Delete screener setup."""
+    try:
+        result = await mongodb.get_db().screener_setups.delete_one({
+            "_id": ObjectId(setup_id),
+            "user_id": user_id
+        })
+        
+        if result.deleted_count > 0:
+            logger.info(f"✅ Screener setup deleted: {setup_id}")
+            return True
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to delete screener setup: {e}")
+        return False
+
+
+async def get_all_active_screener_setups() -> List[Dict[str, Any]]:
+    """Get all active screener setups."""
+    try:
+        cursor = mongodb.get_db().screener_setups.find({"is_active": True})
+        setups = await cursor.to_list(length=1000)
+        
+        for setup in setups:
+            setup["_id"] = str(setup["_id"])
+        
+        return setups
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get all active screener setups: {e}")
+        return []
+        
       
