@@ -40,6 +40,9 @@ class AlgoEngine:
         self.order_monitor = OrderMonitor()
         self.logger_bot = logger_bot
         self.running_tasks = {}
+
+        # ✅ NEW: Initialize duplicate filter
+        self.duplicate_filter = DuplicateFilter()
         
         # ✅ TESTING: Signal counters
         self.signal_counts = {
