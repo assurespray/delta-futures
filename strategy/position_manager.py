@@ -332,9 +332,23 @@ class PositionManager:
                 logger.warning(f"⚠️ No current position for {symbol}")
                 return False
             
-            # Cancel any existing orders (including stop-loss)
-            cancelled = await cancel_all_orders(client, product_id)
-            logger.info(f"🗑️ Cancelled {cancelled} existing order(s)")
+            # ✅ FIXED: Cancel ONLY this setup's stop-loss order (not all product orders)
+            setup_id = str(algo_setup["_id"])
+            stop_loss_order_id = algo_setup.get("stop_loss_order_id")
+
+            if stop_loss_order_id:
+                from api.orders import cancel_order
+                try:
+                    cancelled = await cancel_order(client, stop_loss_order_id)
+                    if cancelled:
+                        logger.info(f"✅ Cancelled stop-loss order {stop_loss_order_id}")
+                    else:
+                        logger.warning(f"⚠️ Could not cancel stop-loss order {stop_loss_order_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error cancelling stop-loss: {e}")
+            else:
+                logger.info(f"ℹ️ No stop-loss order to cancel")
+
             
             # Determine exit order side (opposite of position)
             exit_side = "sell" if current_position == "long" else "buy"
