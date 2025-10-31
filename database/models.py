@@ -65,6 +65,9 @@ class AlgoSetup(BaseModel):
     last_perusu_signal: Optional[int] = None  # 1=uptrend, -1=downtrend
     pending_entry_order_id: Optional[int] = None  # Stop-market entry order ID
     entry_trigger_price: Optional[float] = None  # Breakout trigger price
+
+    # ✅ FIXED: Track stop-loss order ID for proper cancellation
+    stop_loss_order_id: Optional[int] = None  # Stop-loss order ID (for cancellation)
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
