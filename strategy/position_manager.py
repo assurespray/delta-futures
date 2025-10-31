@@ -113,13 +113,15 @@ class PositionManager:
                     "last_signal_time": datetime.utcnow()
                 })
     
-                # Place stop-loss if enabled
+                # ✅ FIXED: Place stop-loss if enabled and capture order ID
                 if algo_setup.get("additional_protection", False):
-                    await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, sirusu_value
+                    sl_order_id = await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, sirusu_value, setup_id
                     )
-    
+                    # Stop-loss order ID is already saved to DB by _place_stop_loss_protection
+
                 return True
+
 
             # Otherwise, place stop order as normal
             logger.info(f"🎯 Placing breakout {entry_side.upper()} order for {symbol}")
