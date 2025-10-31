@@ -32,6 +32,16 @@ from handlers.algo_setup import (
     SETUP_NAME, SETUP_DESC, SETUP_API, SETUP_INDICATOR, SETUP_DIRECTION,
     SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM
 )
+from handlers.screener_setup import (
+    screener_setups_callback, screener_add_start, screener_name_received, screener_desc_received,
+    screener_api_selected, screener_asset_type_selected, screener_timeframe_selected,
+    screener_direction_selected, screener_lot_size_received, screener_protection_selected,
+    screener_confirmed, cancel_screener_setup,
+    screener_view_list_callback, screener_view_detail_callback,
+    screener_delete_list_callback, screener_delete_confirm_callback,
+    SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_ASSET_TYPE,
+    SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
+)
 from handlers.algo_activity import algo_activity_callback
 
 logger = logging.getLogger(__name__)
@@ -138,6 +148,34 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(algo_view_detail_callback, pattern="^algo_view_"))
     application.add_handler(CallbackQueryHandler(algo_delete_list_callback, pattern="^algo_delete_list$"))
     application.add_handler(CallbackQueryHandler(algo_delete_confirm_callback, pattern="^algo_delete_confirm_"))
+
+    # ===== ADD SCREENER SETUP HANDLERS =====
+    
+    # Screener Setup conversation handler
+    screener_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(screener_add_start, pattern="^screener_add_start$")],
+        states={
+            SCREENER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_name_received)],
+            SCREENER_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_desc_received)],
+            SCREENER_API: [CallbackQueryHandler(screener_api_selected, pattern="^screener_api_")],
+            SCREENER_ASSET_TYPE: [CallbackQueryHandler(screener_asset_type_selected, pattern="^screener_atype_")],
+            SCREENER_TIMEFRAME: [CallbackQueryHandler(screener_timeframe_selected, pattern="^screener_tf_")],
+            SCREENER_DIRECTION: [CallbackQueryHandler(screener_direction_selected, pattern="^screener_dir_")],
+            SCREENER_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_lot_size_received)],
+            SCREENER_PROTECTION: [CallbackQueryHandler(screener_protection_selected, pattern="^screener_prot_")],
+            SCREENER_CONFIRM: [CallbackQueryHandler(screener_confirmed, pattern="^screener_confirm_")]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_screener_setup)],
+        per_message=False
+    )
+    application.add_handler(screener_conv_handler)
+    
+    # Screener Setups other handlers
+    application.add_handler(CallbackQueryHandler(screener_setups_callback, pattern="^menu_screener_setups$"))
+    application.add_handler(CallbackQueryHandler(screener_view_list_callback, pattern="^screener_view_list$"))
+    application.add_handler(CallbackQueryHandler(screener_view_detail_callback, pattern="^screener_view_"))
+    application.add_handler(CallbackQueryHandler(screener_delete_list_callback, pattern="^screener_delete_list$"))
+    application.add_handler(CallbackQueryHandler(screener_delete_confirm_callback, pattern="^screener_delete_confirm_"))
     
     # Algo Activity handler
     application.add_handler(CallbackQueryHandler(algo_activity_callback, pattern="^menu_algo_activity$"))
