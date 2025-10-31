@@ -201,11 +201,12 @@ class PositionManager:
                 
                 logger.info(f"   Entry: {entry_side.upper()} {lot_size} @ ${entry_price:.5f}")
                 
-                # Place stop-loss if additional protection enabled
+                # ✅ FIXED: Place stop-loss if additional protection enabled and capture order ID
                 if algo_setup.get("additional_protection", False):
-                    await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, sirusu_value
+                    sl_order_id = await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, sirusu_value, setup_id
                     )
+                    # Stop-loss order ID is already saved to DB by _place_stop_loss_protection
                 
                 # Create activity record
                 activity_data = {
