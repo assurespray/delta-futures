@@ -1,6 +1,6 @@
 """Duplicate asset filtering between Algo and Screener setups."""
 import logging
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -8,120 +8,118 @@ logger = logging.getLogger(__name__)
 class DuplicateFilter:
     """Filter duplicate assets between Algo and Screener setups.
     
-    ✅ ENHANCED: Now checks both asset AND timeframe
+    ✅ NOW CHECKS: Asset + Timeframe combination
+    ✅ TWO-LEVEL: Algo level (skip entire setup) + Screener level (skip asset only)
     """
     
     def __init__(self):
         """Initialize filter."""
         self.logger = logger
     
-    async def check_duplicate(
+    async def check_duplicate_for_algo(
         self,
         algo_asset: str,
         algo_timeframe: str,
         screener_setups: List[Dict]
     ) -> Optional[Dict[str, str]]:
         """
-        Check if an algo asset+timeframe is in ANY active screener.
+        ALGO LEVEL: Check if algo should be skipped entirely.
         
-        ✅ FIXED: Now considers timeframe!
+        ✅ Only skips if:
+        • Same asset + same timeframe found in screener
+        • AND screener type that would include this asset
         
         Args:
-            algo_asset: Asset symbol from algo setup
-            algo_timeframe: Timeframe from algo setup
-            screener_setups: List of active screener setups
+            algo_asset: Asset from algo
+            algo_timeframe: Timeframe from algo
+            screener_setups: All screener setups
         
         Returns:
-            Dict with screener_id and screener_name if duplicate, None otherwise
+            Dict if duplicate, None otherwise
         """
+        
         algo_asset_upper = algo_asset.upper()
         algo_tf_lower = algo_timeframe.lower()
         
-        for setup in screener_setups:
-            setup_id = str(setup.get("_id", ""))
-            setup_name = setup.get("setup_name", "Unknown")
-            asset_type = setup.get("asset_selection_type", "")
-            screener_tf = setup.get("timeframe", "").lower()
+        for screener in screener_setups:
+            screener_tf = screener.get("timeframe", "").lower()
+            screener_type = screener.get("asset_selection_type", "")
             
-            # ✅ ENHANCED: Check BOTH asset AND timeframe match
-            is_duplicate = await self._is_duplicate_combo(
-                algo_asset_upper,
-                algo_tf_lower,
-                asset_type,
-                screener_tf
-            )
+            # ✅ Step 1: Check timeframe match
+            if algo_tf_lower != screener_tf:
+                continue  # Different timeframe, not a problem
             
-            if is_duplicate:
+            # ✅ Step 2: Check if asset would be in this screener type
+            would_include = self._screener_type_would_include(screener_type)
+            
+            if would_include or screener_type == "every":
+                # ✅ DUPLICATE FOUND
                 return {
-                    "screener_id": setup_id,
-                    "screener_name": setup_name,
-                    "asset_type": asset_type,
+                    "screener_id": str(screener.get("_id", "")),
+                    "screener_name": screener.get("setup_name", "Unknown"),
+                    "screener_type": screener_type,
                     "screener_timeframe": screener_tf
                 }
         
         return None
     
-    async def _is_duplicate_combo(
+    async def check_duplicate_for_screener_asset(
         self,
-        algo_asset: str,
-        algo_tf: str,
-        screener_type: str,
-        screener_tf: str
+        screener_asset: str,
+        screener_timeframe: str,
+        algo_setups: List[Dict]
     ) -> bool:
         """
-        Check if asset+timeframe combination is duplicate.
+        SCREENER LEVEL: Check if a specific asset should be skipped.
         
-        ✅ RULES:
-        • Different timeframes = NOT a duplicate (different signals)
-        • Same timeframe + same asset = DUPLICATE (conflicting trades)
+        ✅ Only returns True if:
+        • Same asset exists in algo
+        • AND same timeframe
         
         Args:
-            algo_asset: Asset symbol from algo
-            algo_tf: Timeframe from algo
-            screener_type: Screener selection type
-            screener_tf: Timeframe from screener
+            screener_asset: Asset from screener
+            screener_timeframe: Timeframe from screener
+            algo_setups: All algo setups
         
         Returns:
-            True if duplicate, False otherwise
+            True if duplicate (skip), False otherwise
         """
         
-        # ✅ STEP 1: Check if timeframes match
-        if algo_tf != screener_tf:
-            logger.info(f"✅ Different timeframes: {algo_tf} vs {screener_tf} - NOT a duplicate")
-            return False
+        screener_asset_upper = screener_asset.upper()
+        screener_tf = screener_timeframe.lower()
         
-        # ✅ STEP 2: Check if asset would be in screener type
-        if screener_type == "every":
-            # "Every asset" includes all assets on same timeframe
-            logger.warning(f"⚠️ Same asset+timeframe: {algo_asset} @ {algo_tf}")
-            return True
-        
-        # For other types (gainers, losers, mixed), we'd need actual market data
-        # For now, return False to be conservative
-        # TODO: Implement actual market data fetching for gainers/losers
+        for algo in algo_setups:
+            algo_asset = algo.get("asset", "").upper()
+            algo_tf = algo.get("timeframe", "").lower()
+            
+            # ✅ Check both asset AND timeframe
+            if algo_asset == screener_asset_upper and algo_tf == screener_tf:
+                self.logger.warning(
+                    f"⚠️ DUPLICATE: {screener_asset_upper} @ {screener_tf} "
+                    f"(found in algo: {algo.get('setup_name', 'Unknown')})"
+                )
+                return True
         
         return False
     
-    def format_duplicate_message(self, duplicate_info: Dict[str, str], algo_name: str, algo_tf: str) -> str:
+    def _screener_type_would_include(self, screener_type: str) -> bool:
         """
-        Format duplicate warning message.
+        Determine if screener type would trade all assets (not just specific list).
         
-        Args:
-            duplicate_info: Dict with screener info
-            algo_name: Name of algo setup
-            algo_tf: Timeframe of algo setup
-        
-        Returns:
-            Formatted message
+        ✅ "every" → Yes, all assets
+        ✅ "gainers" → No, only top gainers (unknown list)
+        ✅ "losers" → No, only top losers (unknown list)
+        ✅ "mixed" → No, only gainers+losers (unknown list)
         """
-        message = (
-            f"⚠️ **Duplicate Asset+Timeframe Detected**\n\n"
-            f"**Algo Setup:** {algo_name} ({algo_tf})\n"
-            f"**Screener Setup:** {duplicate_info['screener_name']} ({duplicate_info['screener_timeframe']})\n"
-            f"**Screener Type:** {duplicate_info['asset_type']}\n\n"
-            f"⏱️ **Same timeframe detected!**\n"
-            f"This could lead to conflicting trades.\n\n"
-            f"✅ **Action:** Skipping trade from SCREENER (Algo has priority)"
+        return screener_type == "every"
+    
+    def format_duplicate_message(self, duplicate_info: Dict[str, str], algo_name: str) -> str:
+        """Format duplicate warning message."""
+        return (
+            f"⚠️ **Duplicate Detected**\n\n"
+            f"**Algo:** {algo_name}\n"
+            f"**Screener:** {duplicate_info['screener_name']}\n"
+            f"**Issue:** Same asset+timeframe\n\n"
+            f"✅ **Action:** Algo skipped (Screener has priority)"
         )
-        return message
         
