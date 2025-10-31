@@ -247,6 +247,7 @@ async def get_open_orders(client: DeltaExchangeClient,
 async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
     """
     Cancel an order by ID.
+    ✅ FIXED: Gracefully handles 404 errors (order already closed).
     
     Args:
         client: Delta Exchange client instance
@@ -266,7 +267,14 @@ async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
         return False
         
     except Exception as e:
-        logger.error(f"❌ Exception cancelling order: {e}")
+        error_msg = str(e)
+        
+        # ✅ Handle 404 gracefully (order already filled/cancelled)
+        if "404" in error_msg or "Not Found" in error_msg:
+            logger.warning(f"⚠️ Order {order_id} already closed (404) - treating as success")
+            return True  # ← Return True since order is already gone
+        
+        logger.error(f"❌ Exception cancelling order {order_id}: {e}")
         return False
 
 
