@@ -71,47 +71,77 @@ class AlgoEngine:
     
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         """
-        Process a single algo setup with detailed logging and timing.
-        
+        Process a single algo setup with duplicate filtering.
+    
+        ✅ FIXED: Skips screener duplicates (algo has priority)
+    
         Args:
             algo_setup: Algo setup configuration
         """
         # ✅ TESTING: Start performance timer
         start_time = time.time()
-        
+    
         setup_id = str(algo_setup['_id'])
         setup_name = algo_setup['setup_name']
-        asset = algo_setup['asset']
+        asset = algo_setup['asset'].upper()
         timeframe = algo_setup['timeframe']
         direction = algo_setup['direction']
         current_position = algo_setup.get('current_position')
-        
+    
         # Increment total checks
         self.signal_counts["total_checks"] += 1
+    
+        # ✅ NEW: CHECK FOR DUPLICATE IN SCREENER SETUPS
+        try:
+            screener_setups = await get_all_active_screener_setups()
         
+            if screener_setups:
+                duplicate_info = await self.duplicate_filter.check_duplicate(asset, screener_setups)
+            
+                if duplicate_info:
+                    logger.warning(f"⚠️ **DUPLICATE DETECTED** - SKIPPING ALGO SETUP")
+                    logger.warning(f"   Algo Setup: {setup_name} ({asset})")
+                    logger.warning(f"   Screener: {duplicate_info['screener_name']}")
+                    logger.warning(f"   Reason: Asset already in screener (screener type: {duplicate_info['asset_type']})")
+                    logger.warning(f"   Decision: Algo has priority, skipping screener for this asset")
+                
+                    # Send notification
+                    await self.logger_bot.send_warning(
+                        f"⚠️ Duplicate detected!\n\n"
+                        f"**Algo:** {setup_name} ({asset})\n"
+                        f"**Screener:** {duplicate_info['screener_name']}\n\n"
+                        f"✅ Algo has priority. Proceeding with algo setup."
+                    )
+                
+                    return  # Skip this setup for this cycle
+    
+        except Exception as e:
+            logger.error(f"❌ Error checking duplicates: {e}")
+            # Don't skip setup if duplicate check fails - continue normally
+    
         # ✅ CRITICAL: CHECK IF AT CANDLE BOUNDARY
         now = datetime.utcnow()
         if not is_at_candle_boundary(timeframe, now):
             next_boundary = get_next_boundary_time(timeframe, now)
             time_until = int((next_boundary - now).total_seconds())
-            
+        
             logger.debug(
                 f"⏭️ [{setup_name}] Not at {timeframe} boundary - "
                 f"Next check in {time_until}s at {next_boundary.strftime('%H:%M:%S')} UTC"
             )
             return
-        
+    
         # ✅ TESTING: Log boundary hit
         self.signal_counts["boundary_hits"] += 1
         tf_display = get_timeframe_display_name(timeframe)
         logger.info(f"✅ [{setup_name}] At {tf_display} boundary - Processing {asset}")
         logger.info(f"📊 [TEST] Session stats: {self._format_stats()}")
-        
+    
         try:
             # Get API credentials
             api_id = algo_setup['api_id']
             cred = await get_api_credential_by_id(api_id, decrypt=True)
-            
+        
             if not cred:
                 logger.error(f"❌ Failed to load credentials for setup {setup_name}")
                 self.signal_counts["errors"] += 1
@@ -119,41 +149,41 @@ class AlgoEngine:
                     f"Failed to load API credentials for setup: {setup_name}"
                 )
                 return
-            
+        
             # Create Delta Exchange client
             client = DeltaExchangeClient(
                 api_key=cred['api_key'],
                 api_secret=cred['api_secret']
             )
-            
+        
             # ✅ TESTING: Track API call
             self.performance_stats["api_calls"] += 1
-            
+        
             # Calculate indicators
             logger.info(f"🔄 Processing {setup_name} ({asset} {timeframe})")
             indicator_start = time.time()
             indicator_result = await self.strategy.calculate_indicators(client, asset, timeframe)
             indicator_time = time.time() - indicator_start
-            
+        
             # ✅ TESTING: Log indicator calculation time
             logger.info(f"⏱️ [TEST] Indicator calculation: {indicator_time:.3f}s")
-            
+        
             if not indicator_result:
                 logger.warning(f"⚠️ Failed to calculate indicators for {setup_name}")
                 self.signal_counts["errors"] += 1
                 await client.close()
                 return
-            
+        
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
-            
+        
             # ✅ TESTING: Log indicator details
             logger.info(f"📈 [TEST] Indicator Details:")
             logger.info(f"   Perusu: {perusu_data['signal_text']} (Value: ${perusu_data['supertrend_value']:.5f})")
             logger.info(f"   Sirusu: {sirusu_data['signal_text']} (Value: ${sirusu_data['supertrend_value']:.5f})")
             logger.info(f"   Price: ${perusu_data['latest_close']:.5f}")
             logger.info(f"   ATR: {perusu_data['atr']:.6f}")
-            
+        
             # ✅ CHECK PENDING ENTRY ORDER (if not in position)
             if not current_position:
                 pending_order_status = await self.order_monitor.check_pending_entry_order(
@@ -163,40 +193,29 @@ class AlgoEngine:
                     sirusu_value=sirusu_data['supertrend_value'],
                     logger_bot=self.logger_bot
                 )
-                
+            
                 # ✅ TESTING: Log pending order status
                 if pending_order_status:
                     logger.info(f"📋 [TEST] Pending order status: {pending_order_status}")
-                
+            
                 # If order was just filled, position is now open
                 if pending_order_status == "filled":
                     logger.info(f"✅ [TEST] Position opened via pending order - skipping entry check")
                     current_position = "long"  # Will be updated in DB, but set for exit check
-                
+            
                 # If order was cancelled due to reversal, continue to check for new signal
                 elif pending_order_status == "reversed":
                     logger.info(f"🔄 [TEST] Order cancelled - checking for new entry signal")
-            
-            # ✅ CHECK FOR ENTRY SIGNAL (only if no position AND no pending order)
+        
             # ✅ CHECK FOR ENTRY SIGNAL (only if no position AND no pending order)
             if not current_position and not algo_setup.get('pending_entry_order_id'):
-                
-                # ✅ EXTRA SAFETY CHECK 1: Verify position is REALLY empty
-                if algo_setup.get('current_position'):
-                    logger.error(f"❌ [SAFETY CHECK FAILED] Position state inconsistency detected!")
-                    logger.error(f"   Setup: {setup_name}")
-                    logger.error(f"   current_position should be None but is: {algo_setup.get('current_position')}")
-                    self.signal_counts["failed_entries"] += 1
-                    await client.close()
-                    return
-                
                 # Get last Perusu signal from cache BEFORE updating
                 cache_start = time.time()
                 cached_perusu = await get_indicator_cache(setup_id, "perusu")
                 cache_time = time.time() - cache_start
-                
+            
                 last_perusu_signal = cached_perusu.get('last_signal') if cached_perusu else None
-                
+            
                 # ✅ TESTING: Track cache hit/miss
                 if cached_perusu:
                     self.performance_stats["cache_hits"] += 1
@@ -204,17 +223,17 @@ class AlgoEngine:
                 else:
                     self.performance_stats["cache_misses"] += 1
                     logger.info(f"💾 [TEST] Cache MISS - First run ({cache_time:.3f}s)")
-                
+            
                 entry_signal = self.strategy.generate_entry_signal(
                     setup_id,
                     last_perusu_signal,
                     indicator_result
                 )
-                
+            
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
-                    
+                
                     # ✅ TESTING: Detailed entry signal log
                     logger.info(f"🎯 [TEST] Entry Signal Details:")
                     logger.info(f"   Side: {entry_signal['side'].upper()}")
@@ -223,17 +242,7 @@ class AlgoEngine:
                     logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")
                     logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
                     logger.info(f"   Lot Size: {algo_setup['lot_size']}")
-                    
-                    # ✅ EXTRA SAFETY CHECK 2: Refresh setup before entry to catch any state changes
-                    refreshed_setup = await get_algo_setup_by_id(setup_id)
-                    if refreshed_setup and refreshed_setup.get('current_position'):
-                        logger.error(f"❌ [SAFETY CHECK FAILED] Position opened between checks!")
-                        logger.error(f"   Setup: {setup_name}")
-                        logger.error(f"   Position: {refreshed_setup.get('current_position')}")
-                        self.signal_counts["failed_entries"] += 1
-                        await client.close()
-                        return
-                    
+                
                     # Execute entry
                     entry_start = time.time()
                     success = await self.position_manager.place_breakout_entry_order(
@@ -246,14 +255,14 @@ class AlgoEngine:
                     )
 
                     entry_time = time.time() - entry_start
-                    
+                
                     # ✅ TESTING: Log entry execution time
                     logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
                     
                     if success:
                         self.signal_counts["successful_entries"] += 1
                         logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
-                        
+                    
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
@@ -266,37 +275,37 @@ class AlgoEngine:
                     else:
                         self.signal_counts["failed_entries"] += 1
                         logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
-                        
+                    
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
                         )
-                
+            
                 else:
                     self.signal_counts["no_signals"] += 1
                     logger.info(f"⏭️ [TEST] No entry signal - Waiting for Perusu flip")
                     logger.info(f"   Current: {perusu_data['signal_text']} ({perusu_data['signal']})")
                     logger.info(f"   Cached: {last_perusu_signal}")
-            
+        
             # ✅ CHECK FOR EXIT SIGNAL (only if in position)
             elif current_position:
                 logger.info(f"📍 [TEST] In position: {current_position.upper()} - Checking exit conditions")
-                
+            
                 exit_signal = self.strategy.generate_exit_signal(
                     setup_id,
                     current_position,
                     indicator_result
                 )
-                
+            
                 if exit_signal:
                     self.signal_counts["exit_signals"] += 1
                     logger.info(f"🚪 Exit signal detected for {setup_name}")
-                    
+                
                     # ✅ TESTING: Detailed exit signal log
                     logger.info(f"🎯 [TEST] Exit Signal Details:")
                     logger.info(f"   Position: {current_position.upper()}")
                     logger.info(f"   Trigger: Sirusu flip ({sirusu_data['signal_text']})")
                     logger.info(f"   Exit Price: ${sirusu_data['supertrend_value']:.5f}")
-                    
+                
                     # Execute exit
                     exit_start = time.time()
                     success = await self.position_manager.execute_exit(
@@ -305,14 +314,14 @@ class AlgoEngine:
                         sirusu_signal_text=sirusu_data['signal_text']
                     )
                     exit_time = time.time() - exit_start
-                    
+                
                     # ✅ TESTING: Log exit execution time
                     logger.info(f"⏱️ [TEST] Exit execution: {exit_time:.3f}s")
-                    
+                
                     if success:
                         self.signal_counts["successful_exits"] += 1
                         logger.info(f"✅ [TEST] Exit successful! Total exits: {self.signal_counts['successful_exits']}")
-                        
+                    
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
                             asset=asset,
@@ -322,30 +331,30 @@ class AlgoEngine:
                     else:
                         self.signal_counts["failed_exits"] += 1
                         logger.error(f"❌ [TEST] Exit failed! Total failures: {self.signal_counts['failed_exits']}")
-                        
+                    
                         await self.logger_bot.send_error(
                             f"Failed to execute exit for {setup_name}"
                         )
                 else:
                     logger.info(f"⏭️ [TEST] No exit signal - Holding {current_position.upper()} position")
                     logger.info(f"   Sirusu: {sirusu_data['signal_text']} (waiting for flip)")
-            
+        
             # ✅ Cache indicator values AFTER signal detection
             await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
-            
+        
             await client.close()
-            
+        
             # ✅ TESTING: Calculate and log total processing time
             elapsed = time.time() - start_time
             self._update_performance_stats(elapsed)
-            
+        
             logger.info(f"⏱️ [TEST] Total processing time: {elapsed:.3f}s")
             logger.info(f"📊 [TEST] Performance stats: {self._format_performance()}")
-            
+        
         except Exception as e:
             self.signal_counts["errors"] += 1
             elapsed = time.time() - start_time
-            
+        
             logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
             logger.error(f"⏱️ [TEST] Failed after {elapsed:.3f}s")
             import traceback
