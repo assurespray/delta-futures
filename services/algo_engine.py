@@ -172,7 +172,18 @@ class AlgoEngine:
                     logger.info(f"🔄 [TEST] Order cancelled - checking for new entry signal")
             
             # ✅ CHECK FOR ENTRY SIGNAL (only if no position AND no pending order)
+            # ✅ CHECK FOR ENTRY SIGNAL (only if no position AND no pending order)
             if not current_position and not algo_setup.get('pending_entry_order_id'):
+                
+                # ✅ EXTRA SAFETY CHECK 1: Verify position is REALLY empty
+                if algo_setup.get('current_position'):
+                    logger.error(f"❌ [SAFETY CHECK FAILED] Position state inconsistency detected!")
+                    logger.error(f"   Setup: {setup_name}")
+                    logger.error(f"   current_position should be None but is: {algo_setup.get('current_position')}")
+                    self.signal_counts["failed_entries"] += 1
+                    await client.close()
+                    return
+                
                 # Get last Perusu signal from cache BEFORE updating
                 cache_start = time.time()
                 cached_perusu = await get_indicator_cache(setup_id, "perusu")
@@ -207,6 +218,16 @@ class AlgoEngine:
                     logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
                     logger.info(f"   Lot Size: {algo_setup['lot_size']}")
                     
+                    # ✅ EXTRA SAFETY CHECK 2: Refresh setup before entry to catch any state changes
+                    refreshed_setup = await get_algo_setup_by_id(setup_id)
+                    if refreshed_setup and refreshed_setup.get('current_position'):
+                        logger.error(f"❌ [SAFETY CHECK FAILED] Position opened between checks!")
+                        logger.error(f"   Setup: {setup_name}")
+                        logger.error(f"   Position: {refreshed_setup.get('current_position')}")
+                        self.signal_counts["failed_entries"] += 1
+                        await client.close()
+                        return
+                    
                     # Execute entry
                     entry_start = time.time()
                     success = await self.position_manager.place_breakout_entry_order(
@@ -215,7 +236,7 @@ class AlgoEngine:
                         entry_side=entry_signal['side'],
                         breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),
                         sirusu_value=sirusu_data['supertrend_value'],
-                        immediate=entry_signal.get('immediate', False)  # ← ADD THIS LINE
+                        immediate=entry_signal.get('immediate', False)
                     )
 
                     entry_time = time.time() - entry_start
