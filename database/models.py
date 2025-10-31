@@ -124,4 +124,30 @@ class IndicatorCache(BaseModel):
         populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
+
+
+class ScreenerSetup(BaseModel):
+    """Model for screener multi-asset setup."""
+    
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    setup_name: str
+    description: str
+    api_id: str
+    api_name: str
+    indicator: str  # "dual_supertrend"
+    asset_selection_type: str  # "every", "gainers", "losers", "mixed"
+    timeframe: str
+    direction: str  # "both", "long_only", "short_only"
+    lot_size: int
+    additional_protection: bool
+    is_active: bool = True
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
         
