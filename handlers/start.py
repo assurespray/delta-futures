@@ -39,7 +39,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("⚙️ Algo Setups", callback_data="menu_algo_setups")
         ],
         [
-            InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity"),
+            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups"),
+            InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
@@ -73,11 +76,11 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("📊 Indicators", callback_data="menu_indicators"),
             InlineKeyboardButton("⚙️ Algo Setups", callback_data="menu_algo_setups")
         ],
-        # In main_menu_callback, add this button in the keyboard:
-        [InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups")],
-        
         [
-            InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity"),
+            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups"),
+            InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
@@ -115,6 +118,8 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Check current indicator signals (Perusu/Sirusu).\n\n"
         "**⚙️ Algo Setups**\n"
         "Create, view, and manage automated trading strategies.\n\n"
+        "**📊 Screener Setups**\n"
+        "Create and manage multi-asset screener strategies.\n\n"
         "**📜 Algo Activity**\n"
         "View last 3 days of trading history and PnL.\n\n"
         "**Strategy Info:**\n"
@@ -128,4 +133,4 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode="Markdown")
-  
+    
