@@ -70,19 +70,17 @@ class DuplicateFilter:
         algo_setups: List[Dict]
     ) -> bool:
         """
-        SCREENER LEVEL: Check if a specific asset should be skipped.
+        Check if asset should be SKIPPED in screener.
         
-        ✅ Only returns True if:
-        • Same asset exists in algo
-        • AND same timeframe
+        ✅ Returns True if DUPLICATE (skip this asset)
         
         Args:
             screener_asset: Asset from screener
             screener_timeframe: Timeframe from screener
-            algo_setups: All algo setups
+            algo_setups: All active algo setups
         
         Returns:
-            True if duplicate (skip), False otherwise
+            True if duplicate (skip), False (trade it)
         """
         
         screener_asset_upper = screener_asset.upper()
@@ -91,17 +89,20 @@ class DuplicateFilter:
         for algo in algo_setups:
             algo_asset = algo.get("asset", "").upper()
             algo_tf = algo.get("timeframe", "").lower()
+            algo_name = algo.get("setup_name", "Unknown")
             
-            # ✅ Check both asset AND timeframe
+            # ✅ Check: Same asset + same timeframe?
             if algo_asset == screener_asset_upper and algo_tf == screener_tf:
-                self.logger.warning(
-                    f"⚠️ DUPLICATE: {screener_asset_upper} @ {screener_tf} "
-                    f"(found in algo: {algo.get('setup_name', 'Unknown')})"
+                logger.warning(
+                    f"⚠️ DUPLICATE FOUND!\n"
+                    f"   Asset: {screener_asset_upper} @ {screener_tf}\n"
+                    f"   Algo: {algo_name} → WILL TRADE\n"
+                    f"   Screener: THIS ASSET SKIPPED"
                 )
-                return True
+                return True  # ← Skip this asset in screener
         
-        return False
-    
+        return False  # ← Asset is safe, trade it
+         
     def _screener_type_would_include(self, screener_type: str) -> bool:
         """
         Determine if screener type would trade all assets (not just specific list).
