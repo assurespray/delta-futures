@@ -34,10 +34,11 @@ class PositionManager:
                                         entry_side: str, 
                                         breakout_price: float,
                                         sirusu_value: float,
-                                        immediate: bool = False) -> bool:  # ← ADD THIS
+                                        immediate: bool = False) -> bool:
 
         """
         Place breakout entry order (stop-market at candle high/low + 1 pip).
+        ✅ FIXED: Added critical validation to prevent duplicate entries.
         
         Args:
             client: Delta Exchange client
@@ -45,6 +46,7 @@ class PositionManager:
             entry_side: "long" or "short"
             breakout_price: Trigger price (previous candle extreme + 1 pip)
             sirusu_value: Sirusu value for stop-loss
+            immediate: If True, place market order immediately
         
         Returns:
             True if successful, False otherwise
@@ -55,6 +57,23 @@ class PositionManager:
             lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
             
+            # ✅ CRITICAL CHECK 1: Verify NO position is already open
+            current_position = algo_setup.get("current_position")
+            if current_position:
+                logger.error(f"❌ ENTRY REJECTED: Position already open for {symbol}")
+                logger.error(f"   Current position: {current_position.upper()}")
+                logger.error(f"   Requested entry: {entry_side.upper()}")
+                logger.error(f"   Setup ID: {setup_id}")
+                return False
+            
+            # ✅ CRITICAL CHECK 2: Verify NO pending entry order exists
+            pending_entry_id = algo_setup.get("pending_entry_order_id")
+            if pending_entry_id:
+                logger.error(f"❌ ENTRY REJECTED: Pending entry order already exists for {symbol}")
+                logger.error(f"   Pending order ID: {pending_entry_id}")
+                logger.error(f"   Setup ID: {setup_id}")
+                return False
+            
             # Get product ID if not cached
             if not product_id:
                 product = await get_product_by_symbol(client, symbol)
@@ -62,7 +81,7 @@ class PositionManager:
                     logger.error(f"❌ Product not found: {symbol}")
                     return False
                 product_id = product["id"]
-                await update_algo_setup(setup_id, {"product_id": product_id})  # ← Just save product_id
+                await update_algo_setup(setup_id, {"product_id": product_id})
 
             # Determine order side
             order_side = "buy" if entry_side == "long" else "sell"
@@ -106,7 +125,7 @@ class PositionManager:
     
                 await create_algo_activity(activity_data)
     
-                # Update algo setup - position is now open
+                # ✅ Update algo setup - position is now open (CRITICAL!)
                 await update_algo_setup(setup_id, {
                     "current_position": entry_side,
                     "last_entry_price": entry_price,
@@ -118,7 +137,7 @@ class PositionManager:
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sirusu_value, setup_id
                     )
-                    # Stop-loss order ID is already saved to DB by _place_stop_loss_protection
+                    logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")
 
                 return True
 
@@ -138,12 +157,12 @@ class PositionManager:
             
             entry_order_id = entry_order.get("id")
             logger.info(f"✅ Breakout entry order placed: ID {entry_order_id}")
-            # Around line 60, after placing order successfully
-            # Update algo setup with pending order info
+            
+            # ✅ Update algo setup with pending order info
             await update_algo_setup(setup_id, {
                 "pending_entry_order_id": entry_order_id,
                 "entry_trigger_price": breakout_price,
-                "pending_entry_direction_signal": 1 if entry_side == "long" else -1,  # ← ADD THIS
+                "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
                 "last_signal_time": datetime.utcnow()
             })
       
@@ -206,7 +225,7 @@ class PositionManager:
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sirusu_value, setup_id
                     )
-                    # Stop-loss order ID is already saved to DB by _place_stop_loss_protection
+                    logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")
                 
                 # Create activity record
                 activity_data = {
@@ -226,7 +245,7 @@ class PositionManager:
                 
                 activity_id = await create_algo_activity(activity_data)
                 
-                # Update algo setup
+                # ✅ Update algo setup - CRITICAL: set current_position
                 await update_algo_setup(setup_id, {
                     "current_position": entry_side,
                     "last_entry_price": entry_price,
@@ -333,7 +352,6 @@ class PositionManager:
                 return False
             
             # ✅ FIXED: Cancel ONLY this setup's stop-loss order (not all product orders)
-            setup_id = str(algo_setup["_id"])
             stop_loss_order_id = algo_setup.get("stop_loss_order_id")
 
             if stop_loss_order_id:
@@ -392,12 +410,13 @@ class PositionManager:
                 
                 logger.info(f"💰 Trade closed - PnL: ${pnl:.4f} (₹{pnl_inr:.2f})")
             
-            # Update algo setup - back to waiting state
+            # ✅ Update algo setup - back to waiting state (CRITICAL!)
             await update_algo_setup(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
                 "pending_entry_order_id": None,
                 "entry_trigger_price": None,
+                "stop_loss_order_id": None,  # ← Clear stop-loss ID too!
                 "last_signal_time": datetime.utcnow()
             })
             
