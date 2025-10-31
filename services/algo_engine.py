@@ -91,12 +91,17 @@ class AlgoEngine:
         # Increment total checks
         self.signal_counts["total_checks"] += 1
     
-        # ✅ NEW: CHECK FOR DUPLICATE IN SCREENER SETUPS
+        # ✅ NEW: CHECK FOR DUPLICATE IN SCREENER SETUPS (Asset + Timeframe)
         try:
             screener_setups = await get_all_active_screener_setups()
-        
+    
             if screener_setups:
-                duplicate_info = await self.duplicate_filter.check_duplicate(asset, screener_setups)
+                # ✅ ENHANCED: Now passes both asset AND timeframe
+                duplicate_info = await self.duplicate_filter.check_duplicate(
+                    algo_asset=asset,
+                    algo_timeframe=timeframe,  # ← NEW: Pass timeframe!
+                    screener_setups=screener_setups
+                )
             
                 if duplicate_info:
                     logger.warning(f"⚠️ **DUPLICATE DETECTED** - SKIPPING ALGO SETUP")
