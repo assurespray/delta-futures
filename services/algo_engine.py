@@ -19,8 +19,6 @@ from utils.timeframe import (
     get_next_boundary_time,
     get_timeframe_display_name
 )
-from utils.duplicate_filter import DuplicateFilter
-from database.crud import get_all_active_screener_setups
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +38,6 @@ class AlgoEngine:
         self.order_monitor = OrderMonitor()
         self.logger_bot = logger_bot
         self.running_tasks = {}
-
-        # ✅ NEW: Initialize duplicate filter
-        self.duplicate_filter = DuplicateFilter()
         
         # ✅ TESTING: Signal counters
         self.signal_counts = {
