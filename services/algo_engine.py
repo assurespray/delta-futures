@@ -91,38 +91,11 @@ class AlgoEngine:
         # Increment total checks
         self.signal_counts["total_checks"] += 1
     
-        # ✅ NEW: CHECK FOR DUPLICATE IN SCREENER SETUPS (Asset + Timeframe)
-        try:
-            screener_setups = await get_all_active_screener_setups()
+        # ✅ NO DUPLICATE CHECK HERE!
+        # Algo ALWAYS trades - it has priority!
+        # Screener will skip duplicates instead.
     
-            if screener_setups:
-                # ✅ ENHANCED: Now passes both asset AND timeframe
-                duplicate_info = await self.duplicate_filter.check_duplicate(
-                    algo_asset=asset,
-                    algo_timeframe=timeframe,  # ← NEW: Pass timeframe!
-                    screener_setups=screener_setups
-                )
-            
-                if duplicate_info:
-                    logger.warning(f"⚠️ **DUPLICATE DETECTED** - SKIPPING ALGO SETUP")
-                    logger.warning(f"   Algo Setup: {setup_name} ({asset})")
-                    logger.warning(f"   Screener: {duplicate_info['screener_name']}")
-                    logger.warning(f"   Reason: Asset already in screener (screener type: {duplicate_info['asset_type']})")
-                    logger.warning(f"   Decision: Algo has priority, skipping screener for this asset")
-                
-                    # Send notification
-                    await self.logger_bot.send_warning(
-                        f"⚠️ Duplicate detected!\n\n"
-                        f"**Algo:** {setup_name} ({asset})\n"
-                        f"**Screener:** {duplicate_info['screener_name']}\n\n"
-                        f"✅ Algo has priority. Proceeding with algo setup."
-                    )
-                
-                    return  # Skip this setup for this cycle
-    
-        except Exception as e:
-            logger.error(f"❌ Error checking duplicates: {e}")
-            # Don't skip setup if duplicate check fails - continue normally
+        logger.info(f"🚀 Processing Algo: {setup_name} ({asset} @ {timeframe})")
     
         # ✅ CRITICAL: CHECK IF AT CANDLE BOUNDARY
         now = datetime.utcnow()
