@@ -257,40 +257,52 @@ class PositionManager:
     
     async def _place_stop_loss_protection(self, client: DeltaExchangeClient, 
                                          product_id: int, lot_size: int, 
-                                         position_side: str, stop_price: float) -> bool:
+                                         position_side: str, stop_price: float,
+                                         setup_id: Optional[str] = None) -> Optional[int]:
         """
         Place stop-loss market order for position protection (Sirusu value).
-        
+        ✅ FIXED: Returns order ID so we can track and cancel it later.
+    
         Args:
             client: Delta Exchange client
             product_id: Product ID
             lot_size: Position size
             position_side: "long" or "short"
             stop_price: Stop-loss trigger price (Sirusu value)
-        
+            setup_id: Algo setup ID (optional, for database updates)
+    
         Returns:
-            True if successful, False otherwise
+            Stop-loss order ID if successful, None otherwise
         """
         try:
             # Determine stop-loss order side (opposite of position)
             sl_side = "sell" if position_side == "long" else "buy"
-            
+        
             logger.info(f"🛡️ Placing stop-loss protection: {sl_side.upper()} @ ${stop_price:.5f}")
-            
+        
             sl_order = await place_stop_loss_order(
                 client, product_id, lot_size, sl_side, stop_price, use_stop_market=True
             )
-            
+        
             if sl_order:
-                logger.info(f"✅ Stop-loss order placed successfully (ID: {sl_order.get('id')})")
-                return True
+                sl_order_id = sl_order.get("id")
+                logger.info(f"✅ Stop-loss order placed successfully (ID: {sl_order_id})")
+            
+                # ✅ FIXED: Save stop-loss order ID to database for later cancellation
+                if setup_id:
+                    await update_algo_setup(setup_id, {
+                        "stop_loss_order_id": sl_order_id
+                    })
+                    logger.info(f"💾 Saved stop-loss order ID {sl_order_id} to database")
+            
+                return sl_order_id
             else:
                 logger.warning(f"⚠️ Failed to place stop-loss order")
-                return False
+                return None
             
         except Exception as e:
             logger.error(f"❌ Exception placing stop-loss: {e}")
-            return False
+            return None
     
     async def execute_exit(self, client: DeltaExchangeClient, 
                           algo_setup: Dict[str, Any],
