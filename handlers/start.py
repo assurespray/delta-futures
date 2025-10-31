@@ -73,6 +73,9 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("📊 Indicators", callback_data="menu_indicators"),
             InlineKeyboardButton("⚙️ Algo Setups", callback_data="menu_algo_setups")
         ],
+        # In main_menu_callback, add this button in the keyboard:
+        [InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups")],
+        
         [
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity"),
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
