@@ -1,7 +1,6 @@
 """Screener processing engine with asset-level filtering."""
 import logging
 from typing import List, Dict
-from utils.screener_asset_filter import ScreenerAssetFilter
 from utils.duplicate_filter import DuplicateFilter
 from database.crud import get_all_active_algo_setups
 
@@ -9,11 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 class ScreenerEngine:
-    """Process screener setups with intelligent asset filtering."""
+    """
+    Process screener setups with intelligent asset filtering.
+    
+    ✅ RULE: If asset+timeframe in Algo → Skip it (Algo has priority)
+    """
     
     def __init__(self):
         """Initialize screener engine."""
-        self.asset_filter = ScreenerAssetFilter()
         self.duplicate_filter = DuplicateFilter()
     
     async def process_screener_setup(
@@ -24,9 +26,9 @@ class ScreenerEngine:
         """
         Process screener setup with asset filtering.
         
-        ✅ Two levels of filtering:
-        1. Asset-level: Skip only duplicates
-        2. Keep all other assets trading
+        ✅ For each asset:
+        • If in Algo with same timeframe → ❌ SKIP (Algo has priority)
+        • Otherwise → ✅ TRADE
         
         Args:
             screener_setup: Screener configuration
@@ -37,16 +39,18 @@ class ScreenerEngine:
         screener_tf = screener_setup.get("timeframe", "")
         
         logger.info(f"📊 Processing Screener: {setup_name}")
+        logger.info(f"   Total assets found: {len(screener_assets)}")
         
         try:
             # Get all active algo setups
             algo_setups = await get_all_active_algo_setups()
             
-            # ✅ Filter each asset against algos
+            # ✅ Filter each asset individually
             allowed_assets = []
             blocked_assets = []
             
             for asset in screener_assets:
+                # Check if this asset+timeframe exists in any algo
                 is_duplicate = await self.duplicate_filter.check_duplicate_for_screener_asset(
                     screener_asset=asset,
                     screener_timeframe=screener_tf,
@@ -55,30 +59,30 @@ class ScreenerEngine:
                 
                 if is_duplicate:
                     blocked_assets.append(asset)
-                    logger.warning(f"⏭️ SKIPPING: {asset} (duplicate with algo)")
+                    logger.warning(f"   ⏭️ SKIP: {asset} (Algo has priority)")
                 else:
                     allowed_assets.append(asset)
-                    logger.info(f"✅ ALLOWING: {asset} (safe to trade)")
+                    logger.info(f"   ✅ TRADE: {asset}")
             
             # Log summary
-            if blocked_assets:
-                logger.info(
-                    f"📊 Filtering complete:\n"
-                    f"   Will trade: {len(allowed_assets)}\n"
-                    f"   Skipped: {', '.join(blocked_assets)}"
-                )
-            else:
-                logger.info(f"✅ All {len(allowed_assets)} assets cleared for trading!")
+            logger.info(
+                f"\n📋 Screener '{setup_name}' Filtering Summary:\n"
+                f"   ✅ Will trade: {len(allowed_assets)} assets\n"
+                f"   ⏭️ Skipped (Algo priority): {len(blocked_assets)} assets"
+            )
             
-            # Now process allowed assets
+            if blocked_assets:
+                logger.info(f"   Skipped assets: {', '.join(blocked_assets)}")
+            
+            # ✅ NOW TRADE ONLY ALLOWED ASSETS
             if allowed_assets:
-                logger.info(f"🚀 Trading {len(allowed_assets)} assets from screener")
+                logger.info(f"\n🚀 Trading {len(allowed_assets)} assets from screener:")
                 for asset in allowed_assets:
-                    logger.info(f"   • {asset}")
-                    # TODO: Execute trade logic for this asset
+                    logger.info(f"   • {asset} @ {screener_tf}")
+                    # TODO: Execute trade for this asset
                     # await self.position_manager.process_asset(asset, screener_setup)
             else:
-                logger.warning(f"⚠️ No assets left to trade after filtering!")
+                logger.warning(f"⚠️ No assets to trade (all {len(blocked_assets)} blocked by algos)")
         
         except Exception as e:
             logger.error(f"❌ Error processing screener: {e}")
