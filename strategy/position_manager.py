@@ -330,17 +330,8 @@ class PositionManager:
                           algo_setup: Dict[str, Any],
                           sirusu_signal_text: str) -> bool:
         """
-        Execute market exit when Sirusu flips (trailing stop exit).
-    
-        ✅ CRITICAL FIX: Cancel stop-loss order BEFORE exiting!
-    
-        Args:
-            client: Delta Exchange client
-            algo_setup: Algo setup configuration
-            sirusu_signal_text: Sirusu signal text for logging
-    
-        Returns:
-            True if successful, False otherwise
+        Execute market exit when Sirusu flips.
+        ✅ PURE AUTOMATIC: No cleanup needed, everything happens atomically
         """
         try:
             setup_id = str(algo_setup["_id"])
@@ -353,113 +344,93 @@ class PositionManager:
                 logger.warning(f"⚠️ No current position for {symbol}")
                 return False
         
-            # ✅ STEP 1: CANCEL STOP-LOSS ORDER FIRST (before market exit)
+            logger.info(f"=" * 70)
+            logger.info(f"🚪 EXECUTING EXIT SIGNAL")
+            logger.info(f"=" * 70)
+            logger.info(f"Asset: {symbol}")
+            logger.info(f"Position: {current_position.upper()}")
+            logger.info(f"Trigger: {sirusu_signal_text}")
+        
+            # ✅ STEP 1: CANCEL STOP-LOSS (CRITICAL!)
             stop_loss_order_id = algo_setup.get("stop_loss_order_id")
-            sl_cancelled = False
         
             if stop_loss_order_id:
-                logger.info(f"🔄 [STEP 1] Attempting to cancel stop-loss order: {stop_loss_order_id}")
+                # Ensure it's an int
+                if isinstance(stop_loss_order_id, str):
+                    try:
+                        stop_loss_order_id = int(stop_loss_order_id)
+                    except (ValueError, TypeError):
+                        stop_loss_order_id = None
             
-                from api.orders import cancel_order
-                try:
-                    cancelled = await cancel_order(client, stop_loss_order_id)
+                if stop_loss_order_id:
+                    logger.info(f"🔄 Cancelling stop-loss order {stop_loss_order_id}...")
                 
-                    if cancelled:
-                        sl_cancelled = True
-                        logger.info(f"✅ Stop-loss order {stop_loss_order_id} cancelled successfully")
-                    else:
-                        # ✅ FIX: Log as INFO, not ERROR (404 is normal!)
-                        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} not found (likely already executed)")
-                        sl_cancelled = True  # ← Treat as success - doesn't matter if it's already gone
-            
-                except Exception as e:
-                    logger.error(f"❌ Error cancelling stop-loss: {e}")
-                    # ✅ Don't return False - continue with market exit anyway!
-            else:
-                logger.info(f"ℹ️ [STEP 1] No stop-loss order to cancel")
-                sl_cancelled = True
+                    from api.orders import cancel_order
+                
+                    try:
+                        await cancel_order(client, stop_loss_order_id)
+                        logger.info(f"✅ Stop-loss cancelled")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Stop-loss cancel: {e}")
+                        # Continue anyway - order might have already triggered
         
-            # ✅ STEP 2: EXECUTE MARKET EXIT (close the position)
-            logger.info(f"🚪 [STEP 2] Executing Sirusu exit for {symbol} {current_position.upper()}")
-        
-            # Determine exit order side (opposite of position)
+            # ✅ STEP 2: EXECUTE MARKET EXIT
             exit_side = "sell" if current_position == "long" else "buy"
         
-            # Place market order to close position
-            logger.info(f"   Direction: {current_position.upper()}")
-            logger.info(f"   Exit reason: {sirusu_signal_text}")
-            logger.info(f"   Market order: {exit_side.upper()} {lot_size} contracts")
+            logger.info(f"📊 Placing market exit order...")
+            logger.info(f"   Order: {exit_side.upper()} {lot_size} contracts @ market")
         
             order = await place_market_order(client, product_id, lot_size, exit_side)
         
             if not order:
-                logger.error(f"❌ Failed to place exit order for {symbol}")
+                logger.error(f"❌ FAILED: Exit order could not be placed")
                 return False
         
             exit_price = float(order.get("average_fill_price", 0))
             if exit_price == 0:
                 exit_price = float(order.get("limit_price", 0))
         
-            logger.info(f"✅ Market exit executed: Close {current_position.upper()} @ ${exit_price:.5f}")
+            logger.info(f"✅ Exit executed @ ${exit_price:.5f}")
         
-            # ✅ STEP 3: RECORD EXIT ACTIVITY & UPDATE DATABASE
-            logger.info(f"💾 [STEP 3] Recording exit activity...")
-        
-            # Get open activity record
+            # ✅ STEP 3: RECORD EXIT & CALCULATE PnL
             activity = await get_open_activity_by_setup(setup_id)
         
             if activity:
-                # Calculate PnL
                 entry_price = activity.get("entry_price", 0)
                 pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
                 pnl_inr = pnl * settings.usd_to_inr_rate
             
-                # Update activity record
-                update_data = {
+                logger.info(f"💰 PnL: ${pnl:.4f} (₹{pnl_inr:.2f})")
+            
+                await update_algo_activity(str(activity["_id"]), {
                     "exit_time": datetime.utcnow(),
                     "exit_price": exit_price,
                     "pnl": round(pnl, 4),
                     "pnl_inr": round(pnl_inr, 2),
                     "sirusu_exit_signal": sirusu_signal_text,
                     "is_closed": True
-                }
+                })
             
-                await update_algo_activity(str(activity["_id"]), update_data)
-            
-                logger.info(f"💰 Trade PnL: ${pnl:.4f} (₹{pnl_inr:.2f})")
-            
-            # ✅ STEP 4: CLEANUP - If specific order wasn't found, clean ALL orphaned stop orders
-            logger.info(f"🧹 [STEP 4] Cleaning up any remaining orphaned stop orders...")
-        
-            from api.orders import cancel_all_orphaned_stop_orders
-        
-            orphaned_cancelled = await cancel_all_orphaned_stop_orders(client, product_id)
-        
-            if orphaned_cancelled > 0:
-                logger.warning(f"⚠️ Had to clean up {orphaned_cancelled} orphaned stop orders!")
-                logger.warning(f"   This indicates stop-loss order ID wasn't properly tracked")
-            else:
-                logger.info(f"✅ No orphaned stop orders found")
-            
-            # ✅ STEP 5: RESET ALGO SETUP STATE TO WAITING
-            logger.info(f"🔄 [STEP 4] Resetting bot state...")
+            # ✅ STEP 4: RESET STATE
+            logger.info(f"🔄 Resetting bot state...")
         
             await update_algo_setup(setup_id, {
-                "current_position": None,           # ← Clear position
-                "last_entry_price": None,           # ← Clear entry price
-                "pending_entry_order_id": None,     # ← Clear pending entry
-                "entry_trigger_price": None,        # ← Clear trigger price
-                "stop_loss_order_id": None,         # ← CRITICAL: Clear stop-loss ID!
+                "current_position": None,
+                "last_entry_price": None,
+                "pending_entry_order_id": None,
+                "entry_trigger_price": None,
+                "stop_loss_order_id": None,
                 "last_signal_time": datetime.utcnow()
             })
         
-            logger.info(f"✅ Position closed - Bot back to WAITING state")
-            logger.info(f"=" * 60)
+            logger.info(f"=" * 70)
+            logger.info(f"✅ TRADE COMPLETE - Waiting for next signal")
+            logger.info(f"=" * 70)
         
             return True
         
         except Exception as e:
-            logger.error(f"❌ Exception executing exit: {e}")
+            logger.error(f"❌ Exception: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
