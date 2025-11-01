@@ -157,9 +157,26 @@ async def place_stop_loss_order(client: DeltaExchangeClient, product_id: int,
 
 
 async def get_open_orders(client: DeltaExchangeClient, 
-                         product_id: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
-    """Get all open orders, optionally filtered by product."""
+                         product_id: Optional[int] = None,
+                         include_untriggered: bool = True) -> Optional[List[Dict[str, Any]]]:
+    """
+    Get all open orders, including untriggered stop orders.
+    
+    ✅ FIXED: Now retrieves both "open" AND "untriggered" orders
+    
+    Args:
+        client: Delta Exchange client instance
+        product_id: Optional product ID to filter
+        include_untriggered: Include untriggered stop orders (default True)
+    
+    Returns:
+        List of open/untriggered orders or None
+    """
     try:
+        all_orders = []
+        
+        # ✅ STEP 1: Get OPEN orders
+        logger.info(f"🔍 [STEP 1] Fetching OPEN orders...")
         params = {"state": "open"}
         if product_id:
             params["product_id"] = product_id
@@ -167,15 +184,36 @@ async def get_open_orders(client: DeltaExchangeClient,
         response = await client.get("/v2/orders", params)
         
         if response and response.get("success"):
-            orders = response.get("result", [])
-            logger.info(f"✅ Retrieved {len(orders)} open orders")
-            return orders
+            open_orders = response.get("result", [])
+            logger.info(f"   Found {len(open_orders)} open orders")
+            all_orders.extend(open_orders)
+        else:
+            logger.warning(f"⚠️ Failed to get open orders: {response}")
         
-        logger.error(f"❌ Failed to get open orders: {response}")
-        return None
+        # ✅ STEP 2: Get UNTRIGGERED stop orders
+        if include_untriggered:
+            logger.info(f"🔍 [STEP 2] Fetching UNTRIGGERED stop orders...")
+            params = {"state": "untriggered"}
+            if product_id:
+                params["product_id"] = product_id
+            
+            response = await client.get("/v2/orders", params)
+            
+            if response and response.get("success"):
+                untriggered_orders = response.get("result", [])
+                logger.info(f"   Found {len(untriggered_orders)} untriggered orders")
+                all_orders.extend(untriggered_orders)
+            else:
+                logger.warning(f"⚠️ Failed to get untriggered orders: {response}")
+        
+        logger.info(f"✅ Total orders retrieved: {len(all_orders)}")
+        
+        return all_orders if all_orders else []
         
     except Exception as e:
         logger.error(f"❌ Exception getting open orders: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 
@@ -307,3 +345,59 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
     
     return formatted
     
+
+async def cancel_all_orphaned_stop_orders(client: DeltaExchangeClient, 
+                                         product_id: int) -> int:
+    """
+    Cancel all untriggered stop orders for a product.
+    
+    ✅ Used to clean up orphaned stop-loss orders
+    
+    Args:
+        client: Delta Exchange client instance
+        product_id: Product ID
+    
+    Returns:
+        Number of orders cancelled
+    """
+    try:
+        logger.info(f"🧹 Cleaning up orphaned stop orders for product {product_id}")
+        
+        # Get all untriggered orders
+        params = {"state": "untriggered", "product_id": product_id}
+        response = await client.get("/v2/orders", params)
+        
+        if not response or not response.get("success"):
+            logger.warning(f"⚠️ Failed to get untriggered orders")
+            return 0
+        
+        untriggered_orders = response.get("result", [])
+        logger.info(f"📋 Found {len(untriggered_orders)} untriggered stop orders")
+        
+        if not untriggered_orders:
+            logger.info(f"✅ No orphaned orders to clean up")
+            return 0
+        
+        cancelled_count = 0
+        
+        for order in untriggered_orders:
+            order_id = order.get("id")
+            order_type = order.get("order_type", "unknown")
+            
+            logger.info(f"   Cancelling {order_type} order {order_id}...")
+            
+            if order_id and await cancel_order(client, order_id):
+                cancelled_count += 1
+                logger.info(f"   ✅ Cancelled {order_id}")
+            else:
+                logger.warning(f"   ❌ Failed to cancel {order_id}")
+        
+        logger.info(f"✅ Cleaned up {cancelled_count}/{len(untriggered_orders)} orphaned orders")
+        return cancelled_count
+        
+    except Exception as e:
+        logger.error(f"❌ Exception cancelling orphaned orders: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0
+        
