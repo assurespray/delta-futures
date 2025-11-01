@@ -15,7 +15,7 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
                      side: str, order_type: str = ORDER_TYPE_MARKET,
                      limit_price: Optional[float] = None, 
                      stop_price: Optional[float] = None,
-                     stop_order_type: Optional[str] = None,  # ← ADDED
+                     stop_order_type: Optional[str] = None,
                      reduce_only: bool = False) -> Optional[Dict[str, Any]]:
     """
     Place an order on Delta Exchange.
@@ -76,50 +76,25 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
 
 async def place_market_order(client: DeltaExchangeClient, product_id: int, 
                             size: int, side: str) -> Optional[Dict[str, Any]]:
-    """
-    Place a market order.
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Product ID
-        size: Order size
-        side: "buy" or "sell"
-    
-    Returns:
-        Order response or None
-    """
+    """Place a market order."""
     return await place_order(client, product_id, size, side, ORDER_TYPE_MARKET)
 
 
 async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id: int,
                                         size: int, side: str, 
                                         stop_price: float) -> Optional[Dict[str, Any]]:
-    """
-    Place a stop-market order for breakout entry.
-    ✅ FIXED: Uses correct Delta Exchange format.
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Product ID
-        size: Order size
-        side: "buy" for long breakout, "sell" for short breakout
-        stop_price: Breakout trigger price (candle high/low + 1 pip)
-    
-    Returns:
-        Order response or None
-    """
+    """Place a stop-market order for breakout entry."""
     logger.info(f"🎯 Placing breakout entry: {side.upper()} stop-market @ ${stop_price}")
     
-    # ✅ FIXED: Correct Delta Exchange stop order format
     return await place_order(
         client=client,
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_MARKET,  # ← Use "market_order"
+        order_type=ORDER_TYPE_MARKET,
         stop_price=stop_price,
-        stop_order_type="stop_loss_order",  # ← Add stop_order_type
-        reduce_only=False  # This opens a new position
+        stop_order_type="stop_loss_order",
+        reduce_only=False
     )
 
 
@@ -127,21 +102,7 @@ async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: 
                                       size: int, side: str, 
                                       stop_price: float,
                                       slippage_pct: float = 0.005) -> Optional[Dict[str, Any]]:
-    """
-    Place a stop-limit order for breakout entry (alternative to stop-market).
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Product ID
-        size: Order size
-        side: "buy" for long breakout, "sell" for short breakout
-        stop_price: Breakout trigger price
-        slippage_pct: Allowed slippage percentage (default 0.5%)
-    
-    Returns:
-        Order response or None
-    """
-    # Calculate limit price with slippage buffer
+    """Place a stop-limit order for breakout entry."""
     if side == "buy":
         limit_price = stop_price * (1 + slippage_pct)
     else:
@@ -156,10 +117,10 @@ async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: 
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_LIMIT,  # ← Use "limit_order"
+        order_type=ORDER_TYPE_LIMIT,
         limit_price=limit_price,
         stop_price=stop_price,
-        stop_order_type="stop_loss_order",  # ← Add stop_order_type
+        stop_order_type="stop_loss_order",
         reduce_only=False
     )
 
@@ -167,64 +128,38 @@ async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: 
 async def place_stop_loss_order(client: DeltaExchangeClient, product_id: int,
                                 size: int, side: str, stop_price: float,
                                 use_stop_market: bool = True) -> Optional[Dict[str, Any]]:
-    """
-    Place a reduce-only stop-loss order (STOP-MARKET or STOP-LIMIT).
-    ✅ FIXED: Uses correct Delta Exchange format.
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Product ID
-        size: Order size (should match position size)
-        side: "buy" for short protection, "sell" for long protection
-        stop_price: Stop-loss trigger price (Sirusu value)
-        use_stop_market: True for stop-market (recommended), False for stop-limit
-    
-    Returns:
-        Order response or None
-    """
+    """Place a reduce-only stop-loss order."""
     if use_stop_market:
         logger.info(f"🛡️ Placing stop-loss: {side.upper()} stop-market @ ${stop_price}")
         
-        # ✅ FIXED: Correct format
         return await place_order(
             client=client,
             product_id=product_id,
             size=size,
             side=side,
-            order_type=ORDER_TYPE_MARKET,  # ← Use "market_order"
+            order_type=ORDER_TYPE_MARKET,
             stop_price=stop_price,
-            stop_order_type="stop_loss_order",  # ← Add stop_order_type
+            stop_order_type="stop_loss_order",
             reduce_only=True
         )
     else:
-        # Stop-limit fallback
         return await place_order(
             client=client,
             product_id=product_id,
             size=size,
             side=side,
-            order_type=ORDER_TYPE_LIMIT,  # ← Use "limit_order"
+            order_type=ORDER_TYPE_LIMIT,
             limit_price=stop_price,
             stop_price=stop_price,
-            stop_order_type="stop_loss_order",  # ← Add stop_order_type
+            stop_order_type="stop_loss_order",
             reduce_only=True
         )
 
 
 async def get_open_orders(client: DeltaExchangeClient, 
                          product_id: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
-    """
-    Get all open orders, optionally filtered by product.
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Optional product ID to filter
-    
-    Returns:
-        List of open orders or None
-    """
+    """Get all open orders, optionally filtered by product."""
     try:
-        # Delta API: GET /v2/orders with state filter
         params = {"state": "open"}
         if product_id:
             params["product_id"] = product_id
@@ -247,32 +182,54 @@ async def get_open_orders(client: DeltaExchangeClient,
 async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
     """
     Cancel an order by ID.
-    ✅ FIXED: Gracefully handles 404 errors (order already closed).
+    ✅ FIXED: Properly handles Delta Exchange delete response format.
     
     Args:
         client: Delta Exchange client instance
         order_id: Order ID to cancel
     
     Returns:
-        True if successful, False otherwise
+        True if cancelled successfully, False otherwise
     """
     try:
+        logger.info(f"🔄 Attempting to cancel order: {order_id}")
+        
+        # DELETE request to cancel order
         response = await client.delete(f"/v2/orders/{order_id}")
         
-        if response and response.get("success"):
-            logger.info(f"✅ Order cancelled: {order_id}")
+        # ✅ FIXED: Handle different response formats
+        if response is None:
+            # ✅ None usually means 404 (order already gone - SUCCESS!)
+            logger.info(f"ℹ️ Order {order_id} not found (404) - already cancelled/executed")
             return True
         
-        logger.error(f"❌ Failed to cancel order {order_id}: {response}")
+        if isinstance(response, dict):
+            # Check for success key
+            if response.get("success"):
+                logger.info(f"✅ Order {order_id} cancelled successfully")
+                return True
+            
+            # Check for error/message
+            error_msg = response.get("message") or response.get("error") or str(response)
+            
+            if "404" in error_msg or "not found" in error_msg.lower():
+                logger.info(f"ℹ️ Order {order_id} not found - already closed")
+                return True
+            
+            logger.error(f"❌ Failed to cancel order {order_id}: {error_msg}")
+            return False
+        
+        # Unexpected response format
+        logger.error(f"❌ Unexpected response cancelling order {order_id}: {response}")
         return False
         
     except Exception as e:
         error_msg = str(e)
         
-        # ✅ Handle 404 gracefully (order already filled/cancelled)
+        # ✅ Handle 404 exception gracefully
         if "404" in error_msg or "Not Found" in error_msg:
-            logger.warning(f"⚠️ Order {order_id} already closed (404) - treating as success")
-            return True  # ← Return True since order is already gone
+            logger.info(f"ℹ️ Order {order_id} not found (404 exception) - treating as success")
+            return True
         
         logger.error(f"❌ Exception cancelling order {order_id}: {e}")
         return False
@@ -280,16 +237,7 @@ async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
 
 async def cancel_all_orders(client: DeltaExchangeClient, 
                            product_id: Optional[int] = None) -> int:
-    """
-    Cancel all open orders (optionally for specific product).
-    
-    Args:
-        client: Delta Exchange client instance
-        product_id: Optional product ID to filter orders
-    
-    Returns:
-        Number of orders cancelled
-    """
+    """Cancel all open orders (optionally for specific product)."""
     try:
         orders = await get_open_orders(client, product_id)
         
@@ -313,16 +261,7 @@ async def cancel_all_orders(client: DeltaExchangeClient,
 
 
 async def get_order_by_id(client: DeltaExchangeClient, order_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Get order details by ID.
-    
-    Args:
-        client: Delta Exchange client instance
-        order_id: Order ID
-    
-    Returns:
-        Order details or None
-    """
+    """Get order details by ID."""
     try:
         response = await client.get(f"/v2/orders/{order_id}")
         
@@ -339,15 +278,7 @@ async def get_order_by_id(client: DeltaExchangeClient, order_id: int) -> Optiona
 
 
 async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Format orders for display in Telegram.
-    
-    Args:
-        orders: List of raw order data
-    
-    Returns:
-        List of formatted order data
-    """
+    """Format orders for display in Telegram."""
     formatted = []
     
     for order in orders:
@@ -375,3 +306,4 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
             continue
     
     return formatted
+    
