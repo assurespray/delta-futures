@@ -331,7 +331,8 @@ class PositionManager:
                           sirusu_signal_text: str) -> bool:
         """
         Execute market exit when Sirusu flips.
-        ✅ PURE AUTOMATIC: No cleanup needed, everything happens atomically
+        ✅ OPTIMAL: Market exit FIRST (closes position) + SL cancel SECOND (parallel)
+           This prevents position being unprotected if market moves before SL cancels
         """
         try:
             setup_id = str(algo_setup["_id"])
@@ -339,7 +340,7 @@ class PositionManager:
             lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
             current_position = algo_setup.get("current_position")
-        
+            
             if not current_position:
                 logger.warning(f"⚠️ No current position for {symbol}")
                 return False
@@ -351,48 +352,82 @@ class PositionManager:
             logger.info(f"Position: {current_position.upper()}")
             logger.info(f"Trigger: {sirusu_signal_text}")
         
-            # ✅ STEP 1: CANCEL STOP-LOSS (CRITICAL!)
-            stop_loss_order_id = algo_setup.get("stop_loss_order_id")
+            # ✅ MARKET EXIT TASK (PRIMARY - runs first in parallel)
+            async def market_exit_task():
+                exit_side = "sell" if current_position == "long" else "buy"
+            
+                logger.info(f"📊 [PRIMARY] Placing market exit: {exit_side.upper()} {lot_size}...")
+            
+                try:
+                    order = await place_market_order(client, product_id, lot_size, exit_side)
+                
+                    if not order:
+                        logger.error(f"❌ Exit order failed!")
+                        return None
+                
+                    exit_price = float(order.get("average_fill_price", 0))
+                    if exit_price == 0:
+                        exit_price = float(order.get("limit_price", 0))
+                
+                    logger.info(f"✅ Position CLOSED @ ${exit_price:.5f}")
+                    return exit_price
+                
+                except Exception as e:
+                    logger.error(f"❌ Market exit error: {e}")
+                    return None
         
-            if stop_loss_order_id:
-                # Ensure it's an int
+            # ✅ STOP-LOSS CANCEL TASK (SECONDARY - runs parallel after exit)
+            async def cancel_sl_task():
+                stop_loss_order_id = algo_setup.get("stop_loss_order_id")
+            
+                if not stop_loss_order_id:
+                    logger.info(f"ℹ️ No stop-loss to cancel")
+                    return True
+            
+                # Convert to int if needed
                 if isinstance(stop_loss_order_id, str):
                     try:
                         stop_loss_order_id = int(stop_loss_order_id)
                     except (ValueError, TypeError):
-                        stop_loss_order_id = None
+                        return True
             
-                if stop_loss_order_id:
-                    logger.info(f"🔄 Cancelling stop-loss order {stop_loss_order_id}...")
-                
-                    from api.orders import cancel_order
-                
-                    try:
-                        await cancel_order(client, stop_loss_order_id)
+                logger.info(f"🔄 [SECONDARY] Cancelling stop-loss {stop_loss_order_id}...")
+            
+                from api.orders import cancel_order
+            
+                try:
+                    result = await cancel_order(client, stop_loss_order_id)
+                    if result:
                         logger.info(f"✅ Stop-loss cancelled")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Stop-loss cancel: {e}")
-                        # Continue anyway - order might have already triggered
+                    else:
+                        logger.info(f"ℹ️ Stop-loss not found (likely filled)")
+                    return result
+                
+                except Exception as e:
+                    logger.warning(f"⚠️ SL cancel error: {e}")
+                    return True  # Continue anyway - position is already closed
         
-            # ✅ STEP 2: EXECUTE MARKET EXIT
-            exit_side = "sell" if current_position == "long" else "buy"
+            # ⚡ PARALLEL EXECUTION: Exit FIRST priority, SL cancel SECOND
+            import asyncio
         
-            logger.info(f"📊 Placing market exit order...")
-            logger.info(f"   Order: {exit_side.upper()} {lot_size} contracts @ market")
+            logger.info(f"⚡ Starting parallel: exit + SL cancel...")
         
-            order = await place_market_order(client, product_id, lot_size, exit_side)
+            exit_price, sl_result = await asyncio.gather(
+                market_exit_task(),
+                cancel_sl_task(),
+                return_exceptions=False
+            )
         
-            if not order:
-                logger.error(f"❌ FAILED: Exit order could not be placed")
+            # ✅ Exit must succeed (position critical)
+            if exit_price is None:
+                logger.error(f"❌ FAILED: Position not closed - cannot proceed")
                 return False
         
-            exit_price = float(order.get("average_fill_price", 0))
-            if exit_price == 0:
-                exit_price = float(order.get("limit_price", 0))
-        
-            logger.info(f"✅ Exit executed @ ${exit_price:.5f}")
+            logger.info(f"✅ Core operations complete: exit closed, SL cancel sent")
         
             # ✅ STEP 3: RECORD EXIT & CALCULATE PnL
+            logger.info(f"💾 [STEP 3] Recording exit activity...")
+        
             activity = await get_open_activity_by_setup(setup_id)
         
             if activity:
@@ -410,9 +445,9 @@ class PositionManager:
                     "sirusu_exit_signal": sirusu_signal_text,
                     "is_closed": True
                 })
-            
+        
             # ✅ STEP 4: RESET STATE
-            logger.info(f"🔄 Resetting bot state...")
+            logger.info(f"🔄 [STEP 4] Resetting bot state...")
         
             await update_algo_setup(setup_id, {
                 "current_position": None,
@@ -424,7 +459,7 @@ class PositionManager:
             })
         
             logger.info(f"=" * 70)
-            logger.info(f"✅ TRADE COMPLETE - Waiting for next signal")
+            logger.info(f"✅ TRADE COMPLETE - Position closed + SL cleaned")
             logger.info(f"=" * 70)
         
             return True
@@ -434,7 +469,7 @@ class PositionManager:
             import traceback
             logger.error(traceback.format_exc())
             return False
-            
+         
     def _calculate_pnl(self, entry_price: float, exit_price: float, 
                       lot_size: int, position_side: str) -> float:
         """
