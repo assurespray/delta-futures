@@ -42,14 +42,6 @@ from handlers.screener_setup import (
     SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_ASSET_TYPE,
     SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
 )
-from handlers.cleanup import (
-    cleanup_menu_callback,
-    cleanup_select_api_callback,
-    cleanup_start_callback,
-    cleanup_confirm_callback,
-    cleanup_view_orders_callback,
-    cleanup_view_start_callback
-)
 from handlers.algo_activity import algo_activity_callback
 
 logger = logging.getLogger(__name__)
@@ -185,14 +177,6 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(screener_delete_list_callback, pattern="^screener_delete_list$"))
     application.add_handler(CallbackQueryHandler(screener_delete_confirm_callback, pattern="^screener_delete_confirm_"))
     
-    # Register callbacks
-    app.add_handler(CallbackQueryHandler(cleanup_menu_callback, pattern="^cleanup_menu_callback$"))
-    app.add_handler(CallbackQueryHandler(cleanup_select_api_callback, pattern="^cleanup_select_api$"))
-    app.add_handler(CallbackQueryHandler(cleanup_start_callback, pattern="^cleanup_start_"))
-    app.add_handler(CallbackQueryHandler(cleanup_confirm_callback, pattern="^cleanup_confirm_"))
-    app.add_handler(CallbackQueryHandler(cleanup_view_orders_callback, pattern="^cleanup_view_orders_callback$"))
-    app.add_handler(CallbackQueryHandler(cleanup_view_start_callback, pattern="^cleanup_view_start_"))
-   
     # Algo Activity handler
     application.add_handler(CallbackQueryHandler(algo_activity_callback, pattern="^menu_algo_activity$"))
     
