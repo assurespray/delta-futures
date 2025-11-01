@@ -81,7 +81,6 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
         ],
         [
-            InlineKeyboardButton("🧹 Cleanup", callback_data="cleanup_menu_callback"),  # ← NEW!
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
