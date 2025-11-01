@@ -428,7 +428,20 @@ class PositionManager:
             
                 logger.info(f"💰 Trade PnL: ${pnl:.4f} (₹{pnl_inr:.2f})")
             
-            # ✅ STEP 4: RESET ALGO SETUP STATE TO WAITING
+            # ✅ STEP 4: CLEANUP - If specific order wasn't found, clean ALL orphaned stop orders
+            logger.info(f"🧹 [STEP 4] Cleaning up any remaining orphaned stop orders...")
+        
+            from api.orders import cancel_all_orphaned_stop_orders
+        
+            orphaned_cancelled = await cancel_all_orphaned_stop_orders(client, product_id)
+        
+            if orphaned_cancelled > 0:
+                logger.warning(f"⚠️ Had to clean up {orphaned_cancelled} orphaned stop orders!")
+                logger.warning(f"   This indicates stop-loss order ID wasn't properly tracked")
+            else:
+                logger.info(f"✅ No orphaned stop orders found")
+            
+            # ✅ STEP 5: RESET ALGO SETUP STATE TO WAITING
             logger.info(f"🔄 [STEP 4] Resetting bot state...")
         
             await update_algo_setup(setup_id, {
