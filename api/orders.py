@@ -219,57 +219,32 @@ async def get_open_orders(client: DeltaExchangeClient,
 
 async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
     """
-    Cancel an order by ID.
-    ✅ FIXED: Properly handles Delta Exchange delete response format.
-    
-    Args:
-        client: Delta Exchange client instance
-        order_id: Order ID to cancel
-    
-    Returns:
-        True if cancelled successfully, False otherwise
+    Cancel an order.
+    ✅ Returns True if cancelled OR already gone (404 is success)
     """
     try:
-        logger.info(f"🔄 Attempting to cancel order: {order_id}")
+        if isinstance(order_id, str):
+            order_id = int(order_id)
         
-        # DELETE request to cancel order
         response = await client.delete(f"/v2/orders/{order_id}")
         
-        # ✅ FIXED: Handle different response formats
         if response is None:
-            # ✅ None usually means 404 (order already gone - SUCCESS!)
-            logger.info(f"ℹ️ Order {order_id} not found (404) - already cancelled/executed")
+            return True  # 404 - order already gone
+        
+        if isinstance(response, dict) and response.get("success"):
             return True
         
         if isinstance(response, dict):
-            # Check for success key
-            if response.get("success"):
-                logger.info(f"✅ Order {order_id} cancelled successfully")
+            msg = response.get("message", "") or response.get("error", "")
+            if "404" in msg or "not found" in msg.lower():
                 return True
-            
-            # Check for error/message
-            error_msg = response.get("message") or response.get("error") or str(response)
-            
-            if "404" in error_msg or "not found" in error_msg.lower():
-                logger.info(f"ℹ️ Order {order_id} not found - already closed")
-                return True
-            
-            logger.error(f"❌ Failed to cancel order {order_id}: {error_msg}")
-            return False
         
-        # Unexpected response format
-        logger.error(f"❌ Unexpected response cancelling order {order_id}: {response}")
         return False
         
     except Exception as e:
-        error_msg = str(e)
-        
-        # ✅ Handle 404 exception gracefully
-        if "404" in error_msg or "Not Found" in error_msg:
-            logger.info(f"ℹ️ Order {order_id} not found (404 exception) - treating as success")
+        if "404" in str(e):
             return True
-        
-        logger.error(f"❌ Exception cancelling order {order_id}: {e}")
+        logger.error(f"❌ Cancel error: {e}")
         return False
 
 
