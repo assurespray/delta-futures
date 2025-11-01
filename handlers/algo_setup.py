@@ -574,3 +574,32 @@ async def cancel_algo_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /start to return to main menu."
     )
     return ConversationHandler.END
+
+
+async def cleanup_orphaned_stop_orders_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Manual cleanup of orphaned stop orders.
+    Usage: /cleanup_stops <product_id>
+    """
+    try:
+        if len(context.args) < 1:
+            await update.message.reply_text("Usage: /cleanup_stops <product_id>")
+            return
+        
+        product_id = int(context.args[0])
+        
+        # Get client
+        client = DeltaExchangeClient(api_key="...", api_secret="...")
+        
+        from api.orders import cancel_all_orphaned_stop_orders
+        
+        cancelled = await cancel_all_orphaned_stop_orders(client, product_id)
+        
+        await update.message.reply_text(
+            f"✅ Cleaned up {cancelled} orphaned stop orders for product {product_id}"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
+        
