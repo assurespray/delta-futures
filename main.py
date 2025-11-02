@@ -47,19 +47,16 @@ async def lifespan(app: FastAPI):
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
         
-        # ✅ NEW: Initialize position lock indexes
+        # ✅ FIXED: Call setup_position_lock_indexes as classmethod (NOT imported)
         logger.info("🔐 Setting up position lock system...")
-        from database.crud import get_db
-        from database.mongodb import setup_position_lock_indexes
-        
-        db = await get_db()
-        await setup_position_lock_indexes(db)
+        await mongodb.setup_position_lock_indexes()
         logger.info("✅ Position lock indexes created")
         
         # ✅ NEW: Clean stale locks from previous crashes
         logger.info("🧹 Cleaning stale position locks...")
         from database.crud import cleanup_stale_locks
         
+        db = mongodb.get_db()
         cleaned = await cleanup_stale_locks(db, max_age_minutes=60)
         if cleaned > 0:
             logger.warning(f"🧹 Cleaned {cleaned} stale position locks from previous session")
@@ -142,11 +139,8 @@ async def lifespan(app: FastAPI):
     try:
         # ✅ NEW: Release all position locks on shutdown
         logger.info("🔐 Releasing all position locks...")
-        from database.crud import get_db, cleanup_stale_locks
         
-        db = await get_db()
-        
-        # Clean all locks (not just stale ones)
+        db = mongodb.get_db()
         collection = db["position_locks"]
         result = await collection.delete_many({})
         
@@ -316,14 +310,15 @@ async def health_check_get():
         JSON with health status and metrics
     """
     from datetime import datetime
-    from database.crud import get_all_active_algo_setups, get_db
     
     try:
+        from database.crud import get_all_active_algo_setups
+        
         active_setups = await get_all_active_algo_setups()
         active_count = len(active_setups) if active_setups else 0
         
         # Get position lock count
-        db = await get_db()
+        db = mongodb.get_db()
         collection = db["position_locks"]
         lock_count = await collection.count_documents({})
         
@@ -373,5 +368,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-        )
+)
     
