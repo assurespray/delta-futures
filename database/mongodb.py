@@ -1,4 +1,4 @@
-"""MongoDB connection and database initialization."""
+"""MongoDB connection and database initialization with asset lock support."""
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from config.settings import settings
@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class MongoDB:
-    """MongoDB connection manager."""
+    """MongoDB connection manager with asset lock support."""
     
     client: AsyncIOMotorClient = None
     db = None
@@ -30,6 +30,9 @@ class MongoDB:
             
             # Create indexes
             await cls.create_indexes()
+            
+            # ✅ NEW: Setup position lock indexes
+            await cls.setup_position_lock_indexes()
             
         except Exception as e:
             logger.error(f"❌ Failed to connect to MongoDB: {e}")
@@ -70,10 +73,11 @@ class MongoDB:
         except Exception as e:
             logger.warning(f"⚠️ Failed to create indexes: {e}")
 
-    async def setup_position_lock_indexes(db):
-        """Set up unique index for position locks."""
+    @classmethod
+    async def setup_position_lock_indexes(cls):
+        """✅ NEW: Set up unique index for position locks."""
         try:
-            collection = db["position_locks"]
+            collection = cls.db["position_locks"]
         
             # Create unique index on symbol (only one lock per symbol)
             await collection.create_index(
@@ -85,7 +89,7 @@ class MongoDB:
             logger.info("✅ Position lock indexes created")
         
         except Exception as e:
-            logger.error(f"❌ Error creating indexes: {e}")
+            logger.error(f"❌ Error creating position lock indexes: {e}")
     
     @classmethod
     def get_db(cls):
@@ -97,3 +101,4 @@ class MongoDB:
 
 # Singleton instance
 mongodb = MongoDB()
+        
