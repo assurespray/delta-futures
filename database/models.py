@@ -1,4 +1,4 @@
-"""Pydantic models for database schemas."""
+"""Pydantic models for database schemas with asset lock support."""
 
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -57,17 +57,32 @@ class AlgoSetup(BaseModel):
     lot_size: int
     additional_protection: bool
     is_active: bool = True
+    
+    # ========== POSITION STATE ==========
     current_position: Optional[str] = None  # "long", "short", None
     last_entry_price: Optional[float] = None
     last_signal_time: Optional[datetime] = None
     
-    # ✅ NEW: Track last Perusu signal state
+    # ========== ENTRY ORDER TRACKING ==========
+    # ✅ Track last Perusu signal state
     last_perusu_signal: Optional[int] = None  # 1=uptrend, -1=downtrend
+    
+    # ✅ Pending breakout entry order
     pending_entry_order_id: Optional[int] = None  # Stop-market entry order ID
     entry_trigger_price: Optional[float] = None  # Breakout trigger price
-
-    # ✅ FIXED: Track stop-loss order ID for proper cancellation
+    pending_entry_direction_signal: Optional[int] = None  # 1 for long, -1 for short
+    
+    # ========== STOP-LOSS TRACKING ==========
+    # ✅ FIXED: Track stop-loss order ID for proper cancellation and state sync
     stop_loss_order_id: Optional[int] = None  # Stop-loss order ID (for cancellation)
+    
+    # ========== ASSET LOCK TRACKING (✅ NEW) ==========
+    # ✅ Track if position lock is held on the asset
+    position_lock_acquired: bool = False  # Whether this setup holds the asset lock
+    
+    # ========== PERIODIC SYNC ==========
+    # ✅ Last position sync (for periodic state validation)
+    last_position_sync: Optional[datetime] = None  # Last exchange position verification
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -94,7 +109,7 @@ class AlgoActivity(BaseModel):
     pnl: Optional[float] = None  # In USD
     pnl_inr: Optional[float] = None  # In INR
     perusu_entry_signal: str  # "uptrend" or "downtrend"
-    sirusu_exit_signal: Optional[str] = None  # "uptrend" or "downtrend"
+    sirusu_exit_signal: Optional[str] = None  # "uptrend" or "downtrend" or stop-loss reason
     asset: str
     trade_date: str  # YYYY-MM-DD format
     is_closed: bool = False
@@ -150,28 +165,64 @@ class ScreenerSetup(BaseModel):
         populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
-        
 
-class PositionLock:
+
+class PositionLock(BaseModel):
     """
-    Global asset position lock to prevent multi-timeframe conflicts.
+    ✅ NEW: Global asset position lock to prevent multi-timeframe conflicts.
     Only ONE setup can trade an asset at a time.
+    
+    Stored in MongoDB as documents:
+    {
+        "_id": ObjectId(...),
+        "symbol": "ADAUSD",
+        "setup_id": "123abc...",
+        "setup_name": "ADA Scalper",
+        "locked_at": datetime.utcnow()
+    }
     """
     
-    def __init__(self, 
-                 symbol: str,
-                 setup_id: str,
-                 setup_name: str,
-                 locked_at: datetime = None):
-        """
-        Args:
-            symbol: Asset symbol (e.g., "ADAUSD")
-            setup_id: ID of the setup owning this lock
-            setup_name: Name of setup (for logging)
-            locked_at: When lock was acquired
-        """
-        self.symbol = symbol
-        self.setup_id = setup_id
-        self.setup_name = setup_name
-        self.locked_at = locked_at or datetime.utcnow()
-                     
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    symbol: str  # Asset symbol (e.g., "ADAUSD")
+    setup_id: str  # ID of the setup owning this lock
+    setup_name: str  # Name of setup (for logging/display)
+    locked_at: datetime = Field(default_factory=datetime.utcnow)  # When lock was acquired
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
+
+
+# ========== SUMMARY OF FIELDS ==========
+"""
+AlgoSetup Fields Organization:
+
+POSITION STATE:
+  - current_position: "long", "short", or None
+  - last_entry_price: Entry price
+  - last_signal_time: When signal triggered
+
+ENTRY TRACKING:
+  - last_perusu_signal: 1 (uptrend) or -1 (downtrend)
+  - pending_entry_order_id: Breakout stop-market order
+  - entry_trigger_price: Breakout price (candle high/low + pip)
+  - pending_entry_direction_signal: 1 or -1
+
+STOP-LOSS TRACKING:
+  - stop_loss_order_id: For cancellation on exit
+
+ASSET LOCK (✅ NEW):
+  - position_lock_acquired: Boolean flag
+  - Prevents multi-timeframe conflicts
+
+SYNC TRACKING:
+  - last_position_sync: For periodic validation
+
+Exit Detection Logic:
+  1. Check position exists on exchange
+  2. Check if SL order was filled (via position check)
+  3. If position size = 0 → SL triggered → sync state
+  4. If position exists → execute market exit
+  5. Release lock after exit
+"""
