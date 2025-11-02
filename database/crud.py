@@ -1,4 +1,4 @@
-"""CRUD operations for database collections."""
+"""CRUD operations for database collections with asset lock support."""
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -13,6 +13,13 @@ logger = logging.getLogger(__name__)
 
 # Initialize Fernet cipher for encryption
 cipher_suite = Fernet(settings.encryption_key.encode())
+
+
+# ==================== Helper Functions ====================
+
+async def get_db() -> AsyncIOMotorDatabase:
+    """Get database instance safely."""
+    return mongodb.get_db()
 
 
 # ==================== API Credentials CRUD ====================
@@ -327,6 +334,7 @@ async def get_indicator_cache(algo_setup_id: str, indicator_name: str) -> Option
         logger.error(f"❌ Failed to get indicator cache: {e}")
         return None
 
+
 # ==================== Screener Setups CRUD ====================
 
 async def create_screener_setup(setup_data: Dict[str, Any]) -> str:
@@ -427,12 +435,14 @@ async def get_all_active_screener_setups() -> List[Dict[str, Any]]:
         return []
         
 
+# ==================== Position Locks CRUD (✅ NEW) ====================
+
 async def acquire_position_lock(db: AsyncIOMotorDatabase,
                                symbol: str,
                                setup_id: str,
                                setup_name: str) -> bool:
     """
-    Acquire exclusive lock on asset for this setup.
+    ✅ NEW: Acquire exclusive lock on asset for this setup.
     Only ONE setup can trade this asset at a time.
     
     Args:
@@ -475,7 +485,7 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
 async def get_position_lock(db: AsyncIOMotorDatabase,
                            symbol: str) -> Optional[dict]:
     """
-    Get lock information for an asset.
+    ✅ NEW: Get lock information for an asset.
     
     Returns:
         Lock record or None if not locked
@@ -494,7 +504,7 @@ async def release_position_lock(db: AsyncIOMotorDatabase,
                                symbol: str,
                                setup_id: str) -> bool:
     """
-    Release lock when position is closed.
+    ✅ NEW: Release lock when position is closed.
     
     Args:
         db: MongoDB database connection
@@ -527,7 +537,7 @@ async def release_position_lock(db: AsyncIOMotorDatabase,
 async def cleanup_stale_locks(db: AsyncIOMotorDatabase,
                              max_age_minutes: int = 60) -> int:
     """
-    Clean up stale locks (in case setup crashes without releasing).
+    ✅ NEW: Clean up stale locks (in case setup crashes without releasing).
     
     Args:
         db: MongoDB database connection
@@ -537,8 +547,6 @@ async def cleanup_stale_locks(db: AsyncIOMotorDatabase,
         Number of locks cleaned up
     """
     try:
-        from datetime import timedelta
-        
         collection = db["position_locks"]
         cutoff_time = datetime.utcnow() - timedelta(minutes=max_age_minutes)
         
