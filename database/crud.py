@@ -4,9 +4,10 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from bson import ObjectId
 from database.mongodb import mongodb
-from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCache
+from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCache, PositionLock
 from cryptography.fernet import Fernet
 from config.settings import settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -425,4 +426,132 @@ async def get_all_active_screener_setups() -> List[Dict[str, Any]]:
         logger.error(f"❌ Failed to get all active screener setups: {e}")
         return []
         
-      
+
+async def acquire_position_lock(db: AsyncIOMotorDatabase,
+                               symbol: str,
+                               setup_id: str,
+                               setup_name: str) -> bool:
+    """
+    Acquire exclusive lock on asset for this setup.
+    Only ONE setup can trade this asset at a time.
+    
+    Args:
+        db: MongoDB database connection
+        symbol: Asset symbol (e.g., "ADAUSD")
+        setup_id: Setup ID requesting lock
+        setup_name: Setup name (for logging)
+    
+    Returns:
+        True if lock acquired, False if already locked
+    """
+    try:
+        collection = db["position_locks"]
+        
+        # Try to insert lock (unique index prevents duplicates)
+        lock_data = {
+            "symbol": symbol,
+            "setup_id": setup_id,
+            "setup_name": setup_name,
+            "locked_at": datetime.utcnow()
+        }
+        
+        result = await collection.insert_one(lock_data)
+        
+        logger.info(f"✅ Acquired lock on {symbol} for {setup_name}")
+        return True
+        
+    except Exception as e:
+        if "duplicate" in str(e).lower():
+            # Lock already exists - get who owns it
+            lock = await get_position_lock(db, symbol)
+            if lock:
+                logger.error(f"❌ {symbol} is LOCKED by: {lock['setup_name']}")
+            return False
+        
+        logger.error(f"⚠️ Error acquiring lock: {e}")
+        raise
+
+
+async def get_position_lock(db: AsyncIOMotorDatabase,
+                           symbol: str) -> Optional[dict]:
+    """
+    Get lock information for an asset.
+    
+    Returns:
+        Lock record or None if not locked
+    """
+    try:
+        collection = db["position_locks"]
+        lock = await collection.find_one({"symbol": symbol})
+        return lock
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting lock: {e}")
+        return None
+
+
+async def release_position_lock(db: AsyncIOMotorDatabase,
+                               symbol: str,
+                               setup_id: str) -> bool:
+    """
+    Release lock when position is closed.
+    
+    Args:
+        db: MongoDB database connection
+        symbol: Asset symbol
+        setup_id: Setup ID releasing lock
+    
+    Returns:
+        True if lock released, False if error
+    """
+    try:
+        collection = db["position_locks"]
+        
+        result = await collection.delete_one({
+            "symbol": symbol,
+            "setup_id": setup_id
+        })
+        
+        if result.deleted_count > 0:
+            logger.info(f"✅ Released lock on {symbol}")
+            return True
+        else:
+            logger.warning(f"⚠️ Lock not found for {symbol}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"❌ Error releasing lock: {e}")
+        return False
+
+
+async def cleanup_stale_locks(db: AsyncIOMotorDatabase,
+                             max_age_minutes: int = 60) -> int:
+    """
+    Clean up stale locks (in case setup crashes without releasing).
+    
+    Args:
+        db: MongoDB database connection
+        max_age_minutes: Max age of lock before cleanup
+    
+    Returns:
+        Number of locks cleaned up
+    """
+    try:
+        from datetime import timedelta
+        
+        collection = db["position_locks"]
+        cutoff_time = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+        
+        result = await collection.delete_many({
+            "locked_at": {"$lt": cutoff_time}
+        })
+        
+        if result.deleted_count > 0:
+            logger.warning(f"🧹 Cleaned up {result.deleted_count} stale locks")
+        
+        return result.deleted_count
+        
+    except Exception as e:
+        logger.error(f"❌ Error cleaning locks: {e}")
+        return 0
+        
