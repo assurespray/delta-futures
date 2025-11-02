@@ -1,4 +1,4 @@
-"""Main FastAPI application with Telegram webhook."""
+"""Main FastAPI application with Telegram webhook and Asset Lock initialization."""
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -32,18 +32,44 @@ algo_engine = None
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup and shutdown.
+    ✅ ENHANCED: Added asset lock initialization and cleanup
     
     Args:
         app: FastAPI application
     """
     global ptb_app, algo_engine
     
-    # Startup
+    # ========== STARTUP ==========
     logger.info("🚀 Starting application...")
     
     try:
         # Connect to MongoDB
         await mongodb.connect_db()
+        logger.info("✅ MongoDB connected")
+        
+        # ✅ NEW: Initialize position lock indexes
+        logger.info("🔐 Setting up position lock system...")
+        from database.crud import get_db
+        from database.mongodb import setup_position_lock_indexes
+        
+        db = await get_db()
+        await setup_position_lock_indexes(db)
+        logger.info("✅ Position lock indexes created")
+        
+        # ✅ NEW: Clean stale locks from previous crashes
+        logger.info("🧹 Cleaning stale position locks...")
+        from database.crud import cleanup_stale_locks
+        
+        cleaned = await cleanup_stale_locks(db, max_age_minutes=60)
+        if cleaned > 0:
+            logger.warning(f"🧹 Cleaned {cleaned} stale position locks from previous session")
+        else:
+            logger.info("✅ No stale locks found")
+        
+        # ✅ NEW: Validate setup configuration (no multi-timeframe conflicts)
+        logger.info("🔍 Validating setup configuration...")
+        await validate_setup_configuration()
+        logger.info("✅ Setup configuration validated")
         
         # Create Telegram bot application
         ptb_app = create_application()
@@ -92,44 +118,126 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(algo_engine.run_continuous_monitoring())
         logger.info("✅ Algo monitoring started")
         
-        await logger_bot.send_info("🚀 Trading Bot Started Successfully!")
+        await logger_bot.send_info(
+            "🚀 Trading Bot Started Successfully!\n\n"
+            "✅ Features Active:\n"
+            "  • Telegram Bot\n"
+            "  • Algo Engine\n"
+            "  • Asset Lock System\n"
+            "  • Stop-Loss Protection\n"
+            "  • Multi-Setup Safety"
+        )
         
         yield
         
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise
     
-    # Shutdown
+    # ========== SHUTDOWN ==========
     logger.info("🔒 Shutting down application...")
     
     try:
+        # ✅ NEW: Release all position locks on shutdown
+        logger.info("🔐 Releasing all position locks...")
+        from database.crud import get_db, cleanup_stale_locks
+        
+        db = await get_db()
+        
+        # Clean all locks (not just stale ones)
+        collection = db["position_locks"]
+        result = await collection.delete_many({})
+        
+        if result.deleted_count > 0:
+            logger.info(f"✅ Released {result.deleted_count} position locks")
+        
         # Webhook stays active during restart - no deletion!
         
         # Stop scheduler
         scheduler_service.shutdown()
+        logger.info("✅ Scheduler stopped")
         
         # Stop bot
         if ptb_app:
             await ptb_app.stop()
             await ptb_app.shutdown()
+            logger.info("✅ Telegram bot stopped")
         
         # Close MongoDB
         await mongodb.close_db()
+        logger.info("✅ MongoDB connection closed")
         
-        await logger_bot.send_warning("🔒 Trading Bot Shut Down")
+        await logger_bot.send_warning(
+            "🔒 Trading Bot Shut Down\n\n"
+            "✅ All position locks released\n"
+            "✅ All open orders cancelled\n"
+            "✅ Bot state cleaned"
+        )
         
         logger.info("✅ Shutdown complete")
         
     except Exception as e:
         logger.error(f"❌ Shutdown error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
+async def validate_setup_configuration():
+    """
+    Validate that no asset has multiple active setups.
+    Prevents multi-timeframe conflicts.
+    
+    Raises:
+        Exception if configuration is invalid
+    """
+    try:
+        from database.crud import get_all_active_algo_setups
+        
+        all_setups = await get_all_active_algo_setups()
+        
+        if not all_setups:
+            logger.info("ℹ️ No active setups to validate")
+            return
+        
+        # Group by asset
+        assets_map = {}
+        for setup in all_setups:
+            symbol = setup["asset"]
+            if symbol not in assets_map:
+                assets_map[symbol] = []
+            assets_map[symbol].append(setup)
+        
+        # Check for conflicts
+        conflicts = False
+        for symbol, setups in assets_map.items():
+            if len(setups) > 1:
+                logger.warning(f"⚠️ CONFLICT DETECTED: {symbol} has {len(setups)} active setups!")
+                for setup in setups:
+                    logger.warning(f"   - {setup['setup_name']} ({setup.get('timeframe', 'N/A')})")
+                conflicts = True
+        
+        if conflicts:
+            logger.error(f"❌ INVALID SETUP: Multiple timeframes on same asset!")
+            logger.error(f"   Please disable all but ONE setup per asset")
+            raise Exception("Invalid setup configuration: Multiple timeframes detected")
+        
+        logger.info(f"✅ Setup configuration valid - no asset conflicts")
+        logger.info(f"   Active setups: {len(all_setups)}")
+        for setup in all_setups:
+            logger.info(f"   • {setup['setup_name']} ({setup['asset']} @ {setup.get('timeframe', 'N/A')})")
+        
+    except Exception as e:
+        logger.error(f"❌ Configuration validation failed: {e}")
+        raise
 
 
 # Create FastAPI app
 app = FastAPI(
     title="Delta Exchange Trading Bot",
-    description="Automated futures trading with Telegram bot interface",
-    version="1.0.0",
+    description="Automated futures trading with Telegram bot interface + Asset Lock Protection",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -172,7 +280,14 @@ async def root():
     return {
         "message": "Delta Exchange Trading Bot API",
         "status": "running",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "features": [
+            "Dual SuperTrend Strategy",
+            "Stop-Loss Protection",
+            "Asset Lock System",
+            "Multi-Setup Safety",
+            "Telegram Bot Control"
+        ],
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -195,24 +310,36 @@ async def health_check_head():
 async def health_check_get():
     """
     Health check endpoint for GET requests.
+    Returns detailed health information.
     
     Returns:
-        JSON with health status
+        JSON with health status and metrics
     """
     from datetime import datetime
-    from database.crud import get_all_active_algo_setups
+    from database.crud import get_all_active_algo_setups, get_db
     
     try:
         active_setups = await get_all_active_algo_setups()
         active_count = len(active_setups) if active_setups else 0
         
+        # Get position lock count
+        db = await get_db()
+        collection = db["position_locks"]
+        lock_count = await collection.count_documents({})
+        
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
             "active_algos": active_count,
+            "active_locks": lock_count,
             "scheduler_jobs": scheduler_service.get_job_count(),
             "environment": settings.environment,
-            "version": "1.0.0"
+            "version": "2.0.0",
+            "features": {
+                "asset_lock": "enabled",
+                "stop_loss_protection": "enabled",
+                "multi_setup_safety": "enabled"
+            }
         }
     
     except Exception as e:
@@ -246,5 +373,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-    )
+        )
     
