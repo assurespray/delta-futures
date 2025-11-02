@@ -320,3 +320,45 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
     
     return formatted
     
+
+async def check_stop_loss_filled(client: DeltaExchangeClient, 
+                                 stop_loss_order_id: Optional[int],
+                                 product_id: int) -> bool:
+    """
+    Check if stop-loss order was already filled/executed.
+    
+    ✅ Returns True if stop-loss is GONE (filled or cancelled)
+    """
+    try:
+        if not stop_loss_order_id:
+            return False
+        
+        if isinstance(stop_loss_order_id, str):
+            try:
+                stop_loss_order_id = int(stop_loss_order_id)
+            except (ValueError, TypeError):
+                return False
+        
+        # Try to get the order
+        response = await client.get(f"/v2/orders/{stop_loss_order_id}")
+        
+        if response is None or not response.get("success"):
+            # 404 - Order doesn't exist (filled or cancelled)
+            return True
+        
+        order = response.get("result", {})
+        order_state = order.get("state", "").lower()
+        
+        # If order is filled, closed, or cancelled - it's GONE
+        if order_state in ["filled", "closed", "cancelled"]:
+            logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} is {order_state}")
+            return True
+        
+        # Order still exists (open or untriggered)
+        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} still {order_state}")
+        return False
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking SL status: {e}")
+        return False
+        
