@@ -278,7 +278,20 @@ class AlgoEngine:
                     logger.info(f"   Position: {current_position.upper()}")
                     logger.info(f"   Trigger: Sirusu flip ({sirusu_data['signal_text']})")
                     logger.info(f"   Exit Price: ${sirusu_data['supertrend_value']:.5f}")
-                
+
+                    # ✅ CRITICAL: Check if stop-loss already filled BEFORE exit
+                    from api.orders import check_stop_loss_filled
+        
+                    sl_filled = await check_stop_loss_filled(
+                        client,
+                        algo_setup.get("stop_loss_order_id"),
+                        algo_setup.get("product_id")
+                    )
+        
+                    if sl_filled:
+                        logger.warning(f"⚠️ Stop-loss already filled - skipping market exit")
+                        logger.info(f"   execute_exit() will handle state sync")
+            
                     # Execute exit
                     exit_start = time.time()
                     success = await self.position_manager.execute_exit(
