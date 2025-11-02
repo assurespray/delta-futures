@@ -69,6 +69,23 @@ class MongoDB:
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to create indexes: {e}")
+
+    async def setup_position_lock_indexes(db):
+        """Set up unique index for position locks."""
+        try:
+            collection = db["position_locks"]
+        
+            # Create unique index on symbol (only one lock per symbol)
+            await collection.create_index(
+                "symbol",
+                unique=True,
+                sparse=True  # Allow multiple null values
+            )
+        
+            logger.info("✅ Position lock indexes created")
+        
+        except Exception as e:
+            logger.error(f"❌ Error creating indexes: {e}")
     
     @classmethod
     def get_db(cls):
