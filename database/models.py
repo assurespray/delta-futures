@@ -151,3 +151,27 @@ class ScreenerSetup(BaseModel):
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
         
+
+class PositionLock:
+    """
+    Global asset position lock to prevent multi-timeframe conflicts.
+    Only ONE setup can trade an asset at a time.
+    """
+    
+    def __init__(self, 
+                 symbol: str,
+                 setup_id: str,
+                 setup_name: str,
+                 locked_at: datetime = None):
+        """
+        Args:
+            symbol: Asset symbol (e.g., "ADAUSD")
+            setup_id: ID of the setup owning this lock
+            setup_name: Name of setup (for logging)
+            locked_at: When lock was acquired
+        """
+        self.symbol = symbol
+        self.setup_id = setup_id
+        self.setup_name = setup_name
+        self.locked_at = locked_at or datetime.utcnow()
+                     
