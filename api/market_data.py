@@ -156,8 +156,20 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
         if not start_time:
             # Calculate based on timeframe and limit
             timeframe_seconds = {
-                "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-                "1h": 3600, "4h": 14400, "1d": 86400
+                "1m": 60,
+                "2m": 120,      # ✅ Added
+                "3m": 180,      # ✅ ADDED - WAS MISSING!
+                "4m": 240,      # ✅ Added
+                "5m": 300,
+                "10m": 600,     # ✅ Added
+                "15m": 900,
+                "20m": 1200,    # ✅ Added
+                "30m": 1800,
+                "45m": 2700,    # ✅ Added
+                "1h": 3600,
+                "2h": 7200,     # ✅ Added
+                "4h": 14400,
+                "1d": 86400,
             }
             seconds_per_candle = timeframe_seconds.get(timeframe, 900)
             
