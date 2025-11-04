@@ -66,38 +66,57 @@ class AlgoEngine:
     
     def get_sleep_time_seconds(self, timeframe: str) -> int:
         """
-        ✅ NEW: Convert timeframe to sleep time in seconds.
-        
-        Maps timeframe strings to their corresponding sleep duration.
+        ✅ COMPREHENSIVE: Convert timeframe to sleep time in seconds.
+    
+        Maps ALL common timeframe strings to their corresponding sleep duration.
         This ensures the bot processes exactly once per candle period.
-        
+    
         Args:
-            timeframe: Timeframe string (e.g., "1m", "5m", "15m", "1h", "1d")
+            timeframe: Timeframe string (e.g., "1m", "5m", "15m", "1h", "1d", "1w")
         
         Returns:
             Sleep time in seconds
         """
         timeframe_map = {
-            "1m": 60,           # 1 minute
-            "3m": 180,          # 3 minutes
-            "5m": 300,          # 5 minutes
-            "10m": 600,         # 10 minutes
-            "15m": 900,         # 15 minutes
-            "30m": 1800,        # 30 minutes
-            "1h": 3600,         # 1 hour
-            "2h": 7200,         # 2 hours
-            "4h": 14400,        # 4 hours
-            "6h": 21600,        # 6 hours
-            "8h": 28800,        # 8 hours
-            "12h": 43200,       # 12 hours
-            "1d": 86400,        # 1 day (24 hours)
-        }
+            # ===== MINUTES =====
+            "1m": 60,              # 1 minute
+            "2m": 120,             # 2 minutes
+            "3m": 180,             # 3 minutes
+            "4m": 240,             # 4 minutes
+            "5m": 300,             # 5 minutes
+            "10m": 600,            # 10 minutes
+            "15m": 900,            # 15 minutes
+            "20m": 1200,           # 20 minutes
+            "30m": 1800,           # 30 minutes
+            "45m": 2700,           # 45 minutes
         
+            # ===== HOURS =====
+            "1h": 3600,            # 1 hour
+            "2h": 7200,            # 2 hours
+            "3h": 10800,           # 3 hours
+            "4h": 14400,           # 4 hours
+            "6h": 21600,           # 6 hours
+            "8h": 28800,           # 8 hours
+            "12h": 43200,          # 12 hours
+        
+            # ===== DAYS =====
+            "1d": 86400,           # 1 day (24 hours)
+            "2d": 172800,          # 2 days
+            "3d": 259200,          # 3 days
+            "7d": 604800,          # 7 days (1 week)
+        
+            # ===== WEEKS & MONTHS =====
+            "1w": 604800,          # 1 week
+            "2w": 1209600,         # 2 weeks
+            "1mo": 2592000,        # 1 month (30 days)
+        }
+    
         # Get sleep time from map, default to 60s if unknown
         sleep_seconds = timeframe_map.get(timeframe, 60)
-        logger.debug(f"⏱️ Sleep time for timeframe '{timeframe}': {sleep_seconds}s")
-        
+        logger.debug(f"⏱️ Sleep time for timeframe '{timeframe}': {sleep_seconds}s ({sleep_seconds/60:.1f} minutes)")
+    
         return sleep_seconds
+
     
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         """
