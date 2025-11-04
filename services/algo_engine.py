@@ -162,7 +162,8 @@ class AlgoEngine:
         self.signal_counts["boundary_hits"] += 1
         tf_display = get_timeframe_display_name(timeframe)
         logger.info(f"✅ [{setup_name}] At {tf_display} boundary - Processing {asset}")
-        logger.info(f"📊 [TEST] Session stats: {self._format_stats()}")
+        # ✅ COMMENTED OUT - SAVES ~0.01s
+        # logger.info(f"📊 [TEST] Session stats: {self._format_stats()}")
     
         try:
             # Get API credentials
@@ -192,8 +193,8 @@ class AlgoEngine:
             indicator_result = await self.strategy.calculate_indicators(client, asset, timeframe)
             indicator_time = time.time() - indicator_start
         
-            # ✅ TESTING: Log indicator calculation time
-            logger.info(f"⏱️ [TEST] Indicator calculation: {indicator_time:.3f}s")
+            # ✅ COMMENTED OUT - SAVES ~0.01s
+            # logger.info(f"⏱️ [TEST] Indicator calculation: {indicator_time:.3f}s")
         
             if not indicator_result:
                 logger.warning(f"⚠️ Failed to calculate indicators for {setup_name}")
@@ -204,12 +205,12 @@ class AlgoEngine:
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
         
-            # ✅ TESTING: Log indicator details
-            logger.info(f"📈 [TEST] Indicator Details:")
-            logger.info(f"   Perusu: {perusu_data['signal_text']} (Value: ${perusu_data['supertrend_value']:.5f})")
-            logger.info(f"   Sirusu: {sirusu_data['signal_text']} (Value: ${sirusu_data['supertrend_value']:.5f})")
-            logger.info(f"   Price: ${perusu_data['latest_close']:.5f}")
-            logger.info(f"   ATR: {perusu_data['atr']:.6f}")
+            # ✅ COMMENTED OUT - SAVES ~0.03s
+            # logger.info(f"📈 [TEST] Indicator Details:")
+            # logger.info(f"   Perusu: {perusu_data['signal_text']} (Value: ${perusu_data['supertrend_value']:.5f})")
+            # logger.info(f"   Sirusu: {sirusu_data['signal_text']} (Value: ${sirusu_data['supertrend_value']:.5f})")
+            # logger.info(f"   Price: ${perusu_data['latest_close']:.5f}")
+            # logger.info(f"   ATR: {perusu_data['atr']:.6f}")
         
             # ✅ CHECK PENDING ENTRY ORDER (if not in position)
             if not current_position:
@@ -221,9 +222,9 @@ class AlgoEngine:
                     logger_bot=self.logger_bot
                 )
             
-                # ✅ TESTING: Log pending order status
-                if pending_order_status:
-                    logger.info(f"📋 [TEST] Pending order status: {pending_order_status}")
+                # ✅ COMMENTED OUT - SAVES ~0.01s
+                # if pending_order_status:
+                #     logger.info(f"📋 [TEST] Pending order status: {pending_order_status}")
             
                 # If order was just filled, position is now open
                 if pending_order_status == "filled":
@@ -243,13 +244,20 @@ class AlgoEngine:
             
                 last_perusu_signal = cached_perusu.get('last_signal') if cached_perusu else None
             
-                # ✅ TESTING: Track cache hit/miss
+                # ✅ COMMENTED OUT - SAVES ~0.02s
+                # # ✅ TESTING: Track cache hit/miss
+                # if cached_perusu:
+                #     self.performance_stats["cache_hits"] += 1
+                #     logger.info(f"💾 [TEST] Cache HIT - Last signal: {last_perusu_signal} ({cache_time:.3f}s)")
+                # else:
+                #     self.performance_stats["cache_misses"] += 1
+                #     logger.info(f"💾 [TEST] Cache MISS - First run ({cache_time:.3f}s)")
+                
+                # Track cache stats without logging
                 if cached_perusu:
                     self.performance_stats["cache_hits"] += 1
-                    logger.info(f"💾 [TEST] Cache HIT - Last signal: {last_perusu_signal} ({cache_time:.3f}s)")
                 else:
                     self.performance_stats["cache_misses"] += 1
-                    logger.info(f"💾 [TEST] Cache MISS - First run ({cache_time:.3f}s)")
             
                 entry_signal = self.strategy.generate_entry_signal(
                     setup_id,
@@ -261,14 +269,14 @@ class AlgoEngine:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
                 
-                    # ✅ TESTING: Detailed entry signal log
-                    logger.info(f"🎯 [TEST] Entry Signal Details:")
-                    logger.info(f"   Side: {entry_signal['side'].upper()}")
-                    logger.info(f"   Trigger: Perusu flip from {last_perusu_signal} to {perusu_data['signal']}")
-                    logger.info(f"   Entry Price: ${perusu_data['latest_close']:.5f}")
-                    logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")
-                    logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
-                    logger.info(f"   Lot Size: {algo_setup['lot_size']}")
+                    # ✅ COMMENTED OUT - SAVES ~0.03s
+                    # logger.info(f"🎯 [TEST] Entry Signal Details:")
+                    # logger.info(f"   Side: {entry_signal['side'].upper()}")
+                    # logger.info(f"   Trigger: Perusu flip from {last_perusu_signal} to {perusu_data['signal']}")
+                    # logger.info(f"   Entry Price: ${perusu_data['latest_close']:.5f}")
+                    # logger.info(f"   Breakout Trigger: ${entry_signal.get('trigger_price', 0):.5f}")
+                    # logger.info(f"   Stop Loss: ${sirusu_data['supertrend_value']:.5f}")
+                    # logger.info(f"   Lot Size: {algo_setup['lot_size']}")
                 
                     # Execute entry
                     entry_start = time.time()
@@ -283,12 +291,13 @@ class AlgoEngine:
 
                     entry_time = time.time() - entry_start
                 
-                    # ✅ TESTING: Log entry execution time
-                    logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
+                    # ✅ COMMENTED OUT - SAVES ~0.01s
+                    # logger.info(f"⏱️ [TEST] Entry execution: {entry_time:.3f}s")
                     
                     if success:
                         self.signal_counts["successful_entries"] += 1
-                        logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
+                        # ✅ COMMENTED OUT - SAVES ~0.01s
+                        # logger.info(f"✅ [TEST] Entry successful! Total entries: {self.signal_counts['successful_entries']}")
                     
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
@@ -301,7 +310,8 @@ class AlgoEngine:
                         )
                     else:
                         self.signal_counts["failed_entries"] += 1
-                        logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
+                        # ✅ COMMENTED OUT - SAVES ~0.01s
+                        # logger.error(f"❌ [TEST] Entry failed! Total failures: {self.signal_counts['failed_entries']}")
                     
                         await self.logger_bot.send_error(
                             f"Failed to execute entry for {setup_name}"
@@ -309,13 +319,15 @@ class AlgoEngine:
             
                 else:
                     self.signal_counts["no_signals"] += 1
-                    logger.info(f"⏭️ [TEST] No entry signal - Waiting for Perusu flip")
-                    logger.info(f"   Current: {perusu_data['signal_text']} ({perusu_data['signal']})")
-                    logger.info(f"   Cached: {last_perusu_signal}")
+                    # ✅ COMMENTED OUT - SAVES ~0.02s
+                    # logger.info(f"⏭️ [TEST] No entry signal - Waiting for Perusu flip")
+                    # logger.info(f"   Current: {perusu_data['signal_text']} ({perusu_data['signal']})")
+                    # logger.info(f"   Cached: {last_perusu_signal}")
         
             # ✅ CHECK FOR EXIT SIGNAL (only if in position)
             elif current_position:
-                logger.info(f"📍 [TEST] In position: {current_position.upper()} - Checking exit conditions")
+                # ✅ COMMENTED OUT - SAVES ~0.01s
+                # logger.info(f"📍 [TEST] In position: {current_position.upper()} - Checking exit conditions")
             
                 exit_signal = self.strategy.generate_exit_signal(
                     setup_id,
@@ -327,11 +339,11 @@ class AlgoEngine:
                     self.signal_counts["exit_signals"] += 1
                     logger.info(f"🚪 Exit signal detected for {setup_name}")
                 
-                    # ✅ TESTING: Detailed exit signal log
-                    logger.info(f"🎯 [TEST] Exit Signal Details:")
-                    logger.info(f"   Position: {current_position.upper()}")
-                    logger.info(f"   Trigger: Sirusu flip ({sirusu_data['signal_text']})")
-                    logger.info(f"   Exit Price: ${sirusu_data['supertrend_value']:.5f}")
+                    # ✅ COMMENTED OUT - SAVES ~0.02s
+                    # logger.info(f"🎯 [TEST] Exit Signal Details:")
+                    # logger.info(f"   Position: {current_position.upper()}")
+                    # logger.info(f"   Trigger: Sirusu flip ({sirusu_data['signal_text']})")
+                    # logger.info(f"   Exit Price: ${sirusu_data['supertrend_value']:.5f}")
 
                     # ✅ CRITICAL: Check if stop-loss already filled BEFORE exit
                     from api.orders import check_stop_loss_filled
@@ -355,12 +367,13 @@ class AlgoEngine:
                     )
                     exit_time = time.time() - exit_start
                 
-                    # ✅ TESTING: Log exit execution time
-                    logger.info(f"⏱️ [TEST] Exit execution: {exit_time:.3f}s")
+                    # ✅ COMMENTED OUT - SAVES ~0.01s
+                    # logger.info(f"⏱️ [TEST] Exit execution: {exit_time:.3f}s")
                 
                     if success:
                         self.signal_counts["successful_exits"] += 1
-                        logger.info(f"✅ [TEST] Exit successful! Total exits: {self.signal_counts['successful_exits']}")
+                        # ✅ COMMENTED OUT - SAVES ~0.01s
+                        # logger.info(f"✅ [TEST] Exit successful! Total exits: {self.signal_counts['successful_exits']}")
                     
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
@@ -370,33 +383,41 @@ class AlgoEngine:
                         )
                     else:
                         self.signal_counts["failed_exits"] += 1
-                        logger.error(f"❌ [TEST] Exit failed! Total failures: {self.signal_counts['failed_exits']}")
+                        # ✅ COMMENTED OUT - SAVES ~0.01s
+                        # logger.error(f"❌ [TEST] Exit failed! Total failures: {self.signal_counts['failed_exits']}")
                     
                         await self.logger_bot.send_error(
                             f"Failed to execute exit for {setup_name}"
                         )
                 else:
-                    logger.info(f"⏭️ [TEST] No exit signal - Holding {current_position.upper()} position")
-                    logger.info(f"   Sirusu: {sirusu_data['signal_text']} (waiting for flip)")
+                    # ✅ COMMENTED OUT - SAVES ~0.02s
+                    # logger.info(f"⏭️ [TEST] No exit signal - Holding {current_position.upper()} position")
+                    # logger.info(f"   Sirusu: {sirusu_data['signal_text']} (waiting for flip)")
+                    pass
         
             # ✅ Cache indicator values AFTER signal detection
             await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
         
             await client.close()
         
-            # ✅ TESTING: Calculate and log total processing time
+            # ✅ COMMENTED OUT - SAVES ~0.02s
+            # # ✅ TESTING: Calculate and log total processing time
+            # elapsed = time.time() - start_time
+            # self._update_performance_stats(elapsed)
+            # logger.info(f"⏱️ [TEST] Total processing time: {elapsed:.3f}s")
+            # logger.info(f"📊 [TEST] Performance stats: {self._format_performance()}")
+            
+            # Still track stats without logging
             elapsed = time.time() - start_time
             self._update_performance_stats(elapsed)
-        
-            logger.info(f"⏱️ [TEST] Total processing time: {elapsed:.3f}s")
-            logger.info(f"📊 [TEST] Performance stats: {self._format_performance()}")
         
         except Exception as e:
             self.signal_counts["errors"] += 1
             elapsed = time.time() - start_time
         
             logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
-            logger.error(f"⏱️ [TEST] Failed after {elapsed:.3f}s")
+            # ✅ COMMENTED OUT - SAVES ~0.01s
+            # logger.error(f"⏱️ [TEST] Failed after {elapsed:.3f}s")
             import traceback
             logger.error(traceback.format_exc())
             await self.logger_bot.send_error(
@@ -480,7 +501,8 @@ class AlgoEngine:
             })
             
             cache_time = time.time() - cache_start
-            logger.info(f"💾 [TEST] Cache update completed ({cache_time:.3f}s)")
+            # ✅ COMMENTED OUT - SAVES ~0.01s
+            # logger.info(f"💾 [TEST] Cache update completed ({cache_time:.3f}s)")
             
         except Exception as e:
             logger.error(f"❌ Failed to cache indicators: {e}")
@@ -529,11 +551,12 @@ class AlgoEngine:
                 loop_time = time.time() - loop_start
                 logger.debug(f"⏱️ [TEST] Loop {loop_count} completed in {loop_time:.3f}s")
                 
-                # Log summary every 10 loops
-                if loop_count % 10 == 0:
-                    logger.info(f"📊 [TEST] Summary after {loop_count} loops:")
-                    logger.info(f"   {self._format_stats()}")
-                    logger.info(f"   {self._format_performance()}")
+                # ✅ COMMENTED OUT - SAVES ~0.02s
+                # # Log summary every 10 loops
+                # if loop_count % 10 == 0:
+                #     logger.info(f"📊 [TEST] Summary after {loop_count} loops:")
+                #     logger.info(f"   {self._format_stats()}")
+                #     logger.info(f"   {self._format_performance()}")
                 
                 # ✅ FIXED: Get dynamic sleep time from FIRST setup's timeframe
                 first_setup = active_setups[0]
