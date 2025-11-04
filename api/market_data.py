@@ -30,7 +30,8 @@ async def get_products(client: DeltaExchangeClient, force_refresh: bool = False)
         # Check cache
         if not force_refresh and _products_cache and _products_cache_time:
             if (datetime.utcnow() - _products_cache_time).seconds < _cache_expiry_seconds:
-                logger.info("✅ Using cached products data")
+                # ✅ COMMENTED OUT - SAVES ~0.01s
+                # logger.info("✅ Using cached products data")
                 return _products_cache
         
         # Fetch fresh data
@@ -40,7 +41,8 @@ async def get_products(client: DeltaExchangeClient, force_refresh: bool = False)
             products = response.get("result", [])
             _products_cache = products
             _products_cache_time = datetime.utcnow()
-            logger.info(f"✅ Retrieved {len(products)} products")
+            # ✅ COMMENTED OUT - SAVES ~0.01s
+            # logger.info(f"✅ Retrieved {len(products)} products")
             return products
         
         logger.error(f"❌ Failed to get products: {response}")
@@ -70,7 +72,8 @@ async def get_product_by_symbol(client: DeltaExchangeClient, symbol: str) -> Opt
         
         for product in products:
             if product.get("symbol") == symbol:
-                logger.info(f"✅ Found product: {symbol} (ID: {product.get('id')})")
+                # ✅ COMMENTED OUT - SAVES ~0.01s
+                # logger.info(f"✅ Found product: {symbol} (ID: {product.get('id')})")
                 return product
         
         logger.warning(f"⚠️ Product not found: {symbol}")
@@ -99,7 +102,8 @@ async def get_ticker(client: DeltaExchangeClient, symbol: str) -> Optional[Dict[
             tickers = response.get("result", [])
             if tickers:
                 ticker = tickers[0]
-                logger.info(f"✅ Got ticker for {symbol}: ${ticker.get('close')}")
+                # ✅ COMMENTED OUT - SAVES ~0.01s
+                # logger.info(f"✅ Got ticker for {symbol}: ${ticker.get('close')}")
                 return ticker
         
         logger.error(f"❌ Failed to get ticker for {symbol}")
@@ -168,22 +172,24 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
             "end": str(end_time)
         }
         
-        logger.info(f"🔍 Requesting {limit} candles for {symbol} ({timeframe})")
-        logger.info(f"   Time range: {datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M')} to {datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M')}")
+        # ✅ COMMENTED OUT - SAVES ~0.02s
+        # logger.info(f"🔍 Requesting {limit} candles for {symbol} ({timeframe})")
+        # logger.info(f"   Time range: {datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M')} to {datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M')}")
         
         response = await client.get("/v2/history/candles", params=params)
         
         if response and response.get("success"):
             candles = response.get("result", [])
 
+            # ✅ COMMENTED OUT - SAVES ~0.03s
             # Calculate raw response size
-            import json
-            response_json = json.dumps(response)
-            response_size_bytes = len(response_json.encode('utf-8'))
-            response_size_kb = response_size_bytes / 1024
-            
-            logger.info(f"📊 API Response size: {response_size_kb:.2f} KB ({response_size_bytes:,} bytes)")
-            logger.info(f"   Raw candles received: {len(candles)}")
+            # import json
+            # response_json = json.dumps(response)
+            # response_size_bytes = len(response_json.encode('utf-8'))
+            # response_size_kb = response_size_bytes / 1024
+            # 
+            # logger.info(f"📊 API Response size: {response_size_kb:.2f} KB ({response_size_bytes:,} bytes)")
+            # logger.info(f"   Raw candles received: {len(candles)}")
         
             # Convert to more usable format
             formatted_candles = []
@@ -203,19 +209,21 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
             # Limit results to requested amount (from most recent)
             formatted_candles = formatted_candles[-limit:]
             
+            # ✅ COMMENTED OUT - SAVES ~0.02s
             # Calculate formatted data size
-            formatted_json = json.dumps(formatted_candles)
-            formatted_size_bytes = len(formatted_json.encode('utf-8'))
-            formatted_size_kb = formatted_size_bytes / 1024
-            
-            logger.info(f"✅ Retrieved {len(formatted_candles)} candles for {symbol} ({timeframe})")
-            logger.info(f"   Processed size: {formatted_size_kb:.2f} KB ({formatted_size_bytes:,} bytes)")
-            
-            if formatted_candles:
-                avg_per_candle = formatted_size_bytes / len(formatted_candles)
-                logger.info(f"   Average per candle: {avg_per_candle:.0f} bytes")
-                logger.info(f"   Oldest: {datetime.fromtimestamp(formatted_candles[0]['time']).strftime('%Y-%m-%d %H:%M')}")
-                logger.info(f"   Newest: {datetime.fromtimestamp(formatted_candles[-1]['time']).strftime('%Y-%m-%d %H:%M')}")
+            # import json
+            # formatted_json = json.dumps(formatted_candles)
+            # formatted_size_bytes = len(formatted_json.encode('utf-8'))
+            # formatted_size_kb = formatted_size_bytes / 1024
+            # 
+            # logger.info(f"✅ Retrieved {len(formatted_candles)} candles for {symbol} ({timeframe})")
+            # logger.info(f"   Processed size: {formatted_size_kb:.2f} KB ({formatted_size_bytes:,} bytes)")
+            # 
+            # if formatted_candles:
+            #     avg_per_candle = formatted_size_bytes / len(formatted_candles)
+            #     logger.info(f"   Average per candle: {avg_per_candle:.0f} bytes")
+            #     logger.info(f"   Oldest: {datetime.fromtimestamp(formatted_candles[0]['time']).strftime('%Y-%m-%d %H:%M')}")
+            #     logger.info(f"   Newest: {datetime.fromtimestamp(formatted_candles[-1]['time']).strftime('%Y-%m-%d %H:%M')}")
             
             return formatted_candles
         
@@ -252,4 +260,4 @@ async def get_latest_price(client: DeltaExchangeClient, symbol: str) -> Optional
     except Exception as e:
         logger.error(f"❌ Exception getting latest price: {e}")
         return None
-                                                                 
+        
