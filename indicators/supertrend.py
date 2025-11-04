@@ -75,6 +75,12 @@ class SuperTrend:
     def calculate(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         ✅ CORRECTED: Calculate SuperTrend with proper band persistence.
+        
+        KEY FIXES:
+        1. Upper band can ONLY go DOWN or STAY SAME (never up immediately)
+        2. Lower band can ONLY go UP or STAY SAME (never down immediately)
+        3. This creates proper trend state persistence
+        4. Eliminates false entry/exit signals
         """
         try:
             # Convert to DataFrame
