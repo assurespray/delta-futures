@@ -198,16 +198,20 @@ async def setup_direction_selected(update: Update, context: ContextTypes.DEFAULT
     keyboard = [
         [
             InlineKeyboardButton("1m", callback_data="setup_tf_1m"),
-            InlineKeyboardButton("5m", callback_data="setup_tf_5m"),
-            InlineKeyboardButton("15m", callback_data="setup_tf_15m")
+            InlineKeyboardButton("3m", callback_data="setup_tf_3m"),  # ✅ NEW: 3m
+            InlineKeyboardButton("5m", callback_data="setup_tf_5m")
         ],
         [
+            InlineKeyboardButton("15m", callback_data="setup_tf_15m"),
             InlineKeyboardButton("30m", callback_data="setup_tf_30m"),
-            InlineKeyboardButton("1h", callback_data="setup_tf_1h"),
-            InlineKeyboardButton("4h", callback_data="setup_tf_4h")
+            InlineKeyboardButton("1h", callback_data="setup_tf_1h")
         ],
-        [InlineKeyboardButton("1d", callback_data="setup_tf_1d")]
+        [
+            InlineKeyboardButton("4h", callback_data="setup_tf_4h"),
+            InlineKeyboardButton("1d", callback_data="setup_tf_1d")
+        ]
     ]
+
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
