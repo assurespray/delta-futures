@@ -86,67 +86,111 @@ async def get_positions(client: DeltaExchangeClient) -> Optional[List[Dict[str, 
     return await get_all_positions_for_assets(client)
 
 
-async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str) -> Optional[Dict[str, Any]]:
+async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, 
+                                retry_count: int = 3) -> Optional[Dict[str, Any]]:
     """
-    ✅ CORRECTED: Get position for a specific symbol efficiently.
-    
-    Extracts underlying asset from symbol and queries directly.
+    ✅ ENHANCED: Get position for a specific symbol with retry logic.
     
     Args:
         client: Delta Exchange client instance
         symbol: Trading symbol (e.g., "ALGOUSD", "ADAUSD", "BTCUSD")
+        retry_count: Number of retries if position not found
     
     Returns:
         Position details or None if no position
     """
-    try:
-        logger.info(f"🔍 Looking for position: {symbol}")
-        
-        # ✅ Extract underlying asset from symbol
-        # ALGOUSD -> ALGO, ADAUSD -> ADA, BTCUSD -> BTC
-        underlying_asset = symbol.replace("USD", "").replace("USDT", "")
-        
-        logger.info(f"📍 Querying Delta Exchange for {underlying_asset}...")
-        
-        # ✅ Query specific asset with REQUIRED parameter
-        response = await client.get("/v2/positions", 
-            params={"underlying_asset_symbol": underlying_asset})
-        
-        if not response or not response.get("success"):
-            logger.warning(f"⚠️ No positions response for {underlying_asset}")
-            return None
-        
-        positions = response.get("result", [])
-        
-        if not positions:
-            logger.info(f"ℹ️ No positions found for {underlying_asset}")
-            return None
-        
-        # Search for exact symbol match
-        for position in positions:
-            position_symbol = position.get("product", {}).get("symbol", "")
-            position_size = float(position.get("size", 0))
+    import asyncio
+    
+    for attempt in range(retry_count):
+        try:
+            logger.info(f"🔍 Looking for position: {symbol} (Attempt {attempt + 1}/{retry_count})")
             
-            if position_symbol == symbol and abs(position_size) > 0:
-                logger.info(f"✅ Found position for {symbol}: {position_size} contracts")
-                logger.info(f"   Entry: ${position.get('entry_price', 0)}")
-                logger.info(f"   Mark: ${position.get('mark_price', 0)}")
-                logger.info(f"   PnL: ${position.get('unrealized_pnl', 0)}")
-                return position
-        
-        logger.info(f"ℹ️ No open position found for {symbol}")
-        if positions:
-            available = [p.get("product", {}).get("symbol") for p in positions if float(p.get("size", 0)) != 0]
+            # ✅ Extract underlying asset from symbol
+            underlying_asset = symbol.replace("USD", "").replace("USDT", "")
+            
+            logger.info(f"📍 Querying Delta Exchange for {underlying_asset}...")
+            
+            # ✅ Query specific asset with REQUIRED parameter
+            response = await client.get("/v2/positions", 
+                params={"underlying_asset_symbol": underlying_asset})
+            
+            # Log full response for debugging
+            logger.debug(f"   API Response: {response}")
+            
+            if not response:
+                logger.warning(f"⚠️ Empty response for {underlying_asset} (attempt {attempt + 1})")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(0.5)  # Wait 500ms before retry
+                    continue
+                return None
+            
+            if not response.get("success"):
+                logger.warning(f"⚠️ API returned success=false for {underlying_asset}")
+                logger.warning(f"   Full response: {response}")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(0.5)
+                    continue
+                return None
+            
+            positions = response.get("result", [])
+            
+            if not positions:
+                logger.info(f"ℹ️ No positions found for {underlying_asset} (attempt {attempt + 1})")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(0.5)
+                    continue
+                return None
+            
+            # Log all positions for debugging
+            logger.debug(f"   Positions returned: {len(positions)}")
+            for pos in positions:
+                pos_symbol = pos.get("product", {}).get("symbol", "")
+                pos_size = float(pos.get("size", 0))
+                logger.debug(f"   - {pos_symbol}: Size={pos_size}")
+            
+            # Search for exact symbol match
+            for position in positions:
+                position_symbol = position.get("product", {}).get("symbol", "")
+                position_size = float(position.get("size", 0))
+                
+                # Match symbol and check non-zero size
+                if position_symbol == symbol and abs(position_size) > 0:
+                    logger.info(f"✅ Found position for {symbol}: {position_size} contracts")
+                    logger.info(f"   Entry: ${position.get('entry_price', 0)}")
+                    logger.info(f"   Mark: ${position.get('mark_price', 0)}")
+                    logger.info(f"   PnL: ${position.get('unrealized_pnl', 0)}")
+                    return position
+            
+            # If not found and we have retries left
+            if attempt < retry_count - 1:
+                logger.warning(f"⚠️ Position {symbol} not found in API response, retrying...")
+                await asyncio.sleep(0.5)
+                continue
+            
+            # Final attempt - log all available positions
+            logger.info(f"ℹ️ No open position found for {symbol} after {retry_count} attempts")
+            available = [
+                p.get("product", {}).get("symbol") 
+                for p in positions 
+                if float(p.get("size", 0)) != 0
+            ]
             if available:
                 logger.info(f"   Available positions: {available}")
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"❌ Exception getting position for {symbol}: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Exception getting position for {symbol} (attempt {attempt + 1}): {e}")
+            if attempt < retry_count - 1:
+                logger.info(f"   Retrying in 500ms...")
+                await asyncio.sleep(0.5)
+                continue
+            
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+    
+    return None
 
 
 async def get_position_size(client: DeltaExchangeClient, symbol: str) -> float:
