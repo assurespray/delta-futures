@@ -405,12 +405,8 @@ class PositionManager:
                           algo_setup: Dict[str, Any],
                           sirusu_signal_text: str) -> bool:
         """
-        ✅ SIMPLIFIED: Execute market exit when Sirusu flips.
-    
-        Logic:
-        1. Check if position exists on exchange (with retry)
-        2. If NO position → Skip exit (already closed)
-        3. If position exists → Exit at market → Cancel orphaned stop-loss
+        ✅ FIXED: Execute market exit when Sirusu flips + RELEASE ASSET LOCK.
+        Sequential execution: Market exit FIRST, then SL cancel SECOND.
         """
         try:
             setup_id = str(algo_setup["_id"])
@@ -420,11 +416,11 @@ class PositionManager:
             product_id = algo_setup.get("product_id")
             current_position = algo_setup.get("current_position")
             stop_loss_order_id = algo_setup.get("stop_loss_order_id")
-        
+            
             if not current_position:
-                logger.warning(f"⚠️ No current position for {symbol} in database")
+                logger.warning(f"⚠️ No current position for {symbol}")
                 return False
-        
+            
             logger.info(f"=" * 70)
             logger.info(f"🚪 EXECUTING EXIT SIGNAL")
             logger.info(f"=" * 70)
@@ -432,38 +428,31 @@ class PositionManager:
             logger.info(f"Asset: {symbol}")
             logger.info(f"Position: {current_position.upper()}")
             logger.info(f"Trigger: {sirusu_signal_text}")
-        
-            # ✅ STEP 1: Check if position exists (with 3 retries)
-            logger.info(f"🔍 [STEP 1] Verifying position on exchange...")
-        
-            actual_position = None
-            import asyncio
-        
-            for attempt in range(3):
-                actual_position = await get_position_by_symbol(client, symbol)
-                if actual_position:
-                    break
-                if attempt < 2:
-                    logger.warning(f"   Retry {attempt + 1}/3...")
-                    await asyncio.sleep(0.5)
-        
-            actual_size = actual_position.get("size", 0) if actual_position else 0
-        
-            # ✅ SCENARIO A: Position already closed
-            if actual_size == 0:
-                logger.warning(f"ℹ️ POSITION ALREADY CLOSED!")
-                logger.warning(f"   Position was closed by stop-loss or manually")
-                logger.warning(f"   Skipping market exit, cleaning up database...")
             
-                # Update database - mark as closed
+            # ✅ STEP 1: Verify actual position on exchange
+            logger.info(f"🔍 [STEP 1] Verifying actual position on exchange...")
+            
+            actual_position = await get_position_by_symbol(client, symbol)
+            actual_size = actual_position.get("size", 0) if actual_position else 0
+            
+            if actual_size == 0:
+                # Position closed by stop-loss - SCENARIO 1 or 2
+                logger.warning(f"⚠️ POSITION ALREADY CLOSED!")
+                logger.warning(f"   Root cause: Stop-loss was triggered")
+                
+                # Record exit
                 activity = await get_open_activity_by_setup(setup_id)
+                
                 if activity:
+                    logger.info(f"💾 Recording stop-loss exit...")
+                    
                     await update_algo_activity(str(activity["_id"]), {
                         "exit_time": datetime.utcnow(),
-                        "sirusu_exit_signal": f"Position already closed ({sirusu_signal_text})",
+                        "exit_price": None,
+                        "sirusu_exit_signal": f"Stop-loss triggered ({sirusu_signal_text})",
                         "is_closed": True
                     })
-            
+                
                 # Clear position state
                 await update_algo_setup(setup_id, {
                     "current_position": None,
@@ -474,86 +463,89 @@ class PositionManager:
                     "position_lock_acquired": False
                 })
                 
-                # Release lock
+                # ✅ RELEASE LOCK
+                logger.info(f"🔐 Releasing position lock on {symbol}...")
+                
                 db = await get_db()
                 await release_position_lock(db, symbol, setup_id)
-            
-                logger.info(f"✅ Database cleaned up, lock released")
+                
+                logger.info(f"✅ Lock released - position closed by stop-loss")
                 logger.info(f"=" * 70)
+                
                 return True
-        
-            # ✅ SCENARIO B: Position exists - execute market exit
+            
             logger.info(f"✅ Position verified: {actual_size} contracts")
-            logger.info(f"   Entry: ${actual_position.get('entry_price', 0)}")
-            logger.info(f"   Current: ${actual_position.get('mark_price', 0)}")
-            logger.info(f"   PnL: ${actual_position.get('unrealized_pnl', 0)}")
-        
-            # ✅ STEP 2: Place market exit order
+            
+            # ✅ STEP 2: MARKET EXIT (PRIMARY) - EXECUTE FIRST
             logger.info(f"📊 [STEP 2] Placing MARKET EXIT...")
-        
+            
             exit_side = "sell" if current_position == "long" else "buy"
-        
+            exit_price = None
+            
             try:
                 logger.info(f"   Placing: {exit_side.upper()} {lot_size} @ market")
-            
+                
                 order = await place_market_order(client, product_id, lot_size, exit_side)
-            
+                
                 if not order:
                     logger.error(f"❌ Market exit order failed!")
                     return False
-            
+                
                 exit_price = float(order.get("average_fill_price", 0))
                 if exit_price == 0:
                     exit_price = float(order.get("limit_price", 0))
-            
+                
                 logger.info(f"✅ Position CLOSED @ ${exit_price:.5f}")
-            
+                
             except Exception as e:
                 error_msg = str(e).lower()
-            
+                
                 if "no_position" in error_msg or "reduce_only" in error_msg:
-                    logger.warning(f"⚠️ Position already closed during exit attempt")
+                    logger.warning(f"⚠️ Position already closed (no_position error)")
                     exit_price = 0.0
                 else:
                     logger.error(f"❌ Market exit error: {e}")
                     return False
-        
-            # ✅ STEP 3: Cancel orphaned stop-loss order
-            logger.info(f"🔄 [STEP 3] Cancelling orphaned stop-loss...")
-        
+            
+            # ✅ STEP 3: STOP-LOSS CANCEL (SECONDARY) - ONLY AFTER EXIT CONFIRMED
+            logger.info(f"🔄 [STEP 3] Cancelling stop-loss (after exit confirmed)...")
+            
             if stop_loss_order_id:
                 try:
+                    # ✅ NEW: Always try to cancel, handle errors gracefully
                     logger.info(f"   Cancelling SL order: {stop_loss_order_id}")
-                
+                    
                     result = await cancel_order(client, stop_loss_order_id)
-                
+                    
                     if result:
                         logger.info(f"✅ Stop-loss cancelled successfully")
                     else:
-                        logger.info(f"ℹ️ Stop-loss already gone")
-                    
+                        logger.info(f"ℹ️ Stop-loss already executed/gone")
+                        
                 except Exception as e:
                     error_msg = str(e).lower()
-                
+                    
+                    # 404 means order doesn't exist anymore - that's OK
                     if "404" in error_msg or "not found" in error_msg:
-                        logger.info(f"ℹ️ Stop-loss already executed/gone (404)")
+                        logger.info(f"✅ Stop-loss already gone (404 Not Found)")
                     else:
                         logger.warning(f"⚠️ SL cancellation issue: {e}")
+                        # Continue anyway - market exit is done
             else:
                 logger.info(f"ℹ️ No stop-loss order to cancel")
-        
-            # ✅ STEP 4: Record exit & PnL
+            
+            # ✅ STEP 4: RECORD EXIT & PnL
             logger.info(f"💾 [STEP 4] Recording exit activity...")
-        
+            
             activity = await get_open_activity_by_setup(setup_id)
-        
+            
             if activity and exit_price > 0:
                 entry_price = activity.get("entry_price", 0)
                 pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
                 pnl_inr = pnl * settings.usd_to_inr_rate
-            
+                
                 logger.info(f"💰 PnL: ${pnl:.4f} (₹{pnl_inr:.2f})")
-            
+                
                 await update_algo_activity(str(activity["_id"]), {
                     "exit_time": datetime.utcnow(),
                     "exit_price": exit_price,
@@ -562,10 +554,10 @@ class PositionManager:
                     "sirusu_exit_signal": sirusu_signal_text,
                     "is_closed": True
                 })
-        
-            # ✅ STEP 5: Reset state and release lock
+            
+            # ✅ STEP 5: RESET STATE AND RELEASE LOCK
             logger.info(f"🔄 [STEP 5] Resetting bot state...")
-        
+            
             await update_algo_setup(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
@@ -574,21 +566,21 @@ class PositionManager:
                 "stop_loss_order_id": None,
                 "position_lock_acquired": False
             })
-        
-            # Release lock
+            
+            # ✅ RELEASE LOCK
+            logger.info(f"🔐 Releasing position lock on {symbol}...")
+            
             db = await get_db()
             await release_position_lock(db, symbol, setup_id)
-        
+            
             logger.info(f"✅ Lock released - trade complete")
             logger.info(f"=" * 70)
-            logger.info(f"✅ TRADE EXIT COMPLETE")
-            if activity:
-                logger.info(f"   Entry: ${activity.get('entry_price', 0):.5f}")
-            if exit_price > 0:
-                logger.info(f"   Exit: ${exit_price:.5f}")
+            logger.info(f"✅ TRADE COMPLETE")
+            logger.info(f"   Entry: ${activity.get('entry_price', 0):.5f}")
+            logger.info(f"   Exit: ${exit_price:.5f}")
             logger.info(f"   Reason: {sirusu_signal_text}")
             logger.info(f"=" * 70)
-        
+            
             return True
             
         except Exception as e:
@@ -596,8 +588,7 @@ class PositionManager:
             import traceback
             logger.error(traceback.format_exc())
             return False
-
-                                
+                
     def _calculate_pnl(self, entry_price: float, exit_price: float, 
                       lot_size: int, position_side: str) -> float:
         """
