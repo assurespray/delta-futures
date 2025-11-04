@@ -92,16 +92,17 @@ class SuperTrend(BaseIndicator):
         atr_series = pd.Series(atr, index=df.index)
         atr_series = atr_series.ffill().bfill()
         
+        # ✅ COMMENTED OUT - SAVES ~0.05s
         # Logging
-        latest_tr = tr[-1]
-        latest_atr = atr[-1]
-        tr_precision = self._get_precision(latest_tr)
-        atr_precision = self._get_precision(latest_atr)
-        
-        logger.info(f"🔍 {self.name} ATR (RMA method):")
-        logger.info(f"   Period: {self.atr_length}")
-        logger.info(f"   Latest TR: {latest_tr:.{tr_precision}f}")
-        logger.info(f"   Latest ATR: {latest_atr:.{atr_precision}f}")
+        # latest_tr = tr[-1]
+        # latest_atr = atr[-1]
+        # tr_precision = self._get_precision(latest_tr)
+        # atr_precision = self._get_precision(latest_atr)
+        # 
+        # logger.info(f"🔍 {self.name} ATR (RMA method):")
+        # logger.info(f"   Period: {self.atr_length}")
+        # logger.info(f"   Latest TR: {latest_tr:.{tr_precision}f}")
+        # logger.info(f"   Latest ATR: {latest_atr:.{atr_precision}f}")
         
         return atr_series
     
@@ -210,12 +211,13 @@ class SuperTrend(BaseIndicator):
                 "precision": price_precision
             }
             
-            logger.info(f"✅ {self.name} calculated:")
-            logger.info(f"   Price: ${latest_close:.{price_precision}f}")
-            logger.info(f"   ATR: {latest_atr:.{atr_precision}f}")
-            logger.info(f"   SuperTrend: ${latest_supertrend:.{st_precision}f}")
-            logger.info(f"   Signal: {result['signal_text']}")
-            logger.info(f"   Precision used: {price_precision} decimals")
+            # ✅ COMMENTED OUT - SAVES ~0.10s
+            # logger.info(f"✅ {self.name} calculated:")
+            # logger.info(f"   Price: ${latest_close:.{price_precision}f}")
+            # logger.info(f"   ATR: {latest_atr:.{atr_precision}f}")
+            # logger.info(f"   SuperTrend: ${latest_supertrend:.{st_precision}f}")
+            # logger.info(f"   Signal: {result['signal_text']}")
+            # logger.info(f"   Precision used: {price_precision} decimals")
             
             return result
             
@@ -224,4 +226,4 @@ class SuperTrend(BaseIndicator):
             import traceback
             logger.error(traceback.format_exc())
             return None
-            
+        
