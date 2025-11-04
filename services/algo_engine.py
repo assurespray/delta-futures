@@ -1,4 +1,4 @@
-"""Core trading engine for algo execution - ENHANCED FOR TESTING."""
+"""Core trading engine for algo execution - ENHANCED WITH DYNAMIC SLEEP."""
 import logging
 import asyncio
 import time
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class AlgoEngine:
-    """Main trading engine for executing algo strategies - ENHANCED FOR TESTING."""
+    """Main trading engine for executing algo strategies - ENHANCED WITH DYNAMIC SLEEP."""
     
     def __init__(self, logger_bot: LoggerBot):
         """
@@ -63,6 +63,41 @@ class AlgoEngine:
             "cache_hits": 0,
             "cache_misses": 0
         }
+    
+    def get_sleep_time_seconds(self, timeframe: str) -> int:
+        """
+        ✅ NEW: Convert timeframe to sleep time in seconds.
+        
+        Maps timeframe strings to their corresponding sleep duration.
+        This ensures the bot processes exactly once per candle period.
+        
+        Args:
+            timeframe: Timeframe string (e.g., "1m", "5m", "15m", "1h", "1d")
+        
+        Returns:
+            Sleep time in seconds
+        """
+        timeframe_map = {
+            "1m": 60,           # 1 minute
+            "3m": 180,          # 3 minutes
+            "5m": 300,          # 5 minutes
+            "10m": 600,         # 10 minutes
+            "15m": 900,         # 15 minutes
+            "30m": 1800,        # 30 minutes
+            "1h": 3600,         # 1 hour
+            "2h": 7200,         # 2 hours
+            "4h": 14400,        # 4 hours
+            "6h": 21600,        # 6 hours
+            "8h": 28800,        # 8 hours
+            "12h": 43200,       # 12 hours
+            "1d": 86400,        # 1 day (24 hours)
+        }
+        
+        # Get sleep time from map, default to 60s if unknown
+        sleep_seconds = timeframe_map.get(timeframe, 60)
+        logger.debug(f"⏱️ Sleep time for timeframe '{timeframe}': {sleep_seconds}s")
+        
+        return sleep_seconds
     
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         """
@@ -433,12 +468,12 @@ class AlgoEngine:
     
     async def run_continuous_monitoring(self):
         """
-        Run continuous monitoring loop for all active algo setups.
+        ✅ FIXED: Run continuous monitoring loop with DYNAMIC sleep based on timeframe.
         This is the main 24/7 trading loop with testing instrumentation.
         """
         logger.info("🚀 Starting continuous algo monitoring...")
         logger.info(f"📊 [TEST] Testing mode enabled with detailed logging")
-        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups (TEST MODE)")
+        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups (DYNAMIC SLEEP)")
         
         loop_count = 0
         
@@ -481,8 +516,16 @@ class AlgoEngine:
                     logger.info(f"   {self._format_stats()}")
                     logger.info(f"   {self._format_performance()}")
                 
-                # Sleep for 60 seconds before next cycle
-                await asyncio.sleep(60)
+                # ✅ FIXED: Get dynamic sleep time from FIRST setup's timeframe
+                first_setup = active_setups[0]
+                timeframe = first_setup.get('timeframe', '1m')
+                sleep_seconds = self.get_sleep_time_seconds(timeframe)
+                
+                # ✅ Log what we're about to do
+                logger.info(f"💤 Sleeping {sleep_seconds}s (waiting for next {timeframe} candle)")
+                
+                # ✅ SLEEP WITH DYNAMIC TIME (instead of hardcoded 60)
+                await asyncio.sleep(sleep_seconds)
                 
             except Exception as e:
                 logger.error(f"❌ Exception in continuous monitoring: {e}")
