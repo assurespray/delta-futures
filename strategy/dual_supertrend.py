@@ -19,7 +19,7 @@ from config.constants import (
     BREAKOUT_PIP_OFFSET,
     TIMEFRAME_MAPPING,
     TIMEFRAME_SECONDS,
-    CANDLE_CLOSE_BUFFER_SECONDS  # ← NEW
+    CANDLE_CLOSE_BUFFER_SECONDS
 )
 from utils.timeframe import get_timeframe_seconds
 
@@ -111,13 +111,14 @@ class DualSuperTrendStrategy:
         
         if is_ready:
             logger.info(f"✅ Candle CLOSED and READY (waited {buffer_seconds}s buffer)")
-            logger.info(f"   Candle opened: {datetime.fromtimestamp(candle_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-            logger.info(f"   Candle closed: {datetime.fromtimestamp(candle_close_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-            logger.info(f"   Data ready: {datetime.fromtimestamp(ready_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+            # logger.info(f"   Candle opened: {datetime.fromtimestamp(candle_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+            # logger.info(f"   Candle closed: {datetime.fromtimestamp(candle_close_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+            # logger.info(f"   Data ready: {datetime.fromtimestamp(ready_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
         else:
-            logger.info(f"⏳ Waiting for candle close + {buffer_seconds}s buffer")
-            logger.info(f"   Candle closes: {datetime.fromtimestamp(candle_close_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-            logger.info(f"   Data ready in: {seconds_until_ready}s")
+            # logger.info(f"⏳ Waiting for candle close + {buffer_seconds}s buffer")
+            # logger.info(f"   Candle closes: {datetime.fromtimestamp(candle_close_time).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+            # logger.info(f"   Data ready in: {seconds_until_ready}s")
+            pass
         
         return {
             'is_closed': is_ready,
@@ -160,7 +161,7 @@ class DualSuperTrendStrategy:
                 return None
             
             resolution = TIMEFRAME_MAPPING[timeframe]
-            logger.info(f"✅ Timeframe '{timeframe}' maps to resolution '{resolution}'")
+            # logger.info(f"✅ Timeframe '{timeframe}' maps to resolution '{resolution}'")
             
             # ===== STEP 2: Get dynamic candle requirements per timeframe =====
             # ✅ COMPLETE: ALL timeframes optimized for accuracy
@@ -199,15 +200,15 @@ class DualSuperTrendStrategy:
             
             # ===== STEP 3: Track fetch time for debug =====
             last_fetch = self._last_fetch_time.get(cache_key)
-            if last_fetch:
-                time_since_fetch = (current_time - last_fetch).total_seconds()
-                logger.info(f"⏱️ Last fetch for {symbol} {timeframe}: {time_since_fetch:.1f}s ago")
-            else:
-                logger.info(f"📍 First fetch for {symbol} {timeframe}")
+            # if last_fetch:
+            #     time_since_fetch = (current_time - last_fetch).total_seconds()
+            #     logger.info(f"⏱️ Last fetch for {symbol} {timeframe}: {time_since_fetch:.1f}s ago")
+            # else:
+            #     logger.info(f"📍 First fetch for {symbol} {timeframe}")
             
             # ===== STEP 4: ALWAYS fetch FRESH candles (never use cache) =====
             logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
-            logger.info(f"   Using API resolution: {resolution}")
+            # logger.info(f"   Using API resolution: {resolution}")
             
             # Force fresh fetch with explicit end_time = now
             end_time = int(current_time.timestamp())
@@ -233,12 +234,12 @@ class DualSuperTrendStrategy:
             if actual_count > 0:
                 last_candle_time = candles[-1].get("time", 0)
                 last_candle_datetime = datetime.fromtimestamp(last_candle_time)
-                time_diff = (current_time - last_candle_datetime).total_seconds()
+                # time_diff = (current_time - last_candle_datetime).total_seconds()
                 
                 logger.info(f"✅ Retrieved {actual_count} candles")
-                logger.info(f"   Latest candle time: {last_candle_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-                logger.info(f"   Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-                logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
+                # logger.info(f"   Latest candle time: {last_candle_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+                # logger.info(f"   Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+                # logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
                 # ✅ No stale detection - API naturally lags 1-3 minutes
                 # This is completely normal. Just wait for 5-second buffer below.
             
@@ -246,7 +247,7 @@ class DualSuperTrendStrategy:
             candle_status = self._is_candle_closed(candles, timeframe)
             
             if not candle_status['is_closed']:
-                logger.info(f"⏳ Waiting {candle_status['seconds_until_ready']}s for candle close + buffer...")
+                # logger.info(f"⏳ Waiting {candle_status['seconds_until_ready']}s for candle close + buffer...")
                 return None
                 
             # ===== STEP 7: Validate minimum data requirements =====
@@ -261,7 +262,7 @@ class DualSuperTrendStrategy:
             
             # ===== STEP 8: Calculate Perusu (Entry indicator) =====
             logger.info(f"🔵 Calculating PERUSU (ATR period={PERUSU_ATR_LENGTH}, factor={PERUSU_FACTOR})")
-            logger.info(f"   Using {actual_count} candles")
+            # logger.info(f"   Using {actual_count} candles")
             
             perusu_result = self.perusu.calculate(candles)
             
@@ -271,7 +272,7 @@ class DualSuperTrendStrategy:
             
             # ===== STEP 9: Calculate Sirusu (Exit indicator) =====
             logger.info(f"🔴 Calculating SIRUSU (ATR period={SIRUSU_ATR_LENGTH}, factor={SIRUSU_FACTOR})")
-            logger.info(f"   Using {actual_count} candles")
+            # logger.info(f"   Using {actual_count} candles")
             
             sirusu_result = self.sirusu.calculate(candles)
             
@@ -296,7 +297,7 @@ class DualSuperTrendStrategy:
                 "calculated_at": current_time,
                 "candles_used": actual_count,
                 "candles_requested": required_candles,
-                "candle_status": candle_status,  # ← NEW
+                "candle_status": candle_status,
                 "perusu": perusu_result,
                 "sirusu": sirusu_result,
                 "previous_candle": {
@@ -308,9 +309,9 @@ class DualSuperTrendStrategy:
             
             # ===== STEP 12: Log summary and update tracking =====
             logger.info(f"✅ INDICATORS CALCULATED SUCCESSFULLY (Chart-Accurate)")
-            logger.info(f"   Symbol: {symbol}")
-            logger.info(f"   Timeframe: {timeframe}")
-            logger.info(f"   Candles: {actual_count}/{required_candles}")
+            # logger.info(f"   Symbol: {symbol}")
+            # logger.info(f"   Timeframe: {timeframe}")
+            # logger.info(f"   Candles: {actual_count}/{required_candles}")
             logger.info(f"   📊 Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Current Price: ${perusu_result.get('latest_close', 0):.5f}")
@@ -333,7 +334,7 @@ class DualSuperTrendStrategy:
                           last_signal: Optional[int]) -> Optional[str]:
         """Detect if Perusu signal has flipped from last known state."""
         if last_signal is None:
-            logger.info(f"📍 Initial Perusu state: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
+            # logger.info(f"📍 Initial Perusu state: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
             return None
         
         if current_signal == last_signal:
@@ -356,7 +357,7 @@ class DualSuperTrendStrategy:
         else:
             breakout_price = prev_low - BREAKOUT_PIP_OFFSET
         
-        logger.info(f"🎯 Breakout {entry_side.upper()} trigger: ${breakout_price:.5f}")
+        # logger.info(f"🎯 Breakout {entry_side.upper()} trigger: ${breakout_price:.5f}")
         return breakout_price
     
     def should_exit_position(self, current_sirusu_signal: int, 
@@ -405,9 +406,9 @@ class DualSuperTrendStrategy:
             
                 if current_price >= trigger_price:
                     logger.warning(f"⚠️ Price already above breakout level!")
-                    logger.warning(f"   Current: ${current_price:.5f}")
-                    logger.warning(f"   Trigger: ${trigger_price:.5f}")
-                    logger.warning(f"   Latest High: ${prev_high:.5f}")
+                    # logger.warning(f"   Current: ${current_price:.5f}")
+                    # logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    # logger.warning(f"   Latest High: ${prev_high:.5f}")
                     logger.warning(f"   → Using MARKET order (immediate execution)")
                 
                     return {
@@ -425,9 +426,9 @@ class DualSuperTrendStrategy:
                 
                 if current_price <= trigger_price:
                     logger.warning(f"⚠️ Price already below breakout level!")
-                    logger.warning(f"   Current: ${current_price:.5f}")
-                    logger.warning(f"   Trigger: ${trigger_price:.5f}")
-                    logger.warning(f"   Latest Low: ${prev_low:.5f}")
+                    # logger.warning(f"   Current: ${current_price:.5f}")
+                    # logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    # logger.warning(f"   Latest Low: ${prev_low:.5f}")
                     logger.warning(f"   → Using MARKET order (immediate execution)")
                 
                     return {
@@ -443,10 +444,10 @@ class DualSuperTrendStrategy:
             logger.info(f"🎯 Entry signal generated:")
             logger.info(f"   Side: {entry_side.upper()}")
             logger.info(f"   Breakout trigger: ${trigger_price:.5f}")
-            logger.info(f"   Current price: ${current_price:.5f}")
-            logger.info(f"   Latest High: ${prev_high:.5f}")
-            logger.info(f"   Latest Low: ${prev_low:.5f}")
-            logger.info(f"   Perusu value: ${perusu['supertrend_value']:.5f}")
+            # logger.info(f"   Current price: ${current_price:.5f}")
+            # logger.info(f"   Latest High: ${prev_high:.5f}")
+            # logger.info(f"   Latest Low: ${prev_low:.5f}")
+            # logger.info(f"   Perusu value: ${perusu['supertrend_value']:.5f}")
         
             return {
                 "side": entry_side,
@@ -482,8 +483,8 @@ class DualSuperTrendStrategy:
             if should_exit:
                 logger.info(f"🚪 Exit signal generated:")
                 logger.info(f"   Position: {position_side.upper()}")
-                logger.info(f"   Sirusu signal: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
-                logger.info(f"   Sirusu value: ${sirusu['supertrend_value']:.5f}")
+                # logger.info(f"   Sirusu signal: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
+                # logger.info(f"   Sirusu value: ${sirusu['supertrend_value']:.5f}")
                 
                 return {
                     "exit_reason": f"Sirusu flip to {'uptrend' if current_signal == 1 else 'downtrend'}",
