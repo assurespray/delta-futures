@@ -213,7 +213,7 @@ class DualSuperTrendStrategy:
             
             actual_count = len(candles)
             
-            # ===== ✅ STEP 5B: NEW - DETECT STALE CANDLE DATA =====
+                        # ===== STEP 5: Validate candle freshness =====
             if actual_count > 0:
                 last_candle_time = candles[-1].get("time", 0)
                 last_candle_datetime = datetime.fromtimestamp(last_candle_time)
@@ -223,6 +223,10 @@ class DualSuperTrendStrategy:
                 logger.info(f"   Latest candle time: {last_candle_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                 logger.info(f"   Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                 logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
+                
+                # ✅ REMOVED: Stale detection - API naturally lags 1-3 minutes
+                # The 181s age is NORMAL! Just wait for 5-second buffer instead.
+
                 
                 # ✅ CRITICAL: Detect stale data
                 # If candle is older than 1.2x timeframe = API returning old data
@@ -240,13 +244,13 @@ class DualSuperTrendStrategy:
                 if time_diff > (timeframe_seconds * 1.0):
                     logger.warning(f"⚠️ Candle data is old: {time_diff:.0f}s ({(time_diff/timeframe_seconds):.1f}x timeframe)")
             
-            # ===== ✅ STEP 6: Check if candle is closed (now with confidence!) =====
+            # ===== STEP 6: Check if candle is closed + 5s buffer ===== 
             candle_status = self._is_candle_closed(candles, timeframe)
             
             if not candle_status['is_closed']:
                 logger.warning(f"⏳ SKIPPING: Waiting {candle_status['seconds_until_ready']}s for candle close + buffer")
                 logger.warning(f"   (Reason: {candle_status['reason']})")
-                return None  # ← SKIP THIS CYCLE
+                return None  # ← SKIP THIS CYCLE ONLY
                 
             # ===== STEP 7: Validate minimum data requirements =====
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
