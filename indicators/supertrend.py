@@ -1,31 +1,73 @@
-"""SuperTrend indicator implementation - TradingView compatible with vectorization."""
+"""
+SuperTrend Indicator - TradingView Compatible with Vectorization & RMA
+✅ Uses RMA (Relative Moving Average) like TradingView default
+✅ Full vectorization for performance
+✅ Proper trailing band logic with exact TradingView formula
+✅ Dynamic precision handling
+"""
+
 import logging
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Any
-from indicators.base import BaseIndicator
-from config.constants import SIGNAL_UPTREND, SIGNAL_DOWNTREND
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Signal constants
+SIGNAL_UPTREND = 1
+SIGNAL_DOWNTREND = -1
 
-class SuperTrend(BaseIndicator):
-    """SuperTrend indicator based on ATR with RMA (TradingView default) - OPTIMIZED."""
+
+class SuperTrend:
+    """
+    SuperTrend indicator - TradingView compatible implementation.
     
-    def __init__(self, atr_length: int, factor: float, name: str = "SuperTrend"):
-        """
-        Initialize SuperTrend indicator.
-        
-        Args:
-            atr_length: ATR period length
-            factor: Multiplier factor for ATR
-            name: Indicator name
-        """
-        super().__init__(name)
+    ✅ Formula Implementation:
+    1. Basic Upper Band = HL2 + (Factor × ATR)
+    2. Basic Lower Band = HL2 - (Factor × ATR)
+    3. Final Upper Band = Trailing Logic (can only stay same or decrease)
+    4. Final Lower Band = Trailing Logic (can only stay same or increase)
+    5. SuperTrend = Final Lower Band (uptrend) or Final Upper Band (downtrend)
+    
+    Uses RMA (Exponential Moving Average) for ATR, matching TradingView.
+    
+    Parameters:
+    - atr_length: ATR period (typically 10, 14, or 20)
+    - factor: Multiplier for ATR distance (typically 2, 3, 10, or 20)
+    - name: Indicator name for logging
+    """
+    
+    def __init__(self, atr_length: int = 20, factor: float = 20, name: str = "SuperTrend"):
+        """Initialize SuperTrend indicator."""
         self.atr_length = atr_length
         self.factor = factor
+        self.name = name
     
-    def _get_precision(self, value: float) -> int:
+    @staticmethod
+    def candles_to_dataframe(candles: List[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Convert candle list to pandas DataFrame.
+        
+        Args:
+            candles: List of OHLC dictionaries
+        
+        Returns:
+            DataFrame with OHLC data
+        """
+        if not candles:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(candles)
+        
+        # Ensure float types for OHLC columns
+        for col in ['open', 'high', 'low', 'close']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        return df.reset_index(drop=True)
+    
+    @staticmethod
+    def _get_precision(value: float) -> int:
         """
         Determine appropriate decimal precision based on value magnitude.
         
@@ -46,14 +88,17 @@ class SuperTrend(BaseIndicator):
             return 6
         elif abs_value < 100:
             return 4
-        elif abs_value < 10000:
-            return 2
         else:
             return 2
     
     def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
         """
-        Calculate Average True Range (ATR) using RMA - OPTIMIZED WITH VECTORIZATION.
+        Calculate Average True Range (ATR) using RMA (Exponential MA).
+        
+        ✅ RMA Formula (matches TradingView):
+        ATR[0] = SMA(TR, period)
+        ATR[n] = ATR[n-1] × (1 - α) + TR[n] × α
+        where α = 1/period
         
         Args:
             df: DataFrame with OHLC data
@@ -65,9 +110,10 @@ class SuperTrend(BaseIndicator):
         low = df['low'].values
         close = df['close'].values
         
-        # Vectorized True Range calculation
+        # ===== STEP 1: Calculate True Range (vectorized) =====
+        # TR = max(H - L, |H - PC|, |L - PC|)
         prev_close = np.roll(close, 1)
-        prev_close[0] = close[0]
+        prev_close[0] = close[0]  # First TR = High - Low
         
         tr = np.maximum(
             high - low,
@@ -77,128 +123,159 @@ class SuperTrend(BaseIndicator):
             )
         )
         
-        # ✅ OPTIMIZED: Vectorized RMA calculation
+        # ===== STEP 2: Calculate RMA using Exponential MA (vectorized) =====
         atr = np.zeros(len(df))
-        
-        # First ATR = SMA of first 'length' TR values
-        atr[self.atr_length - 1] = np.mean(tr[:self.atr_length])
-        
-        # Calculate subsequent ATR using RMA (vectorized loop)
         alpha = 1.0 / self.atr_length
+        
+        # First RMA = SMA of first 'length' values
+        if len(df) >= self.atr_length:
+            atr[self.atr_length - 1] = np.mean(tr[:self.atr_length])
+        
+        # Subsequent RMA values using exponential smoothing
+        # ATR[n] = ATR[n-1] × (1 - α) + TR[n] × α
         for i in range(self.atr_length, len(df)):
             atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
         
-        # Convert to pandas Series
+        # Forward fill for initial NaN values, backfill for any remaining
         atr_series = pd.Series(atr, index=df.index)
-        atr_series = atr_series.ffill().bfill()
-        
-        # ✅ COMMENTED OUT - SAVES ~0.05s
-        # Logging
-        # latest_tr = tr[-1]
-        # latest_atr = atr[-1]
-        # tr_precision = self._get_precision(latest_tr)
-        # atr_precision = self._get_precision(latest_atr)
-        # 
-        # logger.info(f"🔍 {self.name} ATR (RMA method):")
-        # logger.info(f"   Period: {self.atr_length}")
-        # logger.info(f"   Latest TR: {latest_tr:.{tr_precision}f}")
-        # logger.info(f"   Latest ATR: {latest_atr:.{atr_precision}f}")
+        atr_series = atr_series.replace(0, np.nan).ffill().bfill()
         
         return atr_series
     
-    def calculate(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
-        Calculate SuperTrend indicator - OPTIMIZED WITH VECTORIZATION.
+        Calculate SuperTrend indicator with full trailing band logic.
+        
+        ✅ Complete Formula Steps:
+        
+        1. Convert candles to DataFrame
+        2. Calculate ATR using RMA
+        3. Calculate Basic Upper/Lower Bands:
+           - Basic UB = HL2 + (Factor × ATR)
+           - Basic LB = HL2 - (Factor × ATR)
+        4. Apply Trailing Logic to Final Bands:
+           - Final UB can only move down or stay same
+           - Final LB can only move up or stay same
+        5. Determine Trend Direction:
+           - Close > Final UB → Uptrend (use Final LB as SuperTrend)
+           - Close < Final LB → Downtrend (use Final UB as SuperTrend)
         
         Args:
-            candles: List of OHLC candle data
+            candles: List of OHLC candle dictionaries
         
         Returns:
-            Dictionary with SuperTrend values and signal
+            Dictionary with SuperTrend values and signal, or None on error
         """
         try:
-            # Convert to DataFrame
+            # ===== STEP 1: Convert to DataFrame =====
             df = self.candles_to_dataframe(candles)
             
             if len(df) < self.atr_length + 1:
-                logger.warning(f"⚠️ Not enough data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
+                logger.warning(f"⚠️ Insufficient data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
                 return None
             
-            # Calculate ATR using optimized RMA
+            # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
             
-            # ✅ VECTORIZED: Calculate basic bands using NumPy
+            # ===== STEP 3: Calculate Basic Upper/Lower Bands (vectorized) =====
+            # HL2 = (High + Low) / 2
             hl2 = (df['high'].values + df['low'].values) / 2
             atr_vals = atr.values
-            basic_upperband = hl2 + (self.factor * atr_vals)
-            basic_lowerband = hl2 - (self.factor * atr_vals)
             
-            # Initialize arrays for final bands and signals
+            # Basic Upper Band = HL2 + (Factor × ATR)
+            basic_ub = hl2 + (self.factor * atr_vals)
+            
+            # Basic Lower Band = HL2 - (Factor × ATR)
+            basic_lb = hl2 - (self.factor * atr_vals)
+            
+            # ===== STEP 4: Apply Trailing Logic to Final Bands =====
             n = len(df)
-            final_upperband = np.zeros(n)
-            final_lowerband = np.zeros(n)
-            supertrend = np.zeros(n)
-            signal = np.zeros(n, dtype=int)
+            final_ub = np.zeros(n)
+            final_lb = np.zeros(n)
             
             close_vals = df['close'].values
             
-            # ✅ OPTIMIZED: Calculate final bands (still needs loop for logic)
-            final_upperband[0] = basic_upperband[0]
-            final_lowerband[0] = basic_lowerband[0]
+            # Initialize first values
+            final_ub[0] = basic_ub[0]
+            final_lb[0] = basic_lb[0]
+            
+            # ✅ Trailing Logic Implementation:
+            # Final Upper Band Trailing:
+            #   IF Basic UB < Prev Final UB OR Prev Close > Prev Final UB:
+            #     Final UB = Basic UB
+            #   ELSE:
+            #     Final UB = Prev Final UB
+            #
+            # Final Lower Band Trailing:
+            #   IF Basic LB > Prev Final LB OR Prev Close < Prev Final LB:
+            #     Final LB = Basic LB
+            #   ELSE:
+            #     Final LB = Prev Final LB
             
             for i in range(1, n):
-                # Final Upperband logic
-                if (basic_upperband[i] < final_upperband[i-1]) or (close_vals[i-1] > final_upperband[i-1]):
-                    final_upperband[i] = basic_upperband[i]
+                # Upper Band Trailing Logic
+                if (basic_ub[i] < final_ub[i-1]) or (close_vals[i-1] > final_ub[i-1]):
+                    final_ub[i] = basic_ub[i]
                 else:
-                    final_upperband[i] = final_upperband[i-1]
+                    final_ub[i] = final_ub[i-1]
                 
-                # Final Lowerband logic
-                if (basic_lowerband[i] > final_lowerband[i-1]) or (close_vals[i-1] < final_lowerband[i-1]):
-                    final_lowerband[i] = basic_lowerband[i]
+                # Lower Band Trailing Logic
+                if (basic_lb[i] > final_lb[i-1]) or (close_vals[i-1] < final_lb[i-1]):
+                    final_lb[i] = basic_lb[i]
                 else:
-                    final_lowerband[i] = final_lowerband[i-1]
+                    final_lb[i] = final_lb[i-1]
             
-            # ✅ OPTIMIZED: SuperTrend and Signal determination
-            # Initial signal
-            if close_vals[0] > final_upperband[0]:
-                supertrend[0] = final_lowerband[0]
+            # ===== STEP 5: Determine Trend & SuperTrend Line =====
+            supertrend = np.zeros(n)
+            signal = np.zeros(n, dtype=int)
+            
+            # Initialize first value
+            if close_vals[0] > final_ub[0]:
+                supertrend[0] = final_lb[0]
                 signal[0] = SIGNAL_UPTREND
             else:
-                supertrend[0] = final_upperband[0]
+                supertrend[0] = final_ub[0]
                 signal[0] = SIGNAL_DOWNTREND
             
-            # Subsequent signals (vectorized where possible)
+            # ✅ Calculate subsequent values based on trend
             for i in range(1, n):
-                # Was in downtrend (using upper band)
-                if supertrend[i-1] == final_upperband[i-1]:
-                    if close_vals[i] > final_upperband[i]:
-                        supertrend[i] = final_lowerband[i]
+                # Previous bar was in downtrend (SuperTrend = Final UB)
+                if supertrend[i-1] == final_ub[i-1]:
+                    if close_vals[i] > final_ub[i]:
+                        # Flip to uptrend
+                        supertrend[i] = final_lb[i]
                         signal[i] = SIGNAL_UPTREND
                     else:
-                        supertrend[i] = final_upperband[i]
+                        # Stay in downtrend
+                        supertrend[i] = final_ub[i]
                         signal[i] = SIGNAL_DOWNTREND
-                # Was in uptrend (using lower band)
+                
+                # Previous bar was in uptrend (SuperTrend = Final LB)
                 else:
-                    if close_vals[i] < final_lowerband[i]:
-                        supertrend[i] = final_upperband[i]
+                    if close_vals[i] < final_lb[i]:
+                        # Flip to downtrend
+                        supertrend[i] = final_ub[i]
                         signal[i] = SIGNAL_DOWNTREND
                     else:
-                        supertrend[i] = final_lowerband[i]
+                        # Stay in uptrend
+                        supertrend[i] = final_lb[i]
                         signal[i] = SIGNAL_UPTREND
             
-            # Get latest values (vectorized access)
+            # ===== STEP 6: Extract Latest Values =====
             latest_idx = -1
+            latest_close = float(close_vals[latest_idx])
             latest_supertrend = float(supertrend[latest_idx])
             latest_signal = int(signal[latest_idx])
-            latest_close = float(close_vals[latest_idx])
             latest_atr = float(atr_vals[latest_idx])
+            latest_ub = float(final_ub[latest_idx])
+            latest_lb = float(final_lb[latest_idx])
             
-            # Determine precision
+            # Determine precision based on price magnitude
             price_precision = self._get_precision(latest_close)
             st_precision = self._get_precision(latest_supertrend)
             atr_precision = self._get_precision(latest_atr)
             
+            # ===== STEP 7: Build Result Dictionary =====
             result = {
                 "indicator_name": self.name,
                 "atr_length": self.atr_length,
@@ -208,19 +285,13 @@ class SuperTrend(BaseIndicator):
                 "signal": latest_signal,
                 "signal_text": "Uptrend" if latest_signal == SIGNAL_UPTREND else "Downtrend",
                 "atr": round(latest_atr, atr_precision),
+                "final_upper_band": round(latest_ub, st_precision),
+                "final_lower_band": round(latest_lb, st_precision),
                 "precision": price_precision
             }
             
-            # ✅ COMMENTED OUT - SAVES ~0.10s
-            # logger.info(f"✅ {self.name} calculated:")
-            # logger.info(f"   Price: ${latest_close:.{price_precision}f}")
-            # logger.info(f"   ATR: {latest_atr:.{atr_precision}f}")
-            # logger.info(f"   SuperTrend: ${latest_supertrend:.{st_precision}f}")
-            # logger.info(f"   Signal: {result['signal_text']}")
-            # logger.info(f"   Precision used: {price_precision} decimals")
-            
             return result
-            
+        
         except Exception as e:
             logger.error(f"❌ Failed to calculate {self.name}: {e}")
             import traceback
