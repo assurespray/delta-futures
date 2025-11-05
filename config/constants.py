@@ -53,6 +53,8 @@ TIME_IN_FORCE_FOK = "fok"     # Fill Or Kill
 # ✅ Used for calculating next check time
 # ✅ Used for rate limiting and cache expiry
 # ✅ Complete for ALL supported timeframes
+# Add if not already present
+CANDLE_CLOSE_BUFFER_SECONDS = 5
 
 TIMEFRAME_SECONDS = {
     # ===== MINUTES =====
