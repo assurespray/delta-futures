@@ -9,7 +9,7 @@ from database.mongodb import mongodb
 from bot import create_application
 from services.algo_engine import AlgoEngine
 from services.scheduler import scheduler_service
-from services.logger_bot import logger_bot
+#from services.logger_bot import logger_bot
 from utils.self_ping import self_ping
 
 # Configure logging
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Global instances
 ptb_app = None
 algo_engine = None
+logger_bot = None  # ✅ ADD THIS - will be initialized in startup
 
 
 @asynccontextmanager
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting application...")
     
     try:
+        # ✅ CREATE logger_bot instance FIRST
+        logger_bot = LoggerBot()  # ← Initialize here
+        logger.info("✅ Logger bot initialized")
+        
         # Connect to MongoDB
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
