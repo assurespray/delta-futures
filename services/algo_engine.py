@@ -188,19 +188,37 @@ class AlgoEngine:
             self.performance_stats["api_calls"] += 1
         
             # Calculate indicators
+            # ✅ NEW CODE (Smart retry loop - ONLY CHANGE)
             logger.info(f"🔄 Processing {setup_name} ({asset} {timeframe})")
-            indicator_start = time.time()
-            indicator_result = await self.strategy.calculate_indicators(client, asset, timeframe)
-            indicator_time = time.time() - indicator_start
-        
-            # ✅ COMMENTED OUT - SAVES ~0.01s
-            # logger.info(f"⏱️ [TEST] Indicator calculation: {indicator_time:.3f}s")
-        
+
+            # ✅ CRITICAL FIX: Smart retry loop (up to 10 seconds)
+            max_retries = 20  # 20 × 0.5s = 10 seconds max
+            retry_count = 0
+            indicator_result = None
+
+            while retry_count < max_retries:
+                indicator_result = await self.strategy.calculate_indicators(
+                    client, asset, timeframe
+                )
+    
+                if indicator_result:
+                    # ✅ SUCCESS - Data ready!
+                    if retry_count > 0:
+                        logger.info(f"✅ Indicators ready after {retry_count * 0.5:.1f}s")
+                    break
+    
+                retry_count += 1
+    
+                if retry_count < max_retries:
+                    await asyncio.sleep(0.5)  # Sleep 500ms before retry
+
             if not indicator_result:
-                logger.warning(f"⚠️ Failed to calculate indicators for {setup_name}")
+                logger.warning(f"⚠️ Failed to calculate indicators for {setup_name} after {max_retries * 0.5}s")
                 self.signal_counts["errors"] += 1
                 await client.close()
                 return
+
+        
         
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
