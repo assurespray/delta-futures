@@ -1,4 +1,4 @@
-"""Main FastAPI application with Telegram webhook and Asset Lock initialization."""
+"""Main FastAPI application with Telegram webhook and Smart Algo Engine."""
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -9,7 +9,7 @@ from database.mongodb import mongodb
 from bot import create_application
 from services.algo_engine import AlgoEngine
 from services.scheduler import scheduler_service
-#from services.logger_bot import logger_bot
+from services.logger_bot import LoggerBot  # ✅ Import CLASS (not instance!)
 from utils.self_ping import self_ping
 
 # Configure logging
@@ -26,38 +26,32 @@ logger = logging.getLogger(__name__)
 # Global instances
 ptb_app = None
 algo_engine = None
-logger_bot = None  # ✅ ADD THIS - will be initialized in startup
+logger_bot = None  # ✅ Will be initialized in startup
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for startup and shutdown.
-    ✅ ENHANCED: Added asset lock initialization and cleanup
-    
-    Args:
-        app: FastAPI application
-    """
-    global ptb_app, algo_engine
+    """Lifespan context manager for startup and shutdown."""
+    global ptb_app, algo_engine, logger_bot
     
     # ========== STARTUP ==========
     logger.info("🚀 Starting application...")
     
     try:
-        # ✅ CREATE logger_bot instance FIRST
-        logger_bot = LoggerBot()  # ← Initialize here
+        # ✅ FIRST: Initialize logger_bot (before any operations!)
+        logger_bot = LoggerBot()
         logger.info("✅ Logger bot initialized")
         
         # Connect to MongoDB
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
         
-        # ✅ FIXED: Call setup_position_lock_indexes as classmethod (NOT imported)
+        # Setup position lock system
         logger.info("🔐 Setting up position lock system...")
         await mongodb.setup_position_lock_indexes()
         logger.info("✅ Position lock indexes created")
         
-        # ✅ NEW: Clean stale locks from previous crashes
+        # Clean stale locks
         logger.info("🧹 Cleaning stale position locks...")
         from database.crud import cleanup_stale_locks
         
@@ -68,7 +62,7 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("✅ No stale locks found")
         
-        # ✅ NEW: Validate setup configuration (no multi-timeframe conflicts)
+        # Validate setup configuration
         logger.info("🔍 Validating setup configuration...")
         await validate_setup_configuration()
         logger.info("✅ Setup configuration validated")
@@ -76,13 +70,13 @@ async def lifespan(app: FastAPI):
         # Create Telegram bot application
         ptb_app = create_application()
         
-        # Set webhook (will update if already exists)
+        # Set webhook
         webhook_url = settings.webhook_url
         logger.info(f"🔧 Setting webhook to: {webhook_url}")
         
         webhook_set = await ptb_app.bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=False,  # Keep messages sent during restart!
+            drop_pending_updates=False,
             allowed_updates=["message", "callback_query"]
         )
         
@@ -92,40 +86,39 @@ async def lifespan(app: FastAPI):
             logger.error("❌ Failed to set webhook!")
             raise RuntimeError("Webhook setup failed")
         
-        # Verify webhook is set correctly
+        # Verify webhook
         webhook_info = await ptb_app.bot.get_webhook_info()
         logger.info(f"📡 Webhook URL: {webhook_info.url}")
         logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
 
-        # Log any webhook errors (only if last_error_date exists)
-        if webhook_info.last_error_date:  # ✅ FIXED - Just check if it exists
+        if webhook_info.last_error_date:
             logger.warning(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
-
         
         # Initialize bot
         await ptb_app.initialize()
         await ptb_app.start()
         logger.info("✅ Telegram bot started")
         
-        # Initialize algo engine
-        algo_engine = AlgoEngine(logger_bot)
-        logger.info("✅ Algo engine initialized")
-        
-        # Start scheduler
+        # Initialize scheduler
         scheduler_service.start()
         scheduler_service.add_cleanup_job()
         scheduler_service.add_health_check_job(health_check_task)
         logger.info("✅ Scheduler started")
         
-        # Start algo monitoring in background
-        asyncio.create_task(algo_engine.run_continuous_monitoring())
-        logger.info("✅ Algo monitoring started")
+        # ✅ Initialize algo engine with SMART monitoring
+        algo_engine = AlgoEngine(logger_bot)
+        logger.info("✅ Algo engine initialized")
         
+        # Start algo monitoring (SMART boundary-aligned scheduling!)
+        asyncio.create_task(algo_engine.run_continuous_monitoring())
+        logger.info("✅ Algo monitoring started (SMART scheduling active)")
+        
+        # Send startup notification
         await logger_bot.send_info(
             "🚀 Trading Bot Started Successfully!\n\n"
             "✅ Features Active:\n"
             "  • Telegram Bot\n"
-            "  • Algo Engine\n"
+            "  • Smart Algo Engine\n"
             "  • Asset Lock System\n"
             "  • Stop-Loss Protection\n"
             "  • Multi-Setup Safety"
@@ -143,17 +136,14 @@ async def lifespan(app: FastAPI):
     logger.info("🔒 Shutting down application...")
     
     try:
-        # ✅ NEW: Release all position locks on shutdown
+        # Release position locks
         logger.info("🔐 Releasing all position locks...")
-        
         db = mongodb.get_db()
         collection = db["position_locks"]
         result = await collection.delete_many({})
         
         if result.deleted_count > 0:
             logger.info(f"✅ Released {result.deleted_count} position locks")
-        
-        # Webhook stays active during restart - no deletion!
         
         # Stop scheduler
         scheduler_service.shutdown()
@@ -169,12 +159,14 @@ async def lifespan(app: FastAPI):
         await mongodb.close_db()
         logger.info("✅ MongoDB connection closed")
         
-        await logger_bot.send_warning(
-            "🔒 Trading Bot Shut Down\n\n"
-            "✅ All position locks released\n"
-            "✅ All open orders cancelled\n"
-            "✅ Bot state cleaned"
-        )
+        # Send shutdown notification
+        if logger_bot:
+            await logger_bot.send_warning(
+                "🔒 Trading Bot Shut Down\n\n"
+                "✅ All position locks released\n"
+                "✅ All open orders cancelled\n"
+                "✅ Bot state cleaned"
+            )
         
         logger.info("✅ Shutdown complete")
         
@@ -185,13 +177,7 @@ async def lifespan(app: FastAPI):
 
 
 async def validate_setup_configuration():
-    """
-    Validate that no asset has multiple active setups.
-    Prevents multi-timeframe conflicts.
-    
-    Raises:
-        Exception if configuration is invalid
-    """
+    """Validate no asset has multiple active setups."""
     try:
         from database.crud import get_all_active_algo_setups
         
@@ -213,14 +199,12 @@ async def validate_setup_configuration():
         conflicts = False
         for symbol, setups in assets_map.items():
             if len(setups) > 1:
-                logger.warning(f"⚠️ CONFLICT DETECTED: {symbol} has {len(setups)} active setups!")
+                logger.warning(f"⚠️ CONFLICT: {symbol} has {len(setups)} active setups!")
                 for setup in setups:
                     logger.warning(f"   - {setup['setup_name']} ({setup.get('timeframe', 'N/A')})")
                 conflicts = True
         
         if conflicts:
-            logger.error(f"❌ INVALID SETUP: Multiple timeframes on same asset!")
-            logger.error(f"   Please disable all but ONE setup per asset")
             raise Exception("Invalid setup configuration: Multiple timeframes detected")
         
         logger.info(f"✅ Setup configuration valid - no asset conflicts")
@@ -236,7 +220,7 @@ async def validate_setup_configuration():
 # Create FastAPI app
 app = FastAPI(
     title="Delta Exchange Trading Bot",
-    description="Automated futures trading with Telegram bot interface + Asset Lock Protection",
+    description="Automated futures trading with Smart Algo Engine + Asset Lock Protection",
     version="2.0.0",
     lifespan=lifespan
 )
@@ -244,15 +228,7 @@ app = FastAPI(
 
 @app.post("/")
 async def telegram_webhook(request: Request):
-    """
-    Handle incoming Telegram webhook updates.
-    
-    Args:
-        request: FastAPI request
-    
-    Returns:
-        Response with 200 status
-    """
+    """Handle incoming Telegram webhook updates."""
     try:
         req = await request.json()
         update = Update.de_json(req, ptb_app.bot)
@@ -264,23 +240,17 @@ async def telegram_webhook(request: Request):
         return Response(status_code=500)
 
 
-# Root endpoint - supports both GET and HEAD for Render health checks
 @app.get("/")
 @app.head("/")
 async def root():
-    """
-    Root endpoint with health status.
-    Render.com will ping this for health checks.
-    
-    Returns:
-        JSON with status (GET) or 200 status (HEAD)
-    """
+    """Root endpoint with health status."""
     from datetime import datetime
     
     return {
         "message": "Delta Exchange Trading Bot API",
         "status": "running",
         "version": "2.0.0",
+        "engine": "Smart Boundary-Aligned",
         "features": [
             "Dual SuperTrend Strategy",
             "Stop-Loss Protection",
@@ -292,29 +262,17 @@ async def root():
     }
 
 
-# Health check endpoints (UptimeRobot compatibility)
 @app.head("/universal/health")
 @app.head("/health")
 async def health_check_head():
-    """
-    Health check endpoint for HEAD requests (UptimeRobot).
-    
-    Returns:
-        Response with 200 status
-    """
+    """Health check for HEAD requests."""
     return Response(status_code=200)
 
 
 @app.get("/universal/health")
 @app.get("/health")
 async def health_check_get():
-    """
-    Health check endpoint for GET requests.
-    Returns detailed health information.
-    
-    Returns:
-        JSON with health status and metrics
-    """
+    """Health check for GET requests with detailed metrics."""
     from datetime import datetime
     
     try:
@@ -336,10 +294,12 @@ async def health_check_get():
             "scheduler_jobs": scheduler_service.get_job_count(),
             "environment": settings.environment,
             "version": "2.0.0",
+            "engine": "Smart Boundary-Aligned",
             "features": {
                 "asset_lock": "enabled",
                 "stop_loss_protection": "enabled",
-                "multi_setup_safety": "enabled"
+                "multi_setup_safety": "enabled",
+                "smart_scheduling": "enabled"
             }
         }
     
@@ -358,9 +318,10 @@ async def health_check_task():
         success = await self_ping.ping()
         
         if not success and self_ping.is_critical():
-            await logger_bot.send_error(
-                f"❌ CRITICAL: Self-ping failed {self_ping.fail_count} times!"
-            )
+            if logger_bot:  # ✅ Check if initialized
+                await logger_bot.send_error(
+                    f"❌ CRITICAL: Self-ping failed {self_ping.fail_count} times!"
+                )
             self_ping.reset_fail_count()
     
     except Exception as e:
@@ -374,5 +335,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=False
-)
+    )
     
