@@ -1,3 +1,7 @@
+# Add at top of main.py BEFORE any imports
+from config.logging import configure_logging
+configure_logging()
+
 """Main FastAPI application with Telegram webhook and Smart Algo Engine."""
 import logging
 import asyncio
