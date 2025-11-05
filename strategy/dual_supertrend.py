@@ -1,5 +1,6 @@
 """Dual SuperTrend breakout strategy (Perusu entry + Sirusu exit).
 ✅ GUARANTEED FRESH DATA - Always fetches current correct candles each calculation cycle
+✅ USES LATEST CANDLE HIGH/LOW FOR BREAKOUT - Not previous
 """
 
 import logging
@@ -24,10 +25,11 @@ class DualSuperTrendStrategy:
     """
     Dual SuperTrend breakout + trailing stop strategy.
     ✅ GUARANTEED: ALWAYS fetches FRESH candles every calculation cycle
+    ✅ USES: LATEST candle high/low for breakout (not previous)
     
     Entry Logic:
     - Perusu (20,20) signal flip triggers breakout entry order
-    - Entry at previous candle HIGH/LOW + 1 pip (stop-market order)
+    - Entry at LATEST candle HIGH/LOW + 1 pip (stop-market order) ✅ UPDATED
     - OR immediate market execution if price already broke
     
     Exit Logic:
@@ -202,15 +204,15 @@ class DualSuperTrendStrategy:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
                 return None
             
-            # ===== STEP 9: Get previous candle high/low for breakout entry =====
-            if len(candles) >= 2:
-                prev_candle = candles[-2]  # Previous closed candle
-                prev_high = float(prev_candle.get("high", 0))
-                prev_low = float(prev_candle.get("low", 0))
+            # ===== STEP 9: Get LATEST candle high/low for breakout entry ✅ FIXED =====
+            # ✅ CHANGED: Now uses candles[-1] (LATEST) instead of candles[-2] (PREVIOUS)
+            if len(candles) >= 1:
+                latest_candle = candles[-1]  # ✅ LATEST candle (current forming)
+                prev_high = float(latest_candle.get("high", 0))
+                prev_low = float(latest_candle.get("low", 0))
             else:
-                prev_candle = candles[-1]
-                prev_high = float(prev_candle.get("high", 0))
-                prev_low = float(prev_candle.get("low", 0))
+                logger.error("❌ No candles available for breakout")
+                return None
             
             # ===== STEP 10: Build result with metadata =====
             result = {
@@ -237,7 +239,7 @@ class DualSuperTrendStrategy:
             logger.info(f"   📊 Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Current Price: ${perusu_result.get('latest_close', 0):.5f}")
-            logger.info(f"   📊 Previous Candle: High ${prev_high:.5f}, Low ${prev_low:.5f}")
+            logger.info(f"   📊 Latest Candle: High ${prev_high:.5f}, Low ${prev_low:.5f} ✅ UPDATED")
             logger.info(f"   📊 ATR(20): {perusu_result.get('atr', 0):.6f}")
             
             # Update tracking for next cycle
@@ -286,21 +288,22 @@ class DualSuperTrendStrategy:
     def calculate_breakout_price(self, entry_side: str, 
                                 prev_high: float, prev_low: float) -> float:
         """
-        Calculate breakout entry trigger price (candle extreme + 1 pip).
+        Calculate breakout entry trigger price (LATEST candle extreme + 1 pip).
+        ✅ NOW USES LATEST CANDLE HIGH/LOW
         
         Args:
             entry_side: "long" or "short"
-            prev_high: Previous candle high
-            prev_low: Previous candle low
+            prev_high: Latest candle high ✅ UPDATED
+            prev_low: Latest candle low ✅ UPDATED
         
         Returns:
             Breakout trigger price
         """
         if entry_side == "long":
-            # Long: Break above previous candle high
+            # Long: Break above LATEST candle high
             breakout_price = prev_high + BREAKOUT_PIP_OFFSET
         else:
-            # Short: Break below previous candle low
+            # Short: Break below LATEST candle low
             breakout_price = prev_low - BREAKOUT_PIP_OFFSET
         
         logger.info(f"🎯 Breakout {entry_side.upper()} trigger: ${breakout_price:.5f}")
@@ -338,6 +341,7 @@ class DualSuperTrendStrategy:
         """
         Generate entry signal based on Perusu flip + breakout logic.
         ✅ HANDLES: Immediate execution when price already broke through.
+        ✅ USES: LATEST candle high/low for breakout ✅ UPDATED
         ✅ GUARANTEES: Fresh candle data used for calculations
         
         Args:
@@ -361,7 +365,7 @@ class DualSuperTrendStrategy:
             prev_low = previous_candle.get("low")
         
             if not prev_high or not prev_low:
-                logger.error("❌ Missing previous candle high/low")
+                logger.error("❌ Missing latest candle high/low")
                 return None
         
             current_signal = perusu.get("signal")
@@ -375,7 +379,7 @@ class DualSuperTrendStrategy:
         
             # Calculate breakout trigger price
             if entry_side == "long":
-                # LONG: Break above previous candle high
+                # LONG: Break above LATEST candle high + 1 pip
                 trigger_price = prev_high + BREAKOUT_PIP_OFFSET
             
                 # Check if price already broke through
@@ -383,6 +387,7 @@ class DualSuperTrendStrategy:
                     logger.warning(f"⚠️ Price already above breakout level!")
                     logger.warning(f"   Current: ${current_price:.5f}")
                     logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    logger.warning(f"   Latest High: ${prev_high:.5f} ✅")
                     logger.warning(f"   → Using MARKET order (immediate execution)")
                 
                     return {
@@ -391,11 +396,12 @@ class DualSuperTrendStrategy:
                         'immediate': True,
                         'entry_reason': 'Perusu flip to uptrend (immediate)',
                         'perusu_signal': current_signal,
-                        'perusu_value': perusu['supertrend_value']
+                        'perusu_value': perusu['supertrend_value'],
+                        'latest_high': prev_high
                     }
         
             else:  # entry_side == "short"
-                # SHORT: Break below previous candle low
+                # SHORT: Break below LATEST candle low - 1 pip
                 trigger_price = prev_low - BREAKOUT_PIP_OFFSET
                 
                 # Check if price already broke through
@@ -403,6 +409,7 @@ class DualSuperTrendStrategy:
                     logger.warning(f"⚠️ Price already below breakout level!")
                     logger.warning(f"   Current: ${current_price:.5f}")
                     logger.warning(f"   Trigger: ${trigger_price:.5f}")
+                    logger.warning(f"   Latest Low: ${prev_low:.5f} ✅")
                     logger.warning(f"   → Using MARKET order (immediate execution)")
                 
                     return {
@@ -411,7 +418,8 @@ class DualSuperTrendStrategy:
                         'immediate': True,
                         'entry_reason': 'Perusu flip to downtrend (immediate)',
                         'perusu_signal': current_signal,
-                        'perusu_value': perusu['supertrend_value']
+                        'perusu_value': perusu['supertrend_value'],
+                        'latest_low': prev_low
                     }
         
             # Price hasn't broken through yet - use stop order
@@ -419,6 +427,8 @@ class DualSuperTrendStrategy:
             logger.info(f"   Side: {entry_side.upper()}")
             logger.info(f"   Breakout trigger: ${trigger_price:.5f}")
             logger.info(f"   Current price: ${current_price:.5f}")
+            logger.info(f"   Latest High: ${prev_high:.5f} ✅ UPDATED")
+            logger.info(f"   Latest Low: ${prev_low:.5f} ✅ UPDATED")
             logger.info(f"   Perusu value: ${perusu['supertrend_value']:.5f}")
         
             return {
