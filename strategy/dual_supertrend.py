@@ -169,7 +169,7 @@ class DualSuperTrendStrategy:
                 # ===== MINUTES =====
                 "1m": 200,
                 "2m": 300,
-                "3m": 300,
+                "3m": 400,
                 "4m": 300,
                 "5m": 300,
                 "10m": 300,
