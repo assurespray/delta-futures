@@ -642,7 +642,7 @@ class AlgoEngine:
                     try:
                         exchange_open_positions = await client.get_open_positions()
                         exchange_ids = set(p.get('id') for p in exchange_open_positions)
-                except Exception as e:
+                    except Exception as e:
                         logger.warning(f"⚠️ Could not fetch exchange positions for {api_id}: {e}")
                         await client.close()
                         continue
