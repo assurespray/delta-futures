@@ -635,8 +635,4 @@ async def reconcile_positions_on_startup():
         except Exception as e:
             logger.error(f"❌ Error reconciling {symbol}: {e}")
 
-# Call this on app startup
-async def on_startup():
-    await reconcile_positions_on_startup()
-    # ... rest of startup
 
