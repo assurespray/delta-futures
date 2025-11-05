@@ -6,7 +6,7 @@
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from indicators.supertrend import SuperTrend
+from indicators.supertrend import SuperTrend, SIGNAL_UPTREND, SIGNAL_DOWNTREND
 from indicators.signal_generator import SignalGenerator
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_candles, get_product_by_symbol
