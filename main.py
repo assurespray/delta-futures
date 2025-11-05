@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
         # Connect to MongoDB
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
+
+        # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)
+        from services.algo_engine import reconcile_positions_on_startup
+        await reconcile_positions_on_startup()
         
         # Setup position lock system
         logger.info("🔐 Setting up position lock system...")
