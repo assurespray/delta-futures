@@ -164,19 +164,35 @@ class DualSuperTrendStrategy:
             
             # ===== STEP 2: Get dynamic candle requirements per timeframe =====
             # ✅ COMPLETE: ALL timeframes optimized for accuracy
+            # ✅ NEW CODE: Custom candle requirements per timeframe
             timeframe_requirements = {
                 # ===== MINUTES =====
-                "1m": 300,      "2m": 250,      "3m": 200,      "4m": 200,
-                "5m": 200,      "10m": 180,     "15m": 150,     "20m": 135,
-                "30m": 120,     "45m": 100,
-                
+                "1m": 200,
+                "2m": 300,
+                "3m": 300,
+                "4m": 300,
+                "5m": 300,
+                "10m": 300,
+                "15m": 300,
+                "20m": 300,
+                "30m": 300,
+                "45m": 300,
+    
                 # ===== HOURS =====
-                "1h": 100,      "2h": 75,       "3h": 60,       "4h": 60,
-                "6h": 50,       "8h": 40,       "12h": 30,
-                
+                "1h": 300,
+                "2h": 300,
+                "3h": 300,
+                "4h": 300,
+                "6h": 300,
+                "8h": 300,
+                "12h": 300,
+    
                 # ===== DAYS =====
-                "1d": 50,       "2d": 40,       "3d": 30,       "7d": 25,
-                "1w": 25,
+                "1d": 600,
+                "2d": 300,
+                "3d": 300,
+                "7d": 300,
+                "1w": 300,
             }
             
             required_candles = timeframe_requirements.get(timeframe, 150)
