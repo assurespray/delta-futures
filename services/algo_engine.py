@@ -595,44 +595,95 @@ class AlgoEngine:
 async def reconcile_positions_on_startup():
     """
     ✅ FIX: Verify open positions exist on exchange
-    Called on bot startup
+    Called on bot startup - handles manually closed positions
     """
+    from database.mongodb import mongodb
+    from database.crud import get_api_credential_by_id
+    
     logger.info("🔍 Reconciling positions with exchange...")
     
-    # Get positions from DB
-    db_positions = db.positions.find({"status": "OPEN"})
-    
-    for db_pos in db_positions:
-        symbol = db_pos['symbol']
+    try:
+        # Get DB instance
+        db = mongodb.get_db()
         
-        # Query exchange for open positions
-        try:
-            exchange_positions = await delta_client.get_open_positions(symbol)
-            
-            # Check if this position exists on exchange
-            pos_exists = any(p['id'] == db_pos['order_id'] for p in exchange_positions)
-            
-            if not pos_exists:
-                # ✅ FIXED: Position was closed manually
-                logger.warning(f"⚠️ Position {db_pos['order_id']} not found on exchange!")
-                logger.info(f"   Marking as CLOSED in DB (was closed manually)")
+        # Get all open positions from DB
+        open_positions = list(db.positions.find({"status": "OPEN"}))
+        
+        if not open_positions:
+            logger.info("✅ No open positions to reconcile")
+            return
+        
+        logger.info(f"📊 Found {len(open_positions)} open position(s) - checking exchange...")
+        
+        # Group by API credential to minimize client creation
+        positions_by_api = {}
+        for pos in open_positions:
+            api_id = pos.get('api_id')
+            if api_id not in positions_by_api:
+                positions_by_api[api_id] = []
+            positions_by_api[api_id].append(pos)
+        
+        # Process each API credential's positions
+        for api_id, positions in positions_by_api.items():
+            try:
+                # Get credentials
+                cred = await get_api_credential_by_id(api_id, decrypt=True)
+                if not cred:
+                    logger.warning(f"⚠️ Could not load credentials for API {api_id}")
+                    continue
                 
-                # Update DB to CLOSED
-                db.positions.update_one(
-                    {"_id": db_pos['_id']},
-                    {
-                        "$set": {
-                            "status": "CLOSED",
-                            "closed_reason": "Manual close (position not found on exchange)",
-                            "closed_at": datetime.utcnow()
-                        }
-                    }
+                # Create client
+                client = DeltaExchangeClient(
+                    api_key=cred['api_key'],
+                    api_secret=cred['api_secret']
                 )
-                logger.info(f"   ✅ DB updated: status=CLOSED")
-            else:
-                logger.info(f"✅ Position {symbol} verified - exists on exchange")
                 
-        except Exception as e:
-            logger.error(f"❌ Error reconciling {symbol}: {e}")
-
-
+                # Get exchange positions
+                try:
+                    exchange_open_positions = await client.get_open_positions()
+                    exchange_ids = set(p.get('id') for p in exchange_open_positions)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch exchange positions for {api_id}: {e}")
+                    await client.close()
+                    continue
+                
+                # Check each position
+                for db_pos in positions:
+                    order_id = db_pos.get('order_id')
+                    symbol = db_pos.get('symbol', 'UNKNOWN')
+                    
+                    if order_id not in exchange_ids:
+                        # ✅ Position was closed manually
+                        logger.warning(f"⚠️ Position {order_id} ({symbol}) not found on exchange")
+                        logger.info(f"   Marking as CLOSED in DB (manual close detected)")
+                        
+                        # Update DB to CLOSED
+                        db.positions.update_one(
+                            {"_id": db_pos['_id']},
+                            {
+                                "$set": {
+                                    "status": "CLOSED",
+                                    "closed_reason": "Manual close (position not found on exchange)",
+                                    "closed_at": datetime.utcnow(),
+                                    "detected_at_startup": True
+                                }
+                            }
+                        )
+                        logger.info(f"   ✅ Status updated to CLOSED")
+                    else:
+                        logger.info(f"✅ Position {order_id} ({symbol}) verified on exchange")
+                
+                await client.close()
+                
+            except Exception as e:
+                logger.error(f"❌ Error reconciling positions for API {api_id}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        logger.info("✅ Position reconciliation completed")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to reconcile positions: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
