@@ -607,7 +607,9 @@ async def reconcile_positions_on_startup():
         db = mongodb.get_db()
         
         # Get all open positions from DB
-        open_positions = list(db.positions.find({"status": "OPEN"}))
+        # ✅ CORRECT - Use async list comprehension
+        open_positions = [pos async for pos in db.positions.find({"status": "OPEN"})]
+
         
         if not open_positions:
             logger.info("✅ No open positions to reconcile")
