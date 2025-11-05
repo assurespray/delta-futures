@@ -509,28 +509,26 @@ class AlgoEngine:
     
     async def run_continuous_monitoring(self):
         """
-        ✅ FIXED: Run continuous monitoring loop with DYNAMIC sleep based on timeframe.
-        This is the main 24/7 trading loop with testing instrumentation.
+        ✅ FIXED: Run continuous monitoring loop with BOUNDARY ALIGNMENT.
+        Sleeps until NEXT candle boundary, not fixed duration.
         """
         logger.info("🚀 Starting continuous algo monitoring...")
-        logger.info(f"📊 [TEST] Testing mode enabled with detailed logging")
-        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups (DYNAMIC SLEEP)")
-        
+        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups")
+    
         loop_count = 0
-        
+    
         while True:
             try:
                 loop_count += 1
-                loop_start = time.time()
-                
+            
                 # Get all active algo setups
                 active_setups = await get_all_active_algo_setups()
-                
+            
                 if not active_setups:
                     logger.debug("ℹ️ No active algo setups found")
                     await asyncio.sleep(60)
                     continue
-                
+            
                 logger.debug(f"📊 [Loop {loop_count}] Checking {len(active_setups)} active algo setup(s)")
                 
                 # Process each setup
@@ -538,7 +536,7 @@ class AlgoEngine:
                 for setup in active_setups:
                     task = asyncio.create_task(self.process_algo_setup(setup))
                     tasks.append(task)
-                
+            
                 # Wait for all processing to complete
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 
@@ -547,27 +545,26 @@ class AlgoEngine:
                     if isinstance(result, Exception):
                         setup_name = active_setups[i].get('setup_name', 'Unknown')
                         logger.error(f"❌ Error processing {setup_name}: {result}")
-                
-                loop_time = time.time() - loop_start
-                logger.debug(f"⏱️ [TEST] Loop {loop_count} completed in {loop_time:.3f}s")
-                
-                # ✅ COMMENTED OUT - SAVES ~0.02s
-                # # Log summary every 10 loops
-                # if loop_count % 10 == 0:
-                #     logger.info(f"📊 [TEST] Summary after {loop_count} loops:")
-                #     logger.info(f"   {self._format_stats()}")
-                #     logger.info(f"   {self._format_performance()}")
-                
-                # ✅ FIXED: Get dynamic sleep time from FIRST setup's timeframe
+            
+                # ✅ CRITICAL FIX: Calculate time until NEXT boundary
                 first_setup = active_setups[0]
                 timeframe = first_setup.get('timeframe', '1m')
-                sleep_seconds = self.get_sleep_time_seconds(timeframe)
+            
+                now = datetime.utcnow()
+                next_boundary = get_next_boundary_time(timeframe, now)
+            
+                # Calculate seconds until next boundary
+                time_until_boundary = (next_boundary - now).total_seconds()
+            
+                # Add 0.5 seconds buffer to ensure we're past the boundary
+                sleep_time = max(1, time_until_boundary + 0.5)
                 
-                # ✅ Log what we're about to do
-                logger.info(f"💤 Sleeping {sleep_seconds}s (waiting for next {timeframe} candle)")
-                
-                # ✅ SLEEP WITH DYNAMIC TIME (instead of hardcoded 60)
-                await asyncio.sleep(sleep_seconds)
+                logger.info(
+                    f"💤 Next check at {next_boundary.strftime('%H:%M:%S')} UTC "
+                    f"(sleeping {sleep_time:.1f}s for {timeframe} boundary)"
+                )
+            
+                await asyncio.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"❌ Exception in continuous monitoring: {e}")
