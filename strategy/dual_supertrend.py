@@ -213,7 +213,7 @@ class DualSuperTrendStrategy:
             
             actual_count = len(candles)
             
-                        # ===== STEP 5: Validate candle freshness =====
+            # ===== STEP 5: Validate candle freshness =====
             if actual_count > 0:
                 last_candle_time = candles[-1].get("time", 0)
                 last_candle_datetime = datetime.fromtimestamp(last_candle_time)
@@ -223,34 +223,15 @@ class DualSuperTrendStrategy:
                 logger.info(f"   Latest candle time: {last_candle_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                 logger.info(f"   Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                 logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
-                
-                # ✅ REMOVED: Stale detection - API naturally lags 1-3 minutes
-                # The 181s age is NORMAL! Just wait for 5-second buffer instead.
-
-                
-                # ✅ CRITICAL: Detect stale data
-                # If candle is older than 1.2x timeframe = API returning old data
-                stale_threshold = timeframe_seconds * 1.2
-                
-                if time_diff > stale_threshold:
-                    logger.warning(f"⚠️ STALE CANDLE DATA DETECTED!")
-                    logger.warning(f"   Latest candle age: {time_diff:.0f}s")
-                    logger.warning(f"   Stale threshold: {stale_threshold:.0f}s")
-                    logger.warning(f"   This is {time_diff - timeframe_seconds:.0f}s past candle close!")
-                    logger.warning(f"   Skipping to avoid false signals - wait for next cycle")
-                    return None  # ← SKIP THIS CYCLE
-                
-                # Safety check: warn if getting close to stale
-                if time_diff > (timeframe_seconds * 1.0):
-                    logger.warning(f"⚠️ Candle data is old: {time_diff:.0f}s ({(time_diff/timeframe_seconds):.1f}x timeframe)")
+                # ✅ No stale detection - API naturally lags 1-3 minutes
+                # This is completely normal. Just wait for 5-second buffer below.
             
             # ===== STEP 6: Check if candle is closed + 5s buffer ===== 
             candle_status = self._is_candle_closed(candles, timeframe)
             
             if not candle_status['is_closed']:
-                logger.warning(f"⏳ SKIPPING: Waiting {candle_status['seconds_until_ready']}s for candle close + buffer")
-                logger.warning(f"   (Reason: {candle_status['reason']})")
-                return None  # ← SKIP THIS CYCLE ONLY
+                logger.info(f"⏳ Waiting {candle_status['seconds_until_ready']}s for candle close + buffer...")
+                return None
                 
             # ===== STEP 7: Validate minimum data requirements =====
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
