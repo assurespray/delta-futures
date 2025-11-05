@@ -590,3 +590,53 @@ class AlgoEngine:
                 logger.error(traceback.format_exc())
                 await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
                 await asyncio.sleep(60)
+
+
+async def reconcile_positions_on_startup():
+    """
+    ✅ FIX: Verify open positions exist on exchange
+    Called on bot startup
+    """
+    logger.info("🔍 Reconciling positions with exchange...")
+    
+    # Get positions from DB
+    db_positions = db.positions.find({"status": "OPEN"})
+    
+    for db_pos in db_positions:
+        symbol = db_pos['symbol']
+        
+        # Query exchange for open positions
+        try:
+            exchange_positions = await delta_client.get_open_positions(symbol)
+            
+            # Check if this position exists on exchange
+            pos_exists = any(p['id'] == db_pos['order_id'] for p in exchange_positions)
+            
+            if not pos_exists:
+                # ✅ FIXED: Position was closed manually
+                logger.warning(f"⚠️ Position {db_pos['order_id']} not found on exchange!")
+                logger.info(f"   Marking as CLOSED in DB (was closed manually)")
+                
+                # Update DB to CLOSED
+                db.positions.update_one(
+                    {"_id": db_pos['_id']},
+                    {
+                        "$set": {
+                            "status": "CLOSED",
+                            "closed_reason": "Manual close (position not found on exchange)",
+                            "closed_at": datetime.utcnow()
+                        }
+                    }
+                )
+                logger.info(f"   ✅ DB updated: status=CLOSED")
+            else:
+                logger.info(f"✅ Position {symbol} verified - exists on exchange")
+                
+        except Exception as e:
+            logger.error(f"❌ Error reconciling {symbol}: {e}")
+
+# Call this on app startup
+async def on_startup():
+    await reconcile_positions_on_startup()
+    # ... rest of startup
+
