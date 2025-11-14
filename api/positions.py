@@ -295,17 +295,19 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
 from api.delta_client import DeltaExchangeClient
 
 async def display_positions_for_all_apis(credentials):
-    """
-    Fetch and display all open positions for a list of API credential dicts.
-    """
     message = "📊 *Open Positions Across All APIs*\n\n"
     total_positions = 0
 
     for cred in credentials:
-        api_name = cred.get('api_name') or cred.get('api_label') or cred.get('api_key', '')[:6] + "..."
+        api_name = cred.get('api_name') or cred.get('api_label') or cred.get('apikey', '')[:6] + "..."
+        api_key = cred.get('api_key') or cred.get('apikey') or cred.get('apiKey')
+        api_secret = cred.get('api_secret') or cred.get('apisecret') or cred.get('apiSecret')
+        if not api_key or not api_secret:
+            message += f"❌ Error fetching for {api_name}: missing API key or secret\n\n"
+            continue
         try:
-            client = DeltaExchangeClient(cred['api_key'], cred['api_secret'])
-            positions = await get_all_positions_for_assets(client)  # <-- or use your async all-open-positions fetcher
+            client = DeltaExchangeClient(api_key, api_secret)
+            positions = await get_all_positions_for_assets(client)
             await client.close()
             formatted = await format_positions_display(positions)
             message += f"=== Account: **{api_name}** ===\n"
@@ -328,4 +330,3 @@ async def display_positions_for_all_apis(credentials):
     if total_positions == 0:
         message += "ℹ️ No open positions across all accounts.\n"
     return message
-  
