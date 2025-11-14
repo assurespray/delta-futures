@@ -29,38 +29,37 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_name = cred['api_name']
         cred_id = str(cred['_id'])
         try:
-            # Decrypt credentials
             full_cred = await get_api_credential_by_id(cred_id, decrypt=True)
             if not full_cred:
                 message += f"❌ **{api_name}**: Failed to load credentials\n\n"
                 continue
 
-            # Create Delta client
             client = DeltaExchangeClient(
                 api_key=full_cred['api_key'],
                 api_secret=full_cred['api_secret']
             )
 
-            # Fetch *all* wallet balances
             balances_resp = await client.get("/v2/wallet/balances")
             await client.close()
             logger.info(f"Fetched wallet balances for {api_name}: {balances_resp}")
 
-            # This structure depends on your API. Usually it's balances_resp['result']
             balances = balances_resp['result'] if balances_resp and 'result' in balances_resp else []
             if not balances:
                 message += f"❌ **{api_name}**: No wallet balances found\n\n"
                 continue
 
-            # Show all assets in balances (INR, USDT, BTC, etc.)
             message += f"✅ **{api_name}**\n"
             for asset in balances:
                 sym = asset.get('asset_symbol', asset.get('symbol', ''))
                 bal = asset.get('balance', 0)
                 avail = asset.get('available_balance', bal)
                 locked = asset.get('locked_balance', 0)
+                inr_total = asset.get('balance_inr')
+                inr_avail = asset.get('available_balance_inr')
+                inr_msg = f" (₹{inr_total})" if inr_total is not None else ""
+                inr_avail_msg = f" (₹{inr_avail})" if inr_avail is not None else ""
                 message += (
-                    f"├ {sym}: Total: {bal}, Available: {avail}, Locked: {locked}\n"
+                    f"├ {sym}: Total: {bal}{inr_msg}, Available: {avail}{inr_avail_msg}, Locked: {locked}\n"
                 )
             message += "\n"
 
