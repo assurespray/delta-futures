@@ -2,6 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from database.crud import get_api_credentials_by_user_decrypted
 from api.positions import display_positions_for_all_apis
+from telegram.error import BadRequest
 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
