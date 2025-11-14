@@ -127,6 +127,7 @@ def create_application() -> Application:
     
     # Balance handler
     application.add_handler(CallbackQueryHandler(balance_callback, pattern="^menu_balance$"))
+    application.add_handler(CallbackQueryHandler(balance_callback, pattern="^(menu_balance|refresh_balance)$"))
     
     # Positions handler
     application.add_handler(CallbackQueryHandler(positions_callback, pattern="^menu_positions$"))
