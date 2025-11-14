@@ -290,4 +290,57 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
             continue
     
     return formatted
-    
+
+async def get_all_positions_for_assets(client: DeltaExchangeClient) -> Optional[List[Dict[str, Any]]]:
+    """
+    Dynamically queries all assets for open positions.
+    """
+    try:
+        # Dynamically get all unique underlying_asset_symbols from assets endpoint
+        available_assets = []
+        assets_resp = await client.get("/v2/assets")
+        if assets_resp and assets_resp.get("success"):
+            available_assets = [
+                asset.get("symbol") for asset in assets_resp.get("result", [])
+                if asset.get("symbol")
+            ]
+            available_assets = list(set(available_assets))  # Remove duplicates
+        else:
+            logger.warning("Could not fetch asset symbols dynamically. Defaulting to static list.")
+            available_assets = ["BTC", "ETH", "SOL", "MATIC", "AVAX", "ADA", "ALGO", "DOT", "NEAR", "ARB"]
+
+        all_positions = []
+        for asset in available_assets:
+            try:
+                logger.debug(f"📍 Querying positions for {asset}...")
+                response = await client.get("/v2/positions", params={"underlying_asset_symbol": asset})
+                if response and response.get("success"):
+                    positions = response.get("result", [])
+                    active_positions = [
+                        p for p in positions
+                        if p.get("size") and abs(float(p.get("size", 0))) > 0
+                    ]
+                    if active_positions:
+                        logger.debug(f"   📊 Found {len(active_positions)} positions for {asset}")
+                        all_positions.extend(active_positions)
+            except Exception as e:
+                logger.debug(f"⚠️ Error querying {asset}: {e}")
+                continue
+
+        if all_positions:
+            logger.info(f"✅ Retrieved {len(all_positions)} total open positions")
+            for pos in all_positions:
+                symbol = pos.get("product", {}).get("symbol", "Unknown")
+                size = pos.get("size", 0)
+                logger.info(f"   📊 {symbol}: {size} contracts")
+        else:
+            logger.info(f"ℹ️ No open positions found")
+
+        return all_positions
+
+    except Exception as e:
+        logger.error(f"❌ Exception getting positions: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+      
