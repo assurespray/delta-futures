@@ -269,11 +269,12 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
                 logger.warning(f"(format_positions_display) Skipping incomplete or empty position: {pos}")
                 continue
         
-            entry_price = float(pos.get("entry_price") or 0)
-            mark_price = float(pos.get("mark_price") or 0)
-            margin = float(pos.get("margin") or 0)
-            pnl = float(pos.get("unrealized_pnl") or 0)
-            pnl_percentage = float(pos.get("unrealized_pnl_percentage") or 0)
+            entry_price = get_float_or_na(pos, "entry_price")
+            mark_price = get_float_or_na(pos, "mark_price", "market_price")
+            margin = get_float_or_na(pos, "margin")
+            pnl = get_float_or_na(pos, "unrealized_pnl", "pnl")
+            pnl_percentage = get_float_or_na(pos, "unrealized_pnl_percentage")
+
 
             formatted_pos = {
                 "symbol": symbol,
