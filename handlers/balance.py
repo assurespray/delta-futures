@@ -68,7 +68,12 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"❌ Error fetching balance for {api_name}: {e}")
             message += f"❌ **{api_name}**: Error - {str(e)[:50]}\n\n"
 
-    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_balance"),
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
     
