@@ -43,8 +43,10 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Fetch all assets and get INR asset_id
             assets = await client.get_assets()
+            logger.info(f"Fetched assets: {assets}")  # This logs all available assets.
             inr_id = None
             for asset in assets:
+                logger.info(f"Asset: symbol={asset.get('symbol')}, id={asset.get('id')}, name={asset.get('name', '')}")
                 if asset.get('symbol', '').upper() == 'INR':
                     inr_id = asset.get('id')
                     break
