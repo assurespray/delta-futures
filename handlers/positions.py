@@ -86,7 +86,12 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if total_positions == 0:
         message += "ℹ️ No open positions across all accounts.\n"
 
-    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Refresh", callback_data="refresh_positions"),
+            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
