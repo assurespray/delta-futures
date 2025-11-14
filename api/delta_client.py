@@ -141,3 +141,15 @@ class DeltaExchangeClient:
         """Make DELETE request."""
         return await self._request("DELETE", endpoint, params=params)
       
+    async def get_assets(self):
+        """
+        Async method to fetch all available assets/currencies from Delta Exchange.
+        Returns a list of dicts, each with keys like 'id' and 'symbol'.
+        """
+        # Adapt the endpoint as appropriate for your API client
+        # Example assumes self._session is an aiohttp client, and self.base_url set correctly
+        url = f"{self.base_url}/v2/assets"
+        async with self._session.get(url) as resp:
+            resp.raise_for_status()  # Or handle errors as appropriate
+            return await resp.json()
+            
