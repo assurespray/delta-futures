@@ -300,6 +300,7 @@ async def display_positions_for_all_apis(credentials):
 
     for cred in credentials:
         api_name = cred.get('api_name') or cred.get('api_label') or cred.get('apikey', '')[:6] + "..."
+        # Robust key fallback:
         api_key = cred.get('api_key') or cred.get('apikey') or cred.get('apiKey')
         api_secret = cred.get('api_secret') or cred.get('apisecret') or cred.get('apiSecret')
         if not api_key or not api_secret:
