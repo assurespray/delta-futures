@@ -257,36 +257,36 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
     for pos in positions:
         try:
             product = pos.get("product", {})
-            symbol = product.get("symbol", "Unknown")
+            symbol = product.get("symbol") or pos.get("symbol") or pos.get("market_symbol") or "Unknown"
             size = float(pos.get("size", 0))
-            
-            # Skip if no position
-            if size == 0:
+
+            if size == 0 or symbol == "Unknown":
+                logger.warning(f"(format_positions_display) Skipping incomplete or empty position: {pos}")
                 continue
-            
-            entry_price = float(pos.get("entry_price", 0))
-            current_price = float(pos.get("mark_price", 0))
-            margin = float(pos.get("margin", 0))
-            pnl = float(pos.get("unrealized_pnl", 0))
-            pnl_percentage = float(pos.get("unrealized_pnl_percentage", 0))
-            
+        
+            entry_price = float(pos.get("entry_price") or 0)
+            mark_price = float(pos.get("mark_price") or 0)
+            margin = float(pos.get("margin") or 0)
+            pnl = float(pos.get("unrealized_pnl") or 0)
+            pnl_percentage = float(pos.get("unrealized_pnl_percentage") or 0)
+
             formatted_pos = {
                 "symbol": symbol,
                 "size": size,
                 "side": "Long" if size > 0 else "Short",
                 "entry_price": round(entry_price, 5),
-                "current_price": round(current_price, 5),
+                "current_price": round(mark_price, 5),
                 "margin": round(margin, 2),
                 "margin_inr": round(margin * 85, 2),
                 "pnl": round(pnl, 2),
                 "pnl_inr": round(pnl * 85, 2),
                 "pnl_percentage": round(pnl_percentage, 2)
             }
-            
+
             formatted.append(formatted_pos)
-            
+        
         except Exception as e:
-            logger.error(f"❌ Error formatting position: {e}")
+            logger.error(f"❌ Error formatting position: {e}, original: {pos}")
             continue
     
     return formatted
