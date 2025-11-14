@@ -8,7 +8,8 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer("Fetching positions...")
 
     user_id = str(query.from_user.id)
-    credentials = await get_api_credentials_by_user(user_id)
+    credentials = await get_api_credentials_by_user_decrypted(user_id)
+    message = await display_positions_for_all_apis(credentials)
 
     if not credentials:
         keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
