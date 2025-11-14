@@ -276,17 +276,22 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
             pnl_percentage = get_float_or_na(pos, "unrealized_pnl_percentage")
 
 
+            def safe_round(val, places):
+                if isinstance(val, float):
+                    return round(val, places)
+                return val  # Leaves "N/A" untouched
+
             formatted_pos = {
                 "symbol": symbol,
                 "size": size,
                 "side": "Long" if size > 0 else "Short",
-                "entry_price": round(entry_price, 5),
-                "current_price": round(mark_price, 5),
-                "margin": round(margin, 2),
-                "margin_inr": round(margin * 85, 2),
-                "pnl": round(pnl, 2),
-                "pnl_inr": round(pnl * 85, 2),
-                "pnl_percentage": round(pnl_percentage, 2)
+                "entry_price": safe_round(entry_price, 5),
+                "current_price": safe_round(mark_price, 5),
+                "margin": safe_round(margin, 2),
+                "margin_inr": safe_round(margin * 85 if isinstance(margin, float) else margin, 2),
+                "pnl": safe_round(pnl, 2),
+                "pnl_inr": safe_round(pnl * 85 if isinstance(pnl, float) else pnl, 2),
+                "pnl_percentage": safe_round(pnl_percentage, 2)
             }
 
             formatted.append(formatted_pos)
@@ -326,11 +331,16 @@ async def display_positions_for_all_apis(credentials):
             for pos in formatted:
                 message += (
                     f"• {pos['symbol']} ({pos['side']}) | Size: {pos['size']} | "
-                    f"Entry: ${pos['entry_price']} | Mark: ${pos['current_price']}\n"
-                    f"  Margin: ${pos['margin']} (₹{pos['margin_inr']})\n"
-                    f"  PnL: ${pos['pnl']} (₹{pos['pnl_inr']}) | %: {pos['pnl_percentage']}%\n"
-                    "-------------------------\n"
+                    f"Entry: ${pos['entry_price']}" if pos['entry_price'] != "N/A" else "Entry: N/A"
+                    f" | Mark: ${pos['current_price']}" if pos['current_price'] != "N/A" else " | Mark: N/A"
+                    f"\n  Margin: ${pos['margin']}" if pos['margin'] != "N/A" else "  Margin: N/A"
+                    f" (₹{pos['margin_inr']})" if pos['margin_inr'] != "N/A" else ""
+                    f"\n  PnL: ${pos['pnl']}" if pos['pnl'] != "N/A" else "  PnL: N/A"
+                    f" (₹{pos['pnl_inr']})" if pos['pnl_inr'] != "N/A" else ""
+                    f" | %: {pos['pnl_percentage']}%" if pos['pnl_percentage'] != "N/A" else " | %: N/A"
+                    "\n-------------------------\n"
                 )
+
                 total_positions += 1
             message += "\n"
         except Exception as e:
