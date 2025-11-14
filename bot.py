@@ -130,6 +130,7 @@ def create_application() -> Application:
     
     # Positions handler
     application.add_handler(CallbackQueryHandler(positions_callback, pattern="^menu_positions$"))
+    application.add_handler(CallbackQueryHandler(positions_callback, pattern="^(menu_positions|refresh_positions)$"))
     
     # Orders handlers
     application.add_handler(CallbackQueryHandler(orders_callback, pattern="^menu_orders$"))
