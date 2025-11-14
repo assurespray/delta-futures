@@ -59,10 +59,14 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             # Get positions
             positions = await get_positions(client)
+            logger.info(f"Fetched positions (raw): {positions}")  # <-- ADD THIS LINE
             await client.close()
             
             if positions is not None:
+                for pos in positions:
+                logger.info(f"Position info: symbol={pos.get('symbol')}, size={pos.get('size')}, side={pos.get('side')}, entry={pos.get('entry_price')}, pnl={pos.get('pnl')}")
                 formatted = await format_positions_display(positions)
+                logger.info(f"Formatted positions: {formatted}")  # <-- ADD THIS LINE
                 
                 if formatted:
                     message += f"✅ **{api_name}** ({len(formatted)} position(s))\n\n"
