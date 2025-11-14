@@ -143,13 +143,26 @@ class DeltaExchangeClient:
       
     async def get_assets(self):
         """
-        Async method to fetch all available assets/currencies from Delta Exchange.
-        Returns a list of dicts, each with keys like 'id' and 'symbol'.
+        Fetch all available assets/currencies from Delta Exchange.
+        Returns result dict with 'result' key containing list of assets.
         """
-        # Adapt the endpoint as appropriate for your API client
-        # Example assumes self._session is an aiohttp client, and self.base_url set correctly
-        url = f"{self.base_url}/v2/assets"
-        async with self._session.get(url) as resp:
-            resp.raise_for_status()  # Or handle errors as appropriate
-            return await resp.json()
-            
+        response = await self.get("/v2/assets")
+        if response and 'result' in response:
+            return response['result']  # List of assets
+        return []
+
+    async def get_balances(self, asset_id: int):
+        """
+        Fetch balance for a specific asset by ID.
+    
+        Args:
+            asset_id: The numeric asset ID (e.g., 14 for INR)
+    
+        Returns:
+            Balance dict with keys like 'balance', 'available_balance', etc.
+        """
+        endpoint = f"/v2/wallet/balances/{asset_id}"
+        response = await self.get(endpoint)
+        if response and 'result' in response:
+            return response['result']
+        return {}
