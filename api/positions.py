@@ -5,7 +5,15 @@ from api.delta_client import DeltaExchangeClient
 
 logger = logging.getLogger(__name__)
 
-
+def get_float_or_na(pos, *keys):
+    for key in keys:
+        if key in pos and pos[key] not in [None, ""]:
+            try:
+                return float(pos[key])
+            except Exception:
+                continue
+    return "N/A"
+  
 async def get_all_positions_for_assets(client: DeltaExchangeClient, 
                                        assets: List[str] = None) -> Optional[List[Dict[str, Any]]]:
     """
