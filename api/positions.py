@@ -303,6 +303,8 @@ async def display_positions_for_all_apis(credentials):
         # Robust key fallback:
         api_key = cred.get('api_key') or cred.get('apikey') or cred.get('apiKey')
         api_secret = cred.get('api_secret') or cred.get('apisecret') or cred.get('apiSecret')
+        logger.info(f"Credentials debug: {cred}")
+      
         if not api_key or not api_secret:
             message += f"❌ Error fetching for {api_name}: missing API key or secret\n\n"
             continue
