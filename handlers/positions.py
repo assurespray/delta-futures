@@ -29,7 +29,14 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    try:
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    except BadRequest as ex:
+        if "Message is not modified" in str(ex):
+            # Optionally notify the user (or just ignore)
+            pass
+        else:
+            raise
 
 # Add a handler for refresh_positions
 async def refresh_positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
