@@ -562,4 +562,27 @@ async def cleanup_stale_locks(db: AsyncIOMotorDatabase,
     except Exception as e:
         logger.error(f"❌ Error cleaning locks: {e}")
         return 0
+
+async def get_api_credentials_by_user_decrypted(user_id: str) -> List[Dict[str, Any]]:
+    """Get all API credentials for a user WITH DECRYPTED KEYS."""
+    try:
+        cursor = mongodb.get_db().api_credentials.find({"user_id": user_id})
+        credentials = await cursor.to_list(length=100)
+        
+        # Convert ObjectId to string and DECRYPT values
+        for cred in credentials:
+            cred["_id"] = str(cred["_id"])
+            try:
+                # Decrypt sensitive data
+                cred["api_key"] = cipher_suite.decrypt(cred["api_key"].encode()).decode()
+                cred["api_secret"] = cipher_suite.decrypt(cred["api_secret"].encode()).decode()
+            except Exception as e:
+                logger.error(f"❌ Failed to decrypt credential for {cred.get('api_name','UNKNOWN')}: {e}")
+                cred["api_key"] = None
+                cred["api_secret"] = None
+        
+        return credentials
+    except Exception as e:
+        logger.error(f"❌ Failed to get decrypted API credentials: {e}")
+        return []
         
