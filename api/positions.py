@@ -22,7 +22,6 @@ async def get_all_positions(client: DeltaExchangeClient) -> Optional[List[Dict[s
         all_positions = []
         for symbol in product_symbols:
             try:
-                logger.debug(f"Querying positions for {symbol} ...")
                 pos_resp = await client.get("/v2/positions", params={"symbol": symbol})
                 if pos_resp and pos_resp.get("success"):
                     positions = pos_resp.get("result", [])
@@ -73,7 +72,7 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
                 "entry_price": round(entry_price, 5),
                 "current_price": round(current_price, 5),
                 "margin": round(margin, 2),
-                "margin_inr": round(margin * 85, 2),  # FX rate; update as needed
+                "margin_inr": round(margin * 85, 2),
                 "pnl": round(pnl, 2),
                 "pnl_inr": round(pnl * 85, 2),
                 "pnl_percentage": round(pnl_percentage, 2)
@@ -84,53 +83,36 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
             continue
     return formatted
 
-async def get_all_user_positions(api_credentials: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+async def display_positions_for_all_apis(credentials: List[Dict[str, Any]]) -> str:
     """
-    Fetch positions across all API credentials/accounts.
-    Returns dict: { 'api_label': [formatted_positions], ... }
+    Fetch and display all open positions for a list of API credential dicts.
     """
-    all_data = {}
-    for cred in api_credentials:
-        api_label = cred.get("api_label") or cred.get("api_key")[:6] + "..."  # fallback label
+    message = "📊 *Open Positions Across All APIs*\n\n"
+    total_positions = 0
+    for cred in credentials:
+        api_name = cred.get('api_name') or cred.get('api_label') or cred.get('api_key', '')[:6] + "..."
         try:
-            client = DeltaExchangeClient(cred["api_key"], cred["api_secret"])
+            client = DeltaExchangeClient(cred['api_key'], cred['api_secret'])
             positions = await get_all_positions(client)
-            formatted = await format_positions_display(positions)
-            all_data[api_label] = formatted
             await client.close()
+            formatted = await format_positions_display(positions)
+            message += f"=== Account: **{api_name}** ===\n"
+            if not formatted:
+                message += "No open positions.\n\n"
+                continue
+            for pos in formatted:
+                message += (
+                    f"• ID: `{pos['position_id']}` | {pos['symbol']} ({pos['side']})\n"
+                    f"  Size: {pos['size']} | Entry: ${pos['entry_price']} | Mark: ${pos['current_price']}\n"
+                    f"  Margin: ${pos['margin']} (₹{pos['margin_inr']})\n"
+                    f"  PnL: ${pos['pnl']} (₹{pos['pnl_inr']}) | %: {pos['pnl_percentage']}%\n"
+                    "-------------------------\n"
+                )
+                total_positions += 1
+            message += "\n"
         except Exception as e:
-            logger.error(f"Error fetching for {api_label}: {e}")
-            all_data[api_label] = []
-    return all_data
-
-async def display_all_user_positions(api_credentials: List[Dict[str, Any]]) -> str:
-    """
-    Format all account positions together.
-    """
-    all_data = await get_all_user_positions(api_credentials)
-    if not any(all_data.values()):
-        return "❌ No open positions found across all accounts."
-
-    message = "📊 *Open Positions across all accounts*\n\n"
-    for api_label, positions in all_data.items():
-        message += f"=== Account: **{api_label}** ===\n"
-        if not positions:
-            message += "No open positions.\n\n"
-            continue
-        for pos in positions:
-            message += (
-                f"• ID: `{pos['position_id']}` | {pos['symbol']} ({pos['side']})\n"
-                f"  Size: {pos['size']} | Entry: ${pos['entry_price']} | Mark: ${pos['current_price']}\n"
-                f"  Margin: ${pos['margin']} (₹{pos['margin_inr']})\n"
-                f"  PnL: ${pos['pnl']} (₹{pos['pnl_inr']}) | %: {pos['pnl_percentage']}%\n"
-                "-------------------------\n"
-            )
-        message += "\n"
+            message += f"❌ Error fetching for {api_name}: {str(e)[:40]}\n\n"
+    if total_positions == 0:
+        message += "ℹ️ No open positions across all accounts.\n"
     return message
-
-# Example usage:
-# api_credentials = [
-#     {'api_key': 'KEY1', 'api_secret': 'SECRET1', 'api_label': 'Main Account'},
-#     {'api_key': 'KEY2', 'api_secret': 'SECRET2', 'api_label': 'Alt Account'},
-# ]
-# result_msg = await display_all_user_positions(api_credentials)
+        
