@@ -64,7 +64,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             if positions is not None:
                 for pos in positions:
-                logger.info(f"Position info: symbol={pos.get('symbol')}, size={pos.get('size')}, side={pos.get('side')}, entry={pos.get('entry_price')}, pnl={pos.get('pnl')}")
+                    logger.info(f"Position info: symbol={pos.get('symbol')}, size={pos.get('size')}, side={pos.get('side')}, entry={pos.get('entry_price')}, pnl={pos.get('pnl')}")
                 formatted = await format_positions_display(positions)
                 logger.info(f"Formatted positions: {formatted}")  # <-- ADD THIS LINE
                 
