@@ -256,8 +256,13 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
     
     for pos in positions:
         try:
-            product = pos.get("product", {})
-            symbol = product.get("symbol") or pos.get("symbol") or pos.get("market_symbol") or "Unknown"
+            symbol = (
+                pos.get("product_symbol") or
+                (pos.get("product", {}) or {}).get("symbol") or
+                pos.get("symbol") or
+                "Unknown"
+            )
+
             size = float(pos.get("size", 0))
 
             if size == 0 or symbol == "Unknown":
