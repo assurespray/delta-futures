@@ -291,3 +291,41 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
     
     return formatted
     
+# In api/positions.py
+from api.delta_client import DeltaExchangeClient
+
+async def display_positions_for_all_apis(credentials):
+    """
+    Fetch and display all open positions for a list of API credential dicts.
+    """
+    message = "📊 *Open Positions Across All APIs*\n\n"
+    total_positions = 0
+
+    for cred in credentials:
+        api_name = cred.get('api_name') or cred.get('api_label') or cred.get('api_key', '')[:6] + "..."
+        try:
+            client = DeltaExchangeClient(cred['api_key'], cred['api_secret'])
+            positions = await get_all_positions_for_assets(client)  # <-- or use your async all-open-positions fetcher
+            await client.close()
+            formatted = await format_positions_display(positions)
+            message += f"=== Account: **{api_name}** ===\n"
+            if not formatted:
+                message += "No open positions.\n\n"
+                continue
+            for pos in formatted:
+                message += (
+                    f"• {pos['symbol']} ({pos['side']}) | Size: {pos['size']} | "
+                    f"Entry: ${pos['entry_price']} | Mark: ${pos['current_price']}\n"
+                    f"  Margin: ${pos['margin']} (₹{pos['margin_inr']})\n"
+                    f"  PnL: ${pos['pnl']} (₹{pos['pnl_inr']}) | %: {pos['pnl_percentage']}%\n"
+                    "-------------------------\n"
+                )
+                total_positions += 1
+            message += "\n"
+        except Exception as e:
+            message += f"❌ Error fetching for {api_name}: {str(e)[:40]}\n\n"
+
+    if total_positions == 0:
+        message += "ℹ️ No open positions across all accounts.\n"
+    return message
+  
