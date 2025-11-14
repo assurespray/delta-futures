@@ -41,34 +41,28 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 api_secret=full_cred['api_secret']
             )
 
-            # Fetch all assets and get INR asset_id
-            assets = await client.get_assets()
-            logger.info(f"Fetched assets: {assets}")  # This logs all available assets.
-            inr_id = None
-            for asset in assets:
-                logger.info(f"Asset: symbol={asset.get('symbol')}, id={asset.get('id')}, name={asset.get('name', '')}")
-                if asset.get('symbol', '').upper() == 'INR':
-                    inr_id = asset.get('id')
-                    break
+            # Fetch *all* wallet balances
+            balances_resp = await client.get("/v2/wallet/balances")
+            await client.close()
+            logger.info(f"Fetched wallet balances for {api_name}: {balances_resp}")
 
-            if not inr_id:
-                await client.close()
-                message += f"❌ **{api_name}**: INR asset not found\n\n"
+            # This structure depends on your API. Usually it's balances_resp['result']
+            balances = balances_resp['result'] if balances_resp and 'result' in balances_resp else []
+            if not balances:
+                message += f"❌ **{api_name}**: No wallet balances found\n\n"
                 continue
 
-            # Fetch INR balance using asset_id
-            inr_bal = await client.get_balances(inr_id)
-            await client.close()
-
-            # Extract relevant data
-            available = inr_bal.get('available_balance', 0) if inr_bal else 0
-            total = inr_bal.get('total_balance', 0) if inr_bal else 0
-            locked = inr_bal.get('locked_balance', 0) if inr_bal else 0
-
+            # Show all assets in balances (INR, USDT, BTC, etc.)
             message += f"✅ **{api_name}**\n"
-            message += f"├ Total Balance: ₹{total}\n"
-            message += f"├ Available: ₹{available}\n"
-            message += f"└ Locked Margin: ₹{locked}\n\n"
+            for asset in balances:
+                sym = asset.get('asset_symbol', asset.get('symbol', ''))
+                bal = asset.get('balance', 0)
+                avail = asset.get('available_balance', bal)
+                locked = asset.get('locked_balance', 0)
+                message += (
+                    f"├ {sym}: Total: {bal}, Available: {avail}, Locked: {locked}\n"
+                )
+            message += "\n"
 
         except Exception as e:
             logger.error(f"❌ Error fetching balance for {api_name}: {e}")
