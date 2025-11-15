@@ -249,6 +249,11 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                 perusu = result['perusu']
                 sirusu = result['sirusu']
                 msg = (
+                    f"🔹 **Symbol:** {asset}\n"
+                    f"🔹 **Timeframe:** {timeframe}\n"
+                    f"🔹 **API Account:** {api_name}\n"
+                    f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
+                    
                     f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
                     f"├ ATR Length: {perusu['atr_length']}\n"
                     f"├ Factor: {perusu['factor']}\n"
