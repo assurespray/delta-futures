@@ -264,12 +264,18 @@ async def format_positions_display(positions: List[Dict[str, Any]]) -> List[Dict
     
     for pos in positions:
         try:
+            product = pos.get("product") or {}
             symbol = (
-                pos.get("product_symbol") or
-                (pos.get("product", {}) or {}).get("symbol") or
-                pos.get("symbol") or
+                product.get("symbol") or           # Standard field
+                pos.get("product_symbol") or       # Alternative field
+                pos.get("symbol") or               # Direct field
                 "Unknown"
             )
+            # Debug: Log the raw position structure
+            if symbol == "Unknown":
+                logger.warning(f"⚠️ Symbol extraction failed. Raw position data: {pos}")
+            else:
+                logger.debug(f"✅ Extracted symbol: {symbol} from position")    
 
             size = float(pos.get("size", 0))
 
