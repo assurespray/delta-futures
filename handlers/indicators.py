@@ -235,15 +235,37 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
         strategy = DualSuperTrendStrategy()
         result = await strategy.calculate_indicators(client, asset, timeframe)
         await client.close()
+
+        indicator_type = context.user_data.get('selected_indicator', 'perusu')
         
         if result:
             if indicator_type == "perusu":
                 indicator_data = result['perusu']
                 msg = f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
-            else:  # sirusu
+            elif indicator_type == "sirusu":
                 indicator_data = result['sirusu']
                 msg = f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
-            
+            elif indicator_type == "both":
+                perusu = result['perusu']
+                sirusu = result['sirusu']
+                msg = (
+                    f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
+                    f"├ ATR Length: {perusu['atr_length']}\n"
+                    f"├ Factor: {perusu['factor']}\n"
+                    f"├ ATR Value: {perusu['atr']}\n"
+                    f"├ Current Price: ${perusu['latest_close']}\n"
+                    f"├ Signal: {'📈' if perusu['signal'] == 1 else '📉'} {perusu['signal_text']}\n"
+                    f"└ SuperTrend Value: ${perusu['supertrend_value']}\n\n"
+                    f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
+                    f"├ ATR Length: {sirusu['atr_length']}\n"
+                    f"├ Factor: {sirusu['factor']}\n"
+                    f"├ ATR Value: {sirusu['atr']}\n"
+                    f"├ Current Price: ${sirusu['latest_close']}\n"
+                    f"├ Signal: {'📈' if sirusu['signal'] == 1 else '📉'} {sirusu['signal_text']}\n"
+                    f"└ SuperTrend Value: ${sirusu['supertrend_value']}\n\n"
+                )
+        else:
+            msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n" # (as before)
             # Get precision for formatting
             precision = indicator_data.get('precision', 2)
             
