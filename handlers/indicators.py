@@ -31,6 +31,7 @@ async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [
         [InlineKeyboardButton("🟢 Perusu (20,20)", callback_data="indicator_select_perusu")],
         [InlineKeyboardButton("🔴 Sirusu (10,10)", callback_data="indicator_select_sirusu")],
+        [InlineKeyboardButton("🟢🔴 Both (20,20 & 10,10)", callback_data="indicator_select_both")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
     ]
     
