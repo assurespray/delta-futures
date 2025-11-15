@@ -70,6 +70,8 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     for order in formatted:
                         order_id = order['order_id']
+                        if order.get('bracket_label'):
+                            message += f"🏷️ {order['bracket_label']}\n"
                         message += f"📝 **{order['symbol']}** - {order['side']}\n"
                         message += f"├ Type: {order['order_type']}\n"
                         message += f"├ Size: {order['size']} contracts\n"
