@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from api.delta_client import DeltaExchangeClient
@@ -27,8 +28,8 @@ async def get_all_positions_for_assets(client: DeltaExchangeClient, assets: List
     if assets is None:
         assets = ["BTC", "ETH", "SOL", "MATIC", "AVAX", "ADA", "ALGO", "DOT", "NEAR", "ARB"]
     try:
-        all_positions = []
-        for asset in assets:
+        # Define the async fetcher for one asset
+        async def fetch_positions(asset):
             try:
                 logger.debug(f"Querying positions for {asset}...")
                 response = await client.get("/v2/positions", params={"underlying_asset_symbol": asset})
@@ -40,10 +41,16 @@ async def get_all_positions_for_assets(client: DeltaExchangeClient, assets: List
                     ]
                     if active_positions:
                         logger.debug(f"Found {len(active_positions)} positions for {asset}")
-                        all_positions.extend(active_positions)
+                    return active_positions
             except Exception as e:
                 logger.debug(f"Error querying {asset}: {e}")
-                continue
+            return []
+
+        # Launch all fetches in parallel
+        all_results = await asyncio.gather(*(fetch_positions(asset) for asset in assets))
+        # Flatten the results
+        all_positions = [pos for sublist in all_results for pos in sublist]
+
         if all_positions:
             logger.info(f"Retrieved {len(all_positions)} total open positions")
             for pos in all_positions:
