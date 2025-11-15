@@ -163,6 +163,7 @@ async def get_open_orders(client: DeltaExchangeClient,
     Get all open orders, including untriggered stop orders.
     
     ✅ FIXED: Now retrieves both "open" AND "untriggered" orders
+    ✅ DEDUPLICATES: Removes duplicate orders by ID
     
     Args:
         client: Delta Exchange client instance
@@ -170,7 +171,7 @@ async def get_open_orders(client: DeltaExchangeClient,
         include_untriggered: Include untriggered stop orders (default True)
     
     Returns:
-        List of open/untriggered orders or None
+        List of unique open/untriggered orders or None
     """
     try:
         all_orders = []
@@ -206,9 +207,19 @@ async def get_open_orders(client: DeltaExchangeClient,
             else:
                 logger.warning(f"⚠️ Failed to get untriggered orders: {response}")
         
-        logger.info(f"✅ Total orders retrieved: {len(all_orders)}")
+        # ✅ STEP 3: DEDUPLICATE by order ID
+        seen = set()
+        unique_orders = []
+        for order in all_orders:
+            order_id = order.get("id")
+            if order_id and order_id not in seen:
+                seen.add(order_id)
+                unique_orders.append(order)
         
-        return all_orders if all_orders else []
+        logger.info(f"✅ Total orders retrieved: {len(all_orders)}")
+        logger.info(f"✅ Unique orders after deduplication: {len(unique_orders)}")
+        
+        return unique_orders if unique_orders else []
         
     except Exception as e:
         logger.error(f"❌ Exception getting open orders: {e}")
@@ -361,4 +372,4 @@ async def check_stop_loss_filled(client: DeltaExchangeClient,
     except Exception as e:
         logger.warning(f"⚠️ Error checking SL status: {e}")
         return False
-        
+                
