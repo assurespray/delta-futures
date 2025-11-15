@@ -217,6 +217,8 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
         indicator_type = context.user_data.get('selected_indicator', 'perusu')
         msg = ""
 
+        logger.info(f"Returned indicator result for both: {result}")
+
         if result:
             # Info block
             info = (
