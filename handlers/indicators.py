@@ -59,8 +59,10 @@ async def indicator_select_callback(update: Update, context: ContextTypes.DEFAUL
     
     if indicator_type == "perusu":
         message = "🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
-    else:
+    elif indicator_type == "sirusu":
         message = "🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
+    else:
+        message = "🟢🔴 **Both Indicators (20,20 & 10,10)**\n\n"
     
     message += "**Select Timeframe:**\n\n"
     message += "Choose a timeframe to calculate the indicator:\n"
