@@ -215,7 +215,21 @@ async def get_open_orders(client: DeltaExchangeClient,
             if order_id and order_id not in seen:
                 seen.add(order_id)
                 unique_orders.append(order)
-        
+
+        # add bracket_label for each
+        for order in unique_orders:
+            label = None
+            stop_order_type = order.get("stop_order_type")
+            reduce_only = order.get("reduce_only")
+            order_type = order.get("order_type")
+            # Bracket - SL: reduce_only + stop_order_type="stop_loss_order"
+            if reduce_only and stop_order_type == "stop_loss_order":
+                label = "Bracket - SL"
+            # Bracket - TP: reduce_only + stop_order_type="take_profit_order" or reduce_only + limit/market order with mark/last trigger (see docs)
+            elif reduce_only and (stop_order_type == "take_profit_order" or order_type in ["limit_order", "market_order"]):
+                label = "Bracket - TP"
+            order["bracket_label"] = label
+    
         logger.info(f"✅ Total orders retrieved: {len(all_orders)}")
         logger.info(f"✅ Unique orders after deduplication: {len(unique_orders)}")
         
@@ -309,6 +323,7 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
         try:
             product = order.get("product", {})
             symbol = product.get("symbol", "Unknown")
+            bracket_label = order.get("bracket_label")
             
             formatted_order = {
                 "order_id": order.get("id"),
@@ -320,7 +335,8 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
                 "stop_price": round(float(order.get("stop_price", 0)), 2) if order.get("stop_price") else None,
                 "filled": order.get("unfilled_size", 0),
                 "status": order.get("state", "").capitalize(),
-                "reduce_only": order.get("reduce_only", False)
+                "reduce_only": order.get("reduce_only", False),
+                "bracket_label": bracket_label
             }
             
             formatted.append(formatted_order)
