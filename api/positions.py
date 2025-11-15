@@ -319,7 +319,6 @@ async def display_positions_for_all_apis(credentials):
 
     for cred in credentials:
         api_name = cred.get('api_name') or cred.get('api_label') or cred.get('apikey', '')[:6] + "..."
-        # Robust key fallback:
         api_key = cred.get('api_key') or cred.get('apikey') or cred.get('apiKey')
         api_secret = cred.get('api_secret') or cred.get('apisecret') or cred.get('apiSecret')
         logger.info(f"Credentials debug: {cred}")
@@ -327,33 +326,44 @@ async def display_positions_for_all_apis(credentials):
         if not api_key or not api_secret:
             message += f"❌ Error fetching for {api_name}: missing API key or secret\n\n"
             continue
+            
         try:
             client = DeltaExchangeClient(api_key, api_secret)
             positions = await get_all_positions_for_assets(client)
             await client.close()
             formatted = await format_positions_display(positions)
+            
             message += f"=== Account: **{api_name}** ===\n"
+            
             if not formatted:
                 message += "No open positions.\n\n"
                 continue
+                
             for pos in formatted:
+                # Build each line separately for clarity
+                entry_str = f"${pos['entry_price']}" if pos['entry_price'] != "N/A" else "N/A"
+                mark_str = f"${pos['current_price']}" if pos['current_price'] != "N/A" else "N/A"
+                margin_str = f"${pos['margin']}" if pos['margin'] != "N/A" else "N/A"
+                margin_inr_str = f"(₹{pos['margin_inr']})" if pos['margin_inr'] != "N/A" else ""
+                pnl_str = f"${pos['pnl']}" if pos['pnl'] != "N/A" else "N/A"
+                pnl_inr_str = f"(₹{pos['pnl_inr']})" if pos['pnl_inr'] != "N/A" else ""
+                pnl_pct_str = f"{pos['pnl_percentage']}%" if pos['pnl_percentage'] != "N/A" else "N/A"
+                
                 message += (
-                    f"• {pos['symbol']} ({pos['side']}) | Size: {pos['size']} | "
-                    f"Entry: ${pos['entry_price']}" if pos['entry_price'] != "N/A" else "Entry: N/A"
-                    f" | Mark: ${pos['current_price']}" if pos['current_price'] != "N/A" else " | Mark: N/A"
-                    f"\n  Margin: ${pos['margin']}" if pos['margin'] != "N/A" else "  Margin: N/A"
-                    f" (₹{pos['margin_inr']})" if pos['margin_inr'] != "N/A" else ""
-                    f"\n  PnL: ${pos['pnl']}" if pos['pnl'] != "N/A" else "  PnL: N/A"
-                    f" (₹{pos['pnl_inr']})" if pos['pnl_inr'] != "N/A" else ""
-                    f" | %: {pos['pnl_percentage']}%" if pos['pnl_percentage'] != "N/A" else " | %: N/A"
-                    "\n-------------------------\n"
+                    f"• {pos['symbol']} ({pos['side']}) | Size: {pos['size']}\n"
+                    f"  Entry: {entry_str} | Mark: {mark_str}\n"
+                    f"  Margin: {margin_str} {margin_inr_str}\n"
+                    f"  PnL: {pnl_str} {pnl_inr_str} | %: {pnl_pct_str}\n"
+                    "-------------------------\n"
                 )
-
                 total_positions += 1
+                
             message += "\n"
+            
         except Exception as e:
             message += f"❌ Error fetching for {api_name}: {str(e)[:40]}\n\n"
 
     if total_positions == 0:
         message += "ℹ️ No open positions across all accounts.\n"
+        
     return message
