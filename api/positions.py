@@ -169,4 +169,32 @@ async def display_positions_for_all_apis(credentials):
     if total_positions == 0:
         message += "ℹ️ No open positions across all accounts.\n"
     return message
-        
+
+async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, retry_count: int = 3) -> Optional[Dict[str, Any]]:
+    import asyncio
+    for attempt in range(retry_count):
+        try:
+            underlying_asset = symbol.replace("USD", "").replace("USDT", "")
+            response = await client.get("/v2/positions", params={"underlying_asset_symbol": underlying_asset})
+            if not response or not response.get("success"):
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(0.5)
+                    continue
+                return None
+            positions = response.get("result", [])
+            for position in positions:
+                position_symbol = position.get("product", {}).get("symbol", "")
+                position_size = float(position.get("size", 0))
+                if position_symbol == symbol and abs(position_size) > 0:
+                    return position
+            if attempt < retry_count - 1:
+                await asyncio.sleep(0.5)
+                continue
+            return None
+        except Exception:
+            if attempt < retry_count - 1:
+                await asyncio.sleep(0.5)
+                continue
+            return None
+    return None
+    
