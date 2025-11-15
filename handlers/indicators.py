@@ -179,141 +179,111 @@ async def indicator_refresh_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def _calculate_and_display_indicator(message, context, asset, indicator_type, timeframe, is_refresh=False):
-    """
-    Helper function to calculate and display indicator.
-    
-    Args:
-        message: Telegram message object to edit
-        context: Callback context
-        asset: Trading symbol
-        indicator_type: 'perusu' or 'sirusu'
-        timeframe: Timeframe string
-        is_refresh: Whether this is a refresh operation
-    """
     user_id = str(message.chat.id) if hasattr(message, 'chat') else str(context._user_id)
-    
-    # Get first API for calculation
     credentials = await get_api_credentials_by_user(user_id)
-    
     if not credentials:
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_indicators")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await message.edit_text(
             "ℹ️ No API credentials stored.\n\n"
             "Please add API credentials first to view indicator signals.",
             reply_markup=reply_markup
         )
         return
-    
-    # Use first API
+
     cred = credentials[0]
     api_name = cred['api_name']
     cred_id = str(cred['_id'])
-    
+
     try:
-        # Get credentials
         full_cred = await get_api_credential_by_id(cred_id, decrypt=True)
-        
         if not full_cred:
             keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_indicators")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
             await message.edit_text(
                 "❌ Failed to load API credentials.",
                 reply_markup=reply_markup
             )
             return
-        
-        # Create client
+
         client = DeltaExchangeClient(
             api_key=full_cred['api_key'],
             api_secret=full_cred['api_secret']
         )
-        
-        # Calculate indicators for selected asset and timeframe
         strategy = DualSuperTrendStrategy()
         result = await strategy.calculate_indicators(client, asset, timeframe)
         await client.close()
 
         indicator_type = context.user_data.get('selected_indicator', 'perusu')
-        
+        msg = ""
+
         if result:
+            # Info block
+            info = (
+                f"🔹 **Symbol:** {asset}\n"
+                f"🔹 **Timeframe:** {timeframe}\n"
+                f"🔹 **API Account:** {api_name}\n"
+                f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
+            )
+
             if indicator_type == "perusu":
-                indicator_data = result['perusu']
-                msg = f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
-            elif indicator_type == "sirusu":
-                indicator_data = result['sirusu']
-                msg = f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
-            elif indicator_type == "both":
-                perusu = result['perusu']
-                sirusu = result['sirusu']
+                d = result['perusu']
                 msg = (
-                    f"🔹 **Symbol:** {asset}\n"
-                    f"🔹 **Timeframe:** {timeframe}\n"
-                    f"🔹 **API Account:** {api_name}\n"
-                    f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
-                    
+                    info +
                     f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
-                    f"├ ATR Length: {perusu['atr_length']}\n"
-                    f"├ Factor: {perusu['factor']}\n"
-                    f"├ ATR Value: {perusu['atr']}\n"
-                    f"├ Current Price: ${perusu['latest_close']}\n"
-                    f"├ Signal: {'📈' if perusu['signal'] == 1 else '📉'} {perusu['signal_text']}\n"
-                    f"└ SuperTrend Value: ${perusu['supertrend_value']}\n\n"
+                    f"├ ATR Length: {d['atr_length']}\n"
+                    f"├ Factor: {d['factor']}\n"
+                    f"├ ATR Value: {d['atr']}\n"
+                    f"├ Current Price: ${d['latest_close']}\n"
+                    f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
+                    f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
+                )
+            elif indicator_type == "sirusu":
+                d = result['sirusu']
+                msg = (
+                    info +
                     f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
-                    f"├ ATR Length: {sirusu['atr_length']}\n"
-                    f"├ Factor: {sirusu['factor']}\n"
-                    f"├ ATR Value: {sirusu['atr']}\n"
-                    f"├ Current Price: ${sirusu['latest_close']}\n"
-                    f"├ Signal: {'📈' if sirusu['signal'] == 1 else '📉'} {sirusu['signal_text']}\n"
-                    f"└ SuperTrend Value: ${sirusu['supertrend_value']}\n\n"
+                    f"├ ATR Length: {d['atr_length']}\n"
+                    f"├ Factor: {d['factor']}\n"
+                    f"├ ATR Value: {d['atr']}\n"
+                    f"├ Current Price: ${d['latest_close']}\n"
+                    f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
+                    f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
+                )
+            elif indicator_type == "both":
+                p, s = result['perusu'], result['sirusu']
+                msg = (
+                    info +
+                    f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
+                    f"├ ATR Length: {p['atr_length']}\n"
+                    f"├ Factor: {p['factor']}\n"
+                    f"├ ATR Value: {p['atr']}\n"
+                    f"├ Current Price: ${p['latest_close']}\n"
+                    f"├ Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']}\n"
+                    f"└ SuperTrend Value: ${p['supertrend_value']}\n\n"
+                    f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
+                    f"├ ATR Length: {s['atr_length']}\n"
+                    f"├ Factor: {s['factor']}\n"
+                    f"├ ATR Value: {s['atr']}\n"
+                    f"├ Current Price: ${s['latest_close']}\n"
+                    f"├ Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']}\n"
+                    f"└ SuperTrend Value: ${s['supertrend_value']}\n"
                 )
         else:
-            msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n" # (as before)
-            # Get precision for formatting
-            precision = indicator_data.get('precision', 2)
-            
-            msg += f"**Symbol:** {asset}\n"
-            msg += f"**Timeframe:** {timeframe}\n"
-            msg += f"**API Account:** {api_name}\n"
-            msg += f"**Candles Used:** {result.get('candles_used', 100)}\n\n"
-            msg += f"**Details:**\n"
-            msg += f"├ ATR Length: {indicator_data['atr_length']}\n"
-            msg += f"├ Factor: {indicator_data['factor']}\n"
-            msg += f"├ ATR Value: {indicator_data['atr']}\n"
-            msg += f"└ Current Price: ${indicator_data['latest_close']}\n\n"
-            
-            signal_emoji = "📈" if indicator_data['signal'] == 1 else "📉"
-            msg += f"**Signal:** {signal_emoji} **{indicator_data['signal_text']}**\n"
-            msg += f"**SuperTrend Value:** ${indicator_data['supertrend_value']}\n\n"
-            
-            if indicator_data['signal'] == 1:
-                msg += f"💡 Price is above SuperTrend line (Uptrend)\n"
-            else:
-                msg += f"💡 Price is below SuperTrend line (Downtrend)\n"
-            
-            msg += f"\n📋 **Compare with TradingView:**\n"
-            msg += f"1. Open {asset} chart on {timeframe} timeframe\n"
-            msg += f"2. Add SuperTrend indicator\n"
-            msg += f"3. Set ATR: {indicator_data['atr_length']}, Factor: {indicator_data['factor']}\n"
-            msg += f"4. Compare values!"
-        else:
-            msg = f"❌ Failed to calculate {indicator_type} indicator for {asset}.\n\n"
+            msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
             msg += "**Possible reasons:**\n"
             msg += "• Invalid symbol (check Delta Exchange product list)\n"
             msg += "• Insufficient market data\n"
             msg += "• API connection issues\n\n"
             msg += "💡 Try a different symbol or timeframe"
-    
+
     except Exception as e:
         logger.error(f"❌ Error calculating indicator: {e}")
         import traceback
         logger.error(traceback.format_exc())
         msg = f"❌ Error calculating indicator for {asset}:\n\n{str(e)[:200]}\n\n"
         msg += "Please check if the symbol is valid on Delta Exchange."
-    
-    # Add refresh button
+
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data="indicator_refresh")],
         [InlineKeyboardButton("🔄 Try Another Asset", callback_data=f"indicator_select_{indicator_type}")],
@@ -321,9 +291,7 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
         [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await message.edit_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
-
 
 async def cancel_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel indicator calculation."""
