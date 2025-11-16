@@ -377,7 +377,7 @@ from api.delta_client import DeltaExchangeClient
 from api.positions import get_position_by_symbol
 from api.orders import get_open_orders
 from indicators.signal_generator import SignalGenerator
-from services.position_manager import PositionManager
+from strategy.position_manager import PositionManager  # ✅ CORRECT
 
 logger = logging.getLogger(__name__)
 
