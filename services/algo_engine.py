@@ -236,6 +236,7 @@ class AlgoEngine:
                     client=client,
                     algo_setup=algo_setup,
                     current_perusu_signal=perusu_data['signal'],
+                    current_sirusu_signal=sirusu_data['signal'],  # ← ADD THIS
                     sirusu_value=sirusu_data['supertrend_value'],
                     logger_bot=self.logger_bot
                 )
