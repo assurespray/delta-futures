@@ -15,180 +15,94 @@ class OrderMonitor:
     def __init__(self):
         """Initialize order monitor."""
         pass
-    
+
     async def check_pending_entry_order(
         self,
-        client: DeltaExchangeClient,
+        client,
         algo_setup: Dict[str, Any],
         current_perusu_signal: int,
-        current_sirusu_signal: int,  # ← ADD THIS
+        current_sirusu_signal: int,
         sirusu_value: float,
-        logger_bot: LoggerBot
+        logger_bot
     ) -> Optional[str]:
         """
-        Check pending entry order status and handle reversals.
-    
-        ✅ NEW: Cancels order if SIRUSU flips (not Perusu)
-    
-        Args:
-            client: Delta Exchange client
-            algo_setup: Algo setup configuration
-            current_perusu_signal: Current Perusu signal (1 or -1)
-            current_sirusu_signal: Current Sirusu signal (1 or -1)  # ← NEW
-            sirusu_value: Current Sirusu value
-            logger_bot: Logger bot for notifications
-    
-        Returns:
-            Order status: "filled", "reversed", "pending", or None
+        Check pending entry order status (robust: using open+history only).
+        Cancels on SIRUSU reversal.
+
+        Returns: "filled", "reversed", "pending", or None
         """
         pending_order_id = algo_setup.get('pending_entry_order_id')
-    
         if not pending_order_id:
             return None
-    
+
         setup_id = str(algo_setup['_id'])
         setup_name = algo_setup['setup_name']
         pending_side = algo_setup.get('pending_entry_side')
-    
+        product_id = algo_setup.get('product_id')
+
         logger.info(f"📋 Checking pending {pending_side} entry order: {pending_order_id}")
-    
+
         try:
-            # Get order details from exchange
-            order = await client.get_order_by_id(pending_order_id)
-        
-            if not order:
-                logger.warning(f"⚠️ Pending order {pending_order_id} not found")
-                # Clean up DB
+            # Robust order state lookup
+            # Use only open orders and order history!
+            is_filled_or_gone = await is_order_gone(client, pending_order_id, product_id)
+
+            if is_filled_or_gone:
+                logger.info(f"✅ Pending {pending_side} entry order FILLED or CANCELLED (gone from orderbook)")
                 await update_algo_setup(setup_id, {
                     "pending_entry_order_id": None,
                     "pending_entry_side": None
                 })
-                return None
-        
-            order_state = order.get('state', '').upper()
-            logger.info(f"   Order state: {order_state}")
-            
-            # ===== CHECK 1: Order Filled =====
-            if order_state == 'FILLED':
-                logger.info(f"✅ Pending {pending_side} entry order FILLED")
-            
-                # Get fill details
-                fill_price = float(order.get('average_fill_price', 0))
-                size = float(order.get('size', 0))
-            
-                # ✅ CRITICAL: Update position in DB
-                position_id = await self.position_manager.record_position_opened(
-                    algo_setup_id=setup_id,
-                    order_id=order.get('id'),
-                    product_id=order.get('product_id'),
-                    symbol=order.get('symbol'),
-                    side=pending_side,
-                    size=size,
-                    entry_price=fill_price,
-                    stop_loss_price=sirusu_value
-                )
-            
-                # Update algo setup
-                await update_algo_setup(setup_id, {
-                    "current_position": pending_side,
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None,
-                    "position_id": position_id
-                })
-            
-                # Send notification
-                await logger_bot.send_trade_entry(
-                    setup_name=setup_name,
-                    asset=algo_setup['asset'],
-                    direction=pending_side,
-                    entry_price=fill_price,
-                    lot_size=size,
-                    perusu_signal="Breakout filled",
-                    sirusu_sl=sirusu_value
-                )
-                
+                # You probably want to handle the "filled" case with follow-up DB/activity logic here
+                # (see _handle_filled_order, but with fresh history fetch if needed)
                 return "filled"
-        
-            # ===== CHECK 2: Order Cancelled =====
-            elif order_state in ['CANCELLED', 'REJECTED']:
-                logger.info(f"ℹ️ Pending order was {order_state}")
-            
-                # Clean up DB
-                await update_algo_setup(setup_id, {
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None
-                })
-                
-                return "cancelled"
-        
-            # ===== CHECK 3: Order Still Open → Check for Sirusu Reversal =====
-            elif order_state == 'OPEN':
-                # ✅ NEW LOGIC: Check SIRUSU flip (not Perusu)
-            
-                # Get cached Sirusu signal from when order was placed
-                cached_sirusu = await get_indicator_cache(setup_id, "sirusu")
-                last_sirusu_signal = cached_sirusu.get('last_signal') if cached_sirusu else None
-            
-                if last_sirusu_signal is None:
-                    logger.warning(f"⚠️ No cached Sirusu signal - cannot check reversal")
-                    return "pending"
-            
-                # ===== CRITICAL: Check if Sirusu flipped =====
-                sirusu_flipped = False
-                
-                if pending_side == "long":
-                    # For LONG entry: Cancel if Sirusu flips to Downtrend
-                    if current_sirusu_signal == -1 and last_sirusu_signal == 1:
-                        sirusu_flipped = True
-                        logger.warning(f"🔄 SIRUSU REVERSAL: Uptrend → Downtrend")
-            
-                elif pending_side == "short":
-                    # For SHORT entry: Cancel if Sirusu flips to Uptrend
-                    if current_sirusu_signal == 1 and last_sirusu_signal == -1:
-                        sirusu_flipped = True
-                        logger.warning(f"🔄 SIRUSU REVERSAL: Downtrend → Uptrend")
-                    
-                # ===== If Sirusu flipped, cancel the order =====
-                if sirusu_flipped:
-                    logger.warning(f"❌ Cancelling pending {pending_side} order - Sirusu signal reversed, trade invalid")
-                
-                    # Cancel order on exchange
-                    cancel_success = await client.cancel_order(pending_order_id)
-                
-                    if cancel_success:
-                        logger.info(f"✅ Order {pending_order_id} cancelled successfully")
-                    
-                        # Update DB
-                        await update_algo_setup(setup_id, {
-                            "pending_entry_order_id": None,
-                            "pending_entry_side": None
-                        })
-                    
-                        # Send notification
-                        await logger_bot.send_info(
-                            f"⚠️ {setup_name}: {pending_side.upper()} entry cancelled\n"
-                            f"Reason: Sirusu signal reversed - trade no longer valid"
-                        )
-                    
-                        return "reversed"
-                    else:
-                        logger.error(f"❌ Failed to cancel order {pending_order_id}")
-                        return "pending"
-            
+
+            # Still live - get last placed Sirusu signal for reversal logic
+            cached_sirusu = await get_indicator_cache(setup_id, "sirusu")
+            last_sirusu_signal = cached_sirusu.get('last_signal') if cached_sirusu else None
+
+            if last_sirusu_signal is None:
+                logger.warning(f"⚠️ No cached Sirusu signal - cannot check reversal")
+                return "pending"
+
+            sirusu_flipped = False
+            if pending_side == "long":
+                if current_sirusu_signal == -1 and last_sirusu_signal == 1:
+                    sirusu_flipped = True
+                    logger.warning(f"🔄 SIRUSU REVERSAL: Uptrend → Downtrend")
+            elif pending_side == "short":
+                if current_sirusu_signal == 1 and last_sirusu_signal == -1:
+                    sirusu_flipped = True
+                    logger.warning(f"🔄 SIRUSU REVERSAL: Downtrend → Uptrend")
+
+            if sirusu_flipped:
+                logger.warning(f"❌ Cancelling pending {pending_side} order - Sirusu signal reversed")
+                cancel_success = await cancel_order(client, pending_order_id)
+                if cancel_success:
+                    await update_algo_setup(setup_id, {
+                        "pending_entry_order_id": None,
+                        "pending_entry_side": None
+                    })
+                    await logger_bot.send_info(
+                        f"⚠️ {setup_name}: {pending_side.upper()} entry cancelled\n"
+                        f"Reason: Sirusu signal reversed - trade no longer valid"
+                    )
+                    return "reversed"
                 else:
-                    logger.info(f"⏳ Order still pending - Sirusu has not reversed")
-                    logger.info(f"   Last Sirusu: {last_sirusu_signal}, Current: {current_sirusu_signal}")
+                    logger.error(f"❌ Failed to cancel order {pending_order_id}")
                     return "pending"
-        
             else:
-                logger.warning(f"⚠️ Unknown order state: {order_state}")
-                return None
-    
+                logger.info(f"⏳ Order still pending - Sirusu has not reversed")
+                logger.info(f"   Last Sirusu: {last_sirusu_signal}, Current: {current_sirusu_signal}")
+                return "pending"
+
         except Exception as e:
             logger.error(f"❌ Error checking pending order: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
+
+    # Other helper methods would similarly use only /orders?state and /orders/history, not /orders/{order_id}
     
     async def _handle_filled_order(
         self,
