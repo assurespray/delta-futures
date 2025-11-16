@@ -196,6 +196,12 @@ class PositionManager:
 
             filled = await is_order_gone(client, pending_order_id, product_id)
             if filled:
+                # ✅ ADD THIS: Update order record to "filled"
+                await update_order_record(pending_order_id, {
+                    "status": "filled",
+                    "filled_at": datetime.utcnow()
+                })
+                
                 await update_algo_setup(setup_id, {"pending_entry_order_id": None})
             return filled
         except Exception as e:
@@ -269,6 +275,13 @@ class PositionManager:
 
             if sl_executed:
                 logger.warning(f"⚠️ Position for {symbol} already closed by stop-loss!")
+                
+                # ✅ ADD THIS: Update SL order record
+                await update_order_record(stop_loss_order_id, {
+                    "status": "filled",
+                    "filled_at": datetime.utcnow()
+                })
+
                 activity = await get_open_activity_by_setup(setup_id)
                 if activity:
                     await update_algo_activity(str(activity["_id"]), {
@@ -318,7 +331,14 @@ class PositionManager:
             if stop_loss_order_id:
                 try:
                     from api.orders import cancel_order
-                    await cancel_order(client, stop_loss_order_id)
+                    cancelled = await cancel_order(client, stop_loss_order_id)
+        
+                    if cancelled:
+                        # ✅ ADD THIS: Mark as cancelled
+                        await update_order_record(stop_loss_order_id, {
+                            "status": "cancelled",
+                            "updated_at": datetime.utcnow()
+                        })
                 except Exception:
                     pass
 
