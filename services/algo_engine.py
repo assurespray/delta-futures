@@ -445,7 +445,18 @@ async def reconcile_positions_on_startup():
     from datetime import datetime
 
     logger = logging.getLogger(__name__)
-    client = DeltaExchangeClient()
+    all_setups = await get_all_active_algo_setups()
+    for setup in all_setups:
+        api_id = setup.get("api_id")
+        cred = await get_api_credential_by_id(api_id, decrypt=True)
+        if not cred:
+            logger.warning(f"Could not load credentials for api_id {api_id}")
+            continue
+        client = DeltaExchangeClient(
+            api_key=cred['api_key'],
+            api_secret=cred['api_secret']
+        )
+
     signal_generator = SignalGenerator()  # make sure this is async-compatible
 
     all_setups = await get_all_active_algo_setups()
