@@ -62,7 +62,10 @@ class DualSuperTrendStrategy:
         # ✅ TRACKING: Last fetch time per symbol+timeframe combo
         self._last_fetch_time: Dict[str, datetime] = {}
         self._last_candle_count: Dict[str, int] = {}
-    
+
+        # Add to __init__:
+        self._last_processed_candle_time: Dict[str, int] = {}
+
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:
         """Generate cache key for tracking."""
         return f"{symbol}_{timeframe}"
@@ -242,7 +245,16 @@ class DualSuperTrendStrategy:
                 # logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
                 # ✅ No stale detection - API naturally lags 1-3 minutes
                 # This is completely normal. Just wait for 5-second buffer below.
-            
+            if actual_count >= 1:
+                latest_candle = candles[-1]
+                latest_candle_time = latest_candle.get("time", 0)
+                cache_key = self._get_cache_key(symbol, timeframe)
+                last_processed = self._last_processed_candle_time.get(cache_key)
+                # >>> THIS IS THE KEY CHECK <<<
+                if last_processed is not None and latest_candle_time == last_processed:
+                    logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
+                    return None
+                    
             # ===== STEP 6: Check if candle is closed + 5s buffer ===== 
             candle_status = self._is_candle_closed(candles, timeframe)
             
@@ -322,6 +334,7 @@ class DualSuperTrendStrategy:
             self._last_fetch_time[cache_key] = current_time
             self._last_candle_count[cache_key] = actual_count
             
+            self._last_processed_candle_time[cache_key] = latest_candle_time
             return result
             
         except Exception as e:
