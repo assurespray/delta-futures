@@ -338,6 +338,16 @@ class AlgoEngine:
                         logger.error(f"❌ Error processing {setup_name}: {result}")
                 first_setup = active_setups[0]
                 timeframe = first_setup.get('timeframe', '1m')
+                timeframes = [setup.get('timeframe', '1m') for setup in active_setups]
+                timeframe_seconds = {
+                    "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+                    "1h": 3600, "4h": 14400, "1d": 86400
+                }
+            
+                # Get shortest timeframe
+                shortest_seconds = min(timeframe_seconds.get(tf, 60) for tf in timeframes)
+                shortest_tf = next(tf for tf in timeframes if timeframe_seconds.get(tf, 60) == shortest_seconds)
+            
                 now = datetime.utcnow()
                 next_boundary = get_next_boundary_time(timeframe, now)
                 time_until_boundary = (next_boundary - now).total_seconds()
