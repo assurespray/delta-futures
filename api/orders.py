@@ -388,4 +388,48 @@ async def check_stop_loss_filled(client: DeltaExchangeClient,
     except Exception as e:
         logger.warning(f"⚠️ Error checking SL status: {e}")
         return False
-                
+
+async def get_order_status_by_id(client, order_id: int, product_id: int) -> str:
+    """
+    Robust order status using open + history endpoints.
+    Returns: "open", "untriggered", "filled", "cancelled", "rejected", or "not_found"
+    """
+    # STEP 1: Check open/untriggered
+    try:
+        open_params = {"product_id": product_id, "state": "open"}
+        open_resp = await client.get("/v2/orders", open_params)
+        if open_resp and open_resp.get("success"):
+            for order in open_resp["result"]:
+                if str(order.get("id")) == str(order_id):
+                    return order.get("state", "open").lower()
+        # Also check untriggered if supported
+        untrig_params = {"product_id": product_id, "state": "untriggered"}
+        untrig_resp = await client.get("/v2/orders", untrig_params)
+        if untrig_resp and untrig_resp.get("success"):
+            for order in untrig_resp["result"]:
+                if str(order.get("id")) == str(order_id):
+                    return order.get("state", "untriggered").lower()
+    except Exception as e:
+        logger.warning(f"Open order status check failed: {e}")
+
+    # STEP 2: Check order history
+    try:
+        hist_params = {"product_id": product_id, "page_size": 100}
+        hist_resp = await client.get("/v2/orders/history", hist_params)
+        if hist_resp and hist_resp.get("success"):
+            for order in hist_resp["result"]:
+                if str(order.get("id")) == str(order_id):
+                    return order.get("state", "not_found").lower()
+    except Exception as e:
+        logger.warning(f"Order history status check failed: {e}")
+
+    # If not found anywhere, treat as "not_found" (assume filled/cancelled for safety)
+    return "not_found"
+
+async def is_order_gone(client, order_id, product_id):
+    """
+    Returns True if the order is fully filled or cancelled (not active).
+    """
+    status = await get_order_status_by_id(client, order_id, product_id)
+    return status in {"filled", "cancelled", "rejected", "not_found"}
+    
