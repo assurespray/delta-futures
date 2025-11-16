@@ -431,20 +431,28 @@ async def reconcile_positions_on_startup():
         logger.error(traceback.format_exc())
 
 
+import logging
+from datetime import datetime
+from database.crud import (
+    get_all_active_algo_setups,
+    get_api_credential_by_id,
+    update_algo_setup
+)
+from api.delta_client import DeltaExchangeClient
+from api.positions import get_position_by_symbol
+from api.orders import get_open_orders
+from indicators.signal_generator import SignalGenerator
+from services.position_manager import PositionManager
+
+logger = logging.getLogger(__name__)
+
 async def reconcile_positions_on_startup():
     """
     Sync open positions and pending orders from the exchange with the DB. 
     Place stop-loss if additional_protection is True and no SL is live.
     """
-    import logging
-    from api.delta_client import DeltaExchangeClient
-    from api.positions import get_position_by_symbol
-    from api.orders import get_open_orders
-    from indicators.signal_generator import SignalGenerator
-    from database.crud import get_all_active_algo_setups, update_algo_setup
-    from datetime import datetime
+    signal_generator = SignalGenerator()  # make sure this is async-compatible
 
-    logger = logging.getLogger(__name__)
     all_setups = await get_all_active_algo_setups()
     for setup in all_setups:
         api_id = setup.get("api_id")
@@ -456,82 +464,57 @@ async def reconcile_positions_on_startup():
             api_key=cred['api_key'],
             api_secret=cred['api_secret']
         )
+        try:
+            symbol = setup.get("asset")
+            setup_id = str(setup["_id"])
+            product_id = setup.get("product_id")
+            lot_size = setup.get("lot_size")
+            addl_prot = setup.get("additional_protection", False)
 
-    signal_generator = SignalGenerator()  # make sure this is async-compatible
+            # 1. Check for live position
+            position = await get_position_by_symbol(client, symbol)
+            position_size = position.get("size", 0) if position else 0
+            entry_price = position.get("entry_price") if position else None
 
-    all_setups = await get_all_active_algo_setups()
-    for setup in all_setups:
-        symbol = setup.get("asset")
-        setup_id = str(setup["_id"])
-        product_id = setup.get("product_id")
-        lot_size = setup.get("lot_size")
-        addl_prot = setup.get("additional_protection", False)
+            if position_size != 0:
+                logger.info(f"Reconciling {symbol}: Open position {position_size} found on exchange")
+                await update_algo_setup(setup_id, {
+                    "current_position": "long" if position_size > 0 else "short",
+                    "last_entry_price": entry_price,
+                    "position_lock_acquired": True,
+                    "last_signal_time": datetime.utcnow(),
+                })
 
-        # 1. Check for live position
-        position = await get_position_by_symbol(client, symbol)
-        position_size = position.get("size", 0) if position else 0
-        entry_price = position.get("entry_price") if position else None
-
-        if position_size != 0:
-            logger.info(f"Reconciling {symbol}: Open position {position_size} found on exchange")
-            await update_algo_setup(setup_id, {
-                "current_position": "long" if position_size > 0 else "short",
-                "last_entry_price": entry_price,
-                "position_lock_acquired": True,
-                "last_signal_time": datetime.utcnow(),
-            })
-
-            # --- ACTIVITY RECORD CREATION ---
-            # Only create if none exists for this setup (avoid duplicates on every restart)
-            open_activity = await get_open_activity_by_setup(setup_id)
-            if not open_activity:
-                activity_data = {
-                    "user_id": setup.get("user_id"),
-                    "algo_setup_id": setup_id,
-                    "algo_setup_name": setup.get("setup_name"),
-                    "entry_time": datetime.utcnow(),   # Optional: use now, since real entry unknown
-                    "entry_price": entry_price,
-                    "direction": "long" if position_size > 0 else "short",
-                    "lot_size": abs(position_size),
-                    "asset": symbol,
-                    "perusu_entry_signal": "reconciled",
-                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "is_closed": False,
-                    "meta": {"reconciled": True}
-                }
-                await create_algo_activity(activity_data)
-
-            # 2. Check open/pending orders (entry and stop-loss)
-            open_orders = await get_open_orders(client, product_id)
-            found_sl = False
-            for order in open_orders or []:
-                state = order.get("state")
-                if state in ("open", "untriggered"):
+                # 2. Check open/pending orders (entry and stop-loss)
+                open_orders = await get_open_orders(client, product_id)
+                found_sl = False
+                for order in open_orders or []:
+                    state = order.get("state")
                     order_type = order.get("order_type")
-                    if order_type == "stop_market_order" and order.get("reduce_only"):
-                        found_sl = True
-                        await update_algo_setup(setup_id, {
-                            "stop_loss_order_id": order.get("id"),
-                        })
+                    if state in ("open", "untriggered"):
+                        if order_type == "stop_market_order" and order.get("reduce_only"):
+                            found_sl = True
+                            await update_algo_setup(setup_id, {
+                                "stop_loss_order_id": order.get("id"),
+                            })
 
-            # 3. Place stop-loss if required
-            if addl_prot and not found_sl:
-                # Use the current Sirusu value for new SL for safety
-                sirusu_value = await signal_generator.calculate_current_sirusu_value(symbol)
-                side = "long" if position_size > 0 else "short"
-                from services.position_manager import PositionManager
-                pm = PositionManager()
-                sl_order_id = await pm._place_stop_loss_protection(
-                    client, product_id, abs(position_size), side, sirusu_value, setup_id
-                )
-                logger.info(f"Stop-loss order placed for {symbol}: {sl_order_id}")
+                # 3. Place stop-loss if required
+                if addl_prot and not found_sl:
+                    sirusu_value = await signal_generator.calculate_current_sirusu_value(symbol)
+                    side = "long" if position_size > 0 else "short"
+                    pm = PositionManager()
+                    sl_order_id = await pm._place_stop_loss_protection(
+                        client, product_id, abs(position_size), side, sirusu_value, setup_id
+                    )
+                    logger.info(f"Stop-loss order placed for {symbol}: {sl_order_id}")
 
-        else:
-            # If no position, clear position fields
-            await update_algo_setup(setup_id, {
-                "current_position": None,
-                "last_entry_price": None,
-                "position_lock_acquired": False,
-                "stop_loss_order_id": None,
-            })
-            
+            else:
+                # If no position, clear position fields
+                await update_algo_setup(setup_id, {
+                    "current_position": None,
+                    "last_entry_price": None,
+                    "position_lock_acquired": False,
+                    "stop_loss_order_id": None,
+                })
+        finally:
+            await client.close()
