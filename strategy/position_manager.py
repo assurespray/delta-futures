@@ -416,6 +416,18 @@ class PositionManager:
                     "position_lock_acquired": True,
                     "last_signal_time": datetime.utcnow(),
                 })
+                await create_position_record({
+                    "algo_setup_id": setup_id,
+                    "user_id": setup.get("user_id"),
+                    "asset": symbol,
+                    "direction": "long" if position_size > 0 else "short",
+                    "size": abs(position_size),
+                    "entry_price": position.get("entry_price"),
+                    "opened_at": datetime.utcnow(),
+                    "status": "open",
+                    "source": "reconciliation"
+                })
+                
                 # Optionally recreate algo_activity here if needed
 
             # 2. Check for open orders (entry, stop-loss, etc.)
