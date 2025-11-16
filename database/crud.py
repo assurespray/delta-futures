@@ -586,3 +586,29 @@ async def get_api_credentials_by_user_decrypted(user_id: str) -> List[Dict[str, 
         logger.error(f"❌ Failed to get decrypted API credentials: {e}")
         return []
         
+from database.models import OrderRecord
+
+async def create_order_record(order_data: dict) -> str:
+    """Create a new order record for robust tracking."""
+    try:
+        order = OrderRecord(**order_data)
+        result = await mongodb.get_db().orders.insert_one(order.dict(by_alias=True, exclude={"id"}))
+        logger.info(f"✅ Order record created: {order.order_id}")
+        return str(result.inserted_id)
+    except Exception as e:
+        logger.error(f"❌ Failed to create order record: {e}")
+        return ""
+
+async def update_order_record(order_id: int, update_data: dict) -> bool:
+    """Update an order record, e.g. status, fill time/price, cancelation, etc."""
+    try:
+        update_data["updated_at"] = datetime.utcnow()
+        result = await mongodb.get_db().orders.update_one(
+            {"order_id": order_id},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"❌ Failed to update order record: {e}")
+        return False
+        
