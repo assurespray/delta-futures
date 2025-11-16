@@ -380,44 +380,44 @@ class PositionManager:
             pnl = (entry_price - exit_price) * lot_size
         return pnl
 
-async def sync_exchange_positions_and_orders(self, client: DeltaExchangeClient, all_setups: list):
-    """
-    On startup, sync open positions and pending orders from the exchange with local database.
-    """
-    for setup in all_setups:
-        symbol = setup.get("asset")
-        setup_id = str(setup["_id"])
-        product_id = setup.get("product_id")
+    async def sync_exchange_positions_and_orders(self, client: DeltaExchangeClient, all_setups: list):
+        """
+        On startup, sync open positions and pending orders from the exchange with local database.
+        """
+        for setup in all_setups:
+            symbol = setup.get("asset")
+            setup_id = str(setup["_id"])
+            product_id = setup.get("product_id")
 
-        # 1. Check for open position
-        position = await get_position_by_symbol(client, symbol)
-        position_size = position.get("size", 0) if position else 0
+            # 1. Check for open position
+            position = await get_position_by_symbol(client, symbol)
+            position_size = position.get("size", 0) if position else 0
 
-        if position_size != 0:
-            await update_algo_setup(setup_id, {
-                "current_position": "long" if position_size > 0 else "short",
-                "last_entry_price": position.get("entry_price"),
-                "position_lock_acquired": True,
-                "last_signal_time": datetime.utcnow(),
-            })
-            # Optionally recreate algo_activity here if needed
+            if position_size != 0:
+                await update_algo_setup(setup_id, {
+                    "current_position": "long" if position_size > 0 else "short",
+                    "last_entry_price": position.get("entry_price"),
+                    "position_lock_acquired": True,
+                    "last_signal_time": datetime.utcnow(),
+                })
+                # Optionally recreate algo_activity here if needed
 
-        # 2. Check for open orders (entry, stop-loss, etc.)
-        open_orders = await get_open_orders(client, product_id)
-        for order in (open_orders or []):
-            state = order.get("state")
-            if state in ("open", "untriggered"):
-                # Re-save as pending order if needed
-                order_type = order.get("order_type")
-                if order_type == "stop_market_order":
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": order.get("id"),
-                        "entry_trigger_price": order.get("stop_price"),
-                        "pending_entry_direction_signal": 1 if order.get("side")=="buy" else -1,
-                        "last_signal_time": datetime.utcnow(),
-                    })
-                elif order_type == "market_order" and order.get("reduce_only"):
-                    await update_algo_setup(setup_id, {
-                        "stop_loss_order_id": order.get("id"),
-                    })
-                    
+            # 2. Check for open orders (entry, stop-loss, etc.)
+            open_orders = await get_open_orders(client, product_id)
+            for order in (open_orders or []):
+                state = order.get("state")
+                if state in ("open", "untriggered"):
+                    # Re-save as pending order if needed
+                    order_type = order.get("order_type")
+                    if order_type == "stop_market_order":
+                        await update_algo_setup(setup_id, {
+                            "pending_entry_order_id": order.get("id"),
+                            "entry_trigger_price": order.get("stop_price"),
+                            "pending_entry_direction_signal": 1 if order.get("side")=="buy" else -1,
+                            "last_signal_time": datetime.utcnow(),
+                        })
+                    elif order_type == "market_order" and order.get("reduce_only"):
+                        await update_algo_setup(setup_id, {
+                            "stop_loss_order_id": order.get("id"),
+                        })
+                        
