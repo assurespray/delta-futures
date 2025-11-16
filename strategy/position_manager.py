@@ -21,6 +21,7 @@ from database.crud import (
 )
 from indicators.signal_generator import SignalGenerator
 from config.settings import settings
+from database.crud import create_order_record, update_order_record
 
 logger = logging.getLogger(__name__)
 
