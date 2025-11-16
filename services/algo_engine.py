@@ -336,27 +336,28 @@ class AlgoEngine:
                     if isinstance(result, Exception):
                         setup_name = active_setups[i].get('setup_name', 'Unknown')
                         logger.error(f"❌ Error processing {setup_name}: {result}")
-                first_setup = active_setups[0]
-                timeframe = first_setup.get('timeframe', '1m')
+                
                 timeframes = [setup.get('timeframe', '1m') for setup in active_setups]
                 timeframe_seconds = {
-                    "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
-                    "1h": 3600, "4h": 14400, "1d": 86400
+                    "1m": 60, "2m": 120, "3m": 180, "4m": 240, "5m": 300, "10m": 600,
+                    "15m": 900, "20m": 1200, "30m": 1800, "45m": 2700, "1h": 3600,
+                    "2h": 7200, "3h": 10800, "4h": 14400, "6h": 21600, "8h": 28800,
+                    "12h": 43200, "1d": 86400
                 }
-            
-                # Get shortest timeframe
                 shortest_seconds = min(timeframe_seconds.get(tf, 60) for tf in timeframes)
+                # In case of multiple with same min, pick first match (stable)
                 shortest_tf = next(tf for tf in timeframes if timeframe_seconds.get(tf, 60) == shortest_seconds)
-            
+
                 now = datetime.utcnow()
-                next_boundary = get_next_boundary_time(timeframe, now)
+                next_boundary = get_next_boundary_time(shortest_tf, now)
                 time_until_boundary = (next_boundary - now).total_seconds()
                 sleep_time = max(1, time_until_boundary + 0.5)
                 logger.info(
                     f"💤 Next check at {next_boundary.strftime('%H:%M:%S')} UTC "
-                    f"(sleeping {sleep_time:.1f}s for {timeframe} boundary)"
+                    f"(sleeping {sleep_time:.1f}s for {shortest_tf} boundary)"
                 )
                 await asyncio.sleep(sleep_time)
+
             except Exception as e:
                 logger.error(f"❌ Exception in continuous monitoring: {e}")
                 import traceback
