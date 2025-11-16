@@ -433,86 +433,74 @@ async def reconcile_positions_on_startup():
 
 async def reconcile_positions_on_startup():
     """
-    On startup: sync open positions and orders from Delta Exchange with MongoDB.
+    Sync open positions and pending orders from the exchange with the DB. 
+    Place stop-loss if additional_protection is True and no SL is live.
     """
     import logging
     from api.delta_client import DeltaExchangeClient
     from api.positions import get_position_by_symbol
     from api.orders import get_open_orders
+    from indicators.signal_generator import SignalGenerator
     from database.crud import get_all_active_algo_setups, update_algo_setup
     from datetime import datetime
-    
+
     logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info("🔄 Starting position reconciliation...")
-        
-        # Get all active setups
-        all_setups = await get_all_active_algo_setups()
-        if not all_setups:
-            logger.info("ℹ️ No active setups to reconcile")
-            return
-        
-        # Initialize Delta client
-        client = DeltaExchangeClient()
-        
-        synced_count = 0
-        for setup in all_setups:
-            symbol = setup.get("asset")
-            setup_id = str(setup["_id"])
-            product_id = setup.get("product_id")
-            
-            if not product_id:
-                continue
-            
-            # Check for open position on exchange
-            position = await get_position_by_symbol(client, symbol)
-            position_size = position.get("size", 0) if position else 0
-            
-            if position_size != 0:
-                logger.info(f"🔍 Found open {symbol} position: {position_size} contracts")
-                await update_algo_setup(setup_id, {
-                    "current_position": "long" if position_size > 0 else "short",
-                    "last_entry_price": position.get("entry_price"),
-                    "position_lock_acquired": True,
-                    "last_signal_time": datetime.utcnow(),
-                })
-                synced_count += 1
-            
-            # Check for open/untriggered orders
+    client = DeltaExchangeClient()
+    signal_generator = SignalGenerator()  # make sure this is async-compatible
+
+    all_setups = await get_all_active_algo_setups()
+    for setup in all_setups:
+        symbol = setup.get("asset")
+        setup_id = str(setup["_id"])
+        product_id = setup.get("product_id")
+        lot_size = setup.get("lot_size")
+        addl_prot = setup.get("additional_protection", False)
+
+        # 1. Check for live position
+        position = await get_position_by_symbol(client, symbol)
+        position_size = position.get("size", 0) if position else 0
+        entry_price = position.get("entry_price") if position else None
+
+        if position_size != 0:
+            logger.info(f"Reconciling {symbol}: Open position {position_size} found on exchange")
+            await update_algo_setup(setup_id, {
+                "current_position": "long" if position_size > 0 else "short",
+                "last_entry_price": entry_price,
+                "position_lock_acquired": True,
+                "last_signal_time": datetime.utcnow(),
+            })
+
+            # 2. Check open/pending orders (entry and stop-loss)
             open_orders = await get_open_orders(client, product_id)
-            if open_orders:
-                for order in open_orders:
-                    state = order.get("state")
-                    if state in ("open", "untriggered"):
-                        order_type = order.get("order_type")
-                        
-                        # Restore entry order
-                        if "stop" in order_type.lower() and not order.get("reduce_only"):
-                            logger.info(f"🔍 Found pending entry order for {symbol}: {order.get('id')}")
-                            await update_algo_setup(setup_id, {
-                                "pending_entry_order_id": order.get("id"),
-                                "entry_trigger_price": order.get("stop_price"),
-                                "pending_entry_direction_signal": 1 if order.get("side") == "buy" else -1,
-                                "last_signal_time": datetime.utcnow(),
-                            })
-                            synced_count += 1
-                        
-                        # Restore stop-loss order
-                        elif order.get("reduce_only"):
-                            logger.info(f"🔍 Found stop-loss order for {symbol}: {order.get('id')}")
-                            await update_algo_setup(setup_id, {
-                                "stop_loss_order_id": order.get("id"),
-                            })
-                            synced_count += 1
-        
-        if synced_count > 0:
-            logger.info(f"✅ Reconciled {synced_count} positions/orders from exchange")
+            found_sl = False
+            for order in open_orders or []:
+                state = order.get("state")
+                if state in ("open", "untriggered"):
+                    order_type = order.get("order_type")
+                    if order_type == "stop_market_order" and order.get("reduce_only"):
+                        found_sl = True
+                        await update_algo_setup(setup_id, {
+                            "stop_loss_order_id": order.get("id"),
+                        })
+
+            # 3. Place stop-loss if required
+            if addl_prot and not found_sl:
+                # Use the current Sirusu value for new SL for safety
+                sirusu_value = await signal_generator.calculate_current_sirusu_value(symbol)
+                side = "long" if position_size > 0 else "short"
+                from services.position_manager import PositionManager
+                pm = PositionManager()
+                sl_order_id = await pm._place_stop_loss_protection(
+                    client, product_id, abs(position_size), side, sirusu_value, setup_id
+                )
+                logger.info(f"Stop-loss order placed for {symbol}: {sl_order_id}")
+
         else:
-            logger.info("✅ No positions or orders to reconcile")
-    
-    except Exception as e:
-        logger.error(f"❌ Position reconciliation failed: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        
+            # If no position, clear position fields
+            await update_algo_setup(setup_id, {
+                "current_position": None,
+                "last_entry_price": None,
+                "position_lock_acquired": False,
+                "stop_loss_order_id": None,
+            })
+            
