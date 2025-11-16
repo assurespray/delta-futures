@@ -8,6 +8,7 @@ from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCac
 from cryptography.fernet import Fernet
 from config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from database.models import OrderRecord
 
 logger = logging.getLogger(__name__)
 
@@ -585,8 +586,6 @@ async def get_api_credentials_by_user_decrypted(user_id: str) -> List[Dict[str, 
     except Exception as e:
         logger.error(f"❌ Failed to get decrypted API credentials: {e}")
         return []
-        
-from database.models import OrderRecord
 
 async def create_order_record(order_data: dict) -> str:
     """Create a new order record for robust tracking."""
