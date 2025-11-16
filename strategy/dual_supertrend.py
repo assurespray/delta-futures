@@ -129,179 +129,77 @@ class DualSuperTrendStrategy:
             'reason': 'Candle closed and buffered' if is_ready else f'Waiting {seconds_until_ready}s'
         }
     
-    async def calculate_indicators(self, client: DeltaExchangeClient, 
-                                  symbol: str, timeframe: str) -> Optional[Dict[str, Any]]:
+    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str) -> Optional[Dict[str, Any]]:
         """
         Calculate both Perusu and Sirusu indicators with GUARANTEED FRESH DATA.
-        
-        ✅ FRESH DATA GUARANTEE:
-        - ALWAYS fetches NEW candles from API (no cache)
-        - Validates timeframe exists in mapping
-        - Checks minimum data requirements
-        - Logs current vs last fetch time
-        - Verifies candles are from correct time range
-        
-        ✅ CHART ACCURACY GUARANTEE:
-        - Waits 5 seconds after candle close
-        - Ensures API has consolidated data
-        - Matches TradingView indicator values exactly
-        
-        Args:
-            client: Delta Exchange client
-            symbol: Trading symbol (e.g., "ADAUSD")
-            timeframe: Timeframe for calculation (e.g., "3m")
-        
-        Returns:
-            Dictionary with perusu, sirusu, and price data, or None on failure
+        Only one fetch and calculation per new candle, per asset/timeframe.
         """
         try:
             cache_key = self._get_cache_key(symbol, timeframe)
             current_time = datetime.utcnow()
-            
-            # ===== STEP 1: Validate timeframe =====
+        
+            # 1. Validate timeframe
             if timeframe not in TIMEFRAME_MAPPING:
                 logger.error(f"❌ Unknown timeframe: {timeframe}")
                 return None
-            
+        
             resolution = TIMEFRAME_MAPPING[timeframe]
-            # logger.info(f"✅ Timeframe '{timeframe}' maps to resolution '{resolution}'")
-            
-            # ===== STEP 2: Get dynamic candle requirements per timeframe =====
-            # ✅ COMPLETE: ALL timeframes optimized for accuracy
-            # ✅ NEW CODE: Custom candle requirements per timeframe
             timeframe_requirements = {
-                # ===== MINUTES =====
-                "1m": 200,
-                "2m": 300,
-                "3m": 400,
-                "4m": 300,
-                "5m": 300,
-                "10m": 300,
-                "15m": 300,
-                "20m": 300,
-                "30m": 300,
-                "45m": 300,
-    
-                # ===== HOURS =====
-                "1h": 300,
-                "2h": 300,
-                "3h": 300,
-                "4h": 300,
-                "6h": 300,
-                "8h": 300,
-                "12h": 300,
-    
-                # ===== DAYS =====
-                "1d": 600,
-                "2d": 300,
-                "3d": 300,
-                "7d": 300,
-                "1w": 300,
+                "1m": 200, "2m": 300, "3m": 400, "4m": 300, "5m": 300, "10m": 300, "15m": 300,
+                "20m": 300, "30m": 300, "45m": 300, "1h": 300, "2h": 300, "3h": 300, "4h": 300,
+                "6h": 300, "8h": 300, "12h": 300, "1d": 600, "2d": 300, "3d": 300, "7d": 300, "1w": 300,
             }
-            
             required_candles = timeframe_requirements.get(timeframe, 150)
-            
-            # ===== STEP 3: Track fetch time for debug =====
-            last_fetch = self._last_fetch_time.get(cache_key)
-            # if last_fetch:
-            #     time_since_fetch = (current_time - last_fetch).total_seconds()
-            #     logger.info(f"⏱️ Last fetch for {symbol} {timeframe}: {time_since_fetch:.1f}s ago")
-            # else:
-            #     logger.info(f"📍 First fetch for {symbol} {timeframe}")
-            
-            # ===== STEP 4: ALWAYS fetch FRESH candles (never use cache) =====
+        
+            # 2. Fetch candles
             logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
-            # logger.info(f"   Using API resolution: {resolution}")
-            
-            # Force fresh fetch with explicit end_time = now
             end_time = int(current_time.timestamp())
             timeframe_seconds = get_timeframe_seconds(timeframe)
             start_time = end_time - (timeframe_seconds * int(required_candles * 1.2))
-            
-            candles = await get_candles(
-                client,
-                symbol,
-                timeframe,
-                start_time=start_time,
-                end_time=end_time,
-                limit=required_candles
-            )
-            
+            candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
+        
             if not candles:
-                logger.error(f"❌ Failed to fetch candles for {symbol}")
+                logger.error("❌ No candles available for breakout")
                 return None
-            
+
+            # 3. Gather latest candle info and prevent duplicate processing
             actual_count = len(candles)
-            
-            # ===== STEP 5: Validate candle freshness =====
-            if actual_count > 0:
-                last_candle_time = candles[-1].get("time", 0)
-                last_candle_datetime = datetime.fromtimestamp(last_candle_time)
-                # time_diff = (current_time - last_candle_datetime).total_seconds()
-                
-                logger.info(f"✅ Retrieved {actual_count} candles")
-                # logger.info(f"   Latest candle time: {last_candle_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-                # logger.info(f"   Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-                # logger.info(f"   Age of latest candle: {time_diff:.0f} seconds")
-                # ✅ No stale detection - API naturally lags 1-3 minutes
-                # This is completely normal. Just wait for 5-second buffer below.
-            if actual_count >= 1:
-                latest_candle = candles[-1]
-                latest_candle_time = latest_candle.get("time", 0)
-                cache_key = self._get_cache_key(symbol, timeframe)
-                last_processed = self._last_processed_candle_time.get(cache_key)
-                # >>> THIS IS THE KEY CHECK <<<
-                if last_processed is not None and latest_candle_time == last_processed:
-                    logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
-                    return None
-                    
-            # ===== STEP 6: Check if candle is closed + 5s buffer ===== 
-            candle_status = self._is_candle_closed(candles, timeframe)
-            
-            if not candle_status['is_closed']:
-                # logger.info(f"⏳ Waiting {candle_status['seconds_until_ready']}s for candle close + buffer...")
+            latest_candle = candles[-1]
+            latest_candle_time = latest_candle.get("time", 0)
+            prev_high = float(latest_candle.get("high", 0))
+            prev_low = float(latest_candle.get("low", 0))
+            last_processed = self._last_processed_candle_time.get(cache_key)
+            if last_processed is not None and latest_candle_time == last_processed:
+                logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
                 return None
-                
-            # ===== STEP 7: Validate minimum data requirements =====
+
+            # 4. Check candle closed and buffered
+            candle_status = self._is_candle_closed(candles, timeframe)
+            if not candle_status['is_closed']:
+                return None
+
+            # 5. Sufficient data?
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
-            
             if actual_count < min_required:
                 logger.error(f"❌ INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
-            
             if actual_count < required_candles:
                 logger.warning(f"⚠️ Got {actual_count} candles, wanted {required_candles}")
-            
-            # ===== STEP 8: Calculate Perusu (Entry indicator) =====
+
+            # 6. Calculate Perusu & Sirusu
             logger.info(f"🔵 Calculating PERUSU (ATR period={PERUSU_ATR_LENGTH}, factor={PERUSU_FACTOR})")
-            # logger.info(f"   Using {actual_count} candles")
-            
             perusu_result = self.perusu.calculate(candles)
-            
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
-            
-            # ===== STEP 9: Calculate Sirusu (Exit indicator) =====
+        
             logger.info(f"🔴 Calculating SIRUSU (ATR period={SIRUSU_ATR_LENGTH}, factor={SIRUSU_FACTOR})")
-            # logger.info(f"   Using {actual_count} candles")
-            
             sirusu_result = self.sirusu.calculate(candles)
-            
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
                 return None
-            
-            # ===== STEP 10: Get LATEST candle high/low for breakout entry =====
-            if len(candles) >= 1:
-                latest_candle = candles[-1]  # ✅ LATEST candle
-                prev_high = float(latest_candle.get("high", 0))
-                prev_low = float(latest_candle.get("low", 0))
-            else:
-                logger.error("❌ No candles available for breakout")
-                return None
-            
-            # ===== STEP 11: Build result with metadata =====
+
+            # 7. Build result
             result = {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -312,37 +210,30 @@ class DualSuperTrendStrategy:
                 "candle_status": candle_status,
                 "perusu": perusu_result,
                 "sirusu": sirusu_result,
-                "previous_candle": {
-                    "high": prev_high,
-                    "low": prev_low
-                },
+                "previous_candle": {"high": prev_high, "low": prev_low},
                 "current_price": perusu_result.get('latest_close', 0)
             }
-            
-            # ===== STEP 12: Log summary and update tracking =====
+
+            # 8. Mark as processed and log
+            self._last_fetch_time[cache_key] = current_time
+            self._last_candle_count[cache_key] = actual_count
+            self._last_processed_candle_time[cache_key] = latest_candle_time
+
             logger.info(f"✅ INDICATORS CALCULATED SUCCESSFULLY (Chart-Accurate)")
-            # logger.info(f"   Symbol: {symbol}")
-            # logger.info(f"   Timeframe: {timeframe}")
-            # logger.info(f"   Candles: {actual_count}/{required_candles}")
             logger.info(f"   📊 Perusu: {perusu_result['signal_text']} @ ${perusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Sirusu: {sirusu_result['signal_text']} @ ${sirusu_result['supertrend_value']:.5f}")
             logger.info(f"   📊 Current Price: ${perusu_result.get('latest_close', 0):.5f}")
             logger.info(f"   📊 Latest Candle: High ${prev_high:.5f}, Low ${prev_low:.5f}")
             logger.info(f"   📊 ATR(20): {perusu_result.get('atr', 0):.6f}")
-            
-            # Update tracking for next cycle
-            self._last_fetch_time[cache_key] = current_time
-            self._last_candle_count[cache_key] = actual_count
-            
-            self._last_processed_candle_time[cache_key] = latest_candle_time
-            return result
-            
+
+        return result
+    
         except Exception as e:
             logger.error(f"❌ Exception calculating indicators: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
-    
+
     def detect_signal_flip(self, current_signal: int, 
                           last_signal: Optional[int]) -> Optional[str]:
         """Detect if Perusu signal has flipped from last known state."""
