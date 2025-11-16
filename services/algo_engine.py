@@ -388,10 +388,18 @@ async def reconcile_positions_on_startup():
                 if not cred:
                     logger.warning(f"⚠️ Could not load credentials for API {api_id}")
                     continue
+            
+            for setup in all_setups:
+                api_id = setup.get("api_id")
+                cred = await get_api_credential_by_id(api_id, decrypt=True)
+                if not cred:
+                    logger.warning(f"Could not load credentials for api_id {api_id}")
+                    continue
                 client = DeltaExchangeClient(
                     api_key=cred['api_key'],
                     api_secret=cred['api_secret']
                 )
+                
                 try:
                     exchange_open_positions = await client.get_open_positions()
                     exchange_ids = set(p.get('id') for p in exchange_open_positions)
