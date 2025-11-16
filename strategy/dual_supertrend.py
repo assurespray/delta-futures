@@ -226,7 +226,7 @@ class DualSuperTrendStrategy:
             logger.info(f"   📊 Latest Candle: High ${prev_high:.5f}, Low ${prev_low:.5f}")
             logger.info(f"   📊 ATR(20): {perusu_result.get('atr', 0):.6f}")
 
-        return result
+            return result
     
         except Exception as e:
             logger.error(f"❌ Exception calculating indicators: {e}")
