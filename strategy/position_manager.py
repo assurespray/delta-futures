@@ -90,6 +90,25 @@ class PositionManager:
                     logger.error(f"❌ Failed to place market entry order")
                     await release_position_lock(db, symbol, setup_id)
                     return False
+
+                # The following block is new:
+                order_data = {
+                    "order_id": entry_order.get("id"),
+                    "algo_setup_id": setup_id,
+                    "user_id": algo_setup.get("user_id"),
+                    "asset": symbol,
+                    "side": order_side,
+                    "size": lot_size,
+                    "order_type": entry_order.get("order_type"),
+                    "status": entry_order.get("state", "submitted"),
+                    "limit_price": entry_order.get("limit_price"),
+                    "stop_price": entry_order.get("stop_price"),
+                    "reduce_only": entry_order.get("reduce_only"),
+                    "average_fill_price": entry_order.get("average_fill_price"),
+                    "extra_data": entry_order,
+                }
+                await create_order_record(order_data)
+
                 entry_order_id = entry_order.get("id")
                 entry_price = float(entry_order.get("average_fill_price", breakout_price))
                 activity_data = {
@@ -126,6 +145,23 @@ class PositionManager:
                 logger.error(f"❌ Failed to place breakout entry order")
                 await release_position_lock(db, symbol, setup_id)
                 return False
+
+            order_data = {
+                "order_id": entry_order.get("id"),
+                "algo_setup_id": setup_id,
+                "user_id": algo_setup.get("user_id"),
+                "asset": symbol,
+                "side": order_side,
+                "size": lot_size,
+                "order_type": entry_order.get("order_type"),
+                "status": entry_order.get("state", "submitted"),
+                "limit_price": entry_order.get("limit_price"),
+                "stop_price": entry_order.get("stop_price"),
+                "reduce_only": entry_order.get("reduce_only"),
+                "average_fill_price": entry_order.get("average_fill_price"),
+                "extra_data": entry_order,
+            }
+            await create_order_record(order_data)
 
             entry_order_id = entry_order.get("id")
             await update_algo_setup(setup_id, {
@@ -185,6 +221,23 @@ class PositionManager:
                         "stop_loss_order_id": sl_order_id
                     })
                     logger.info(f"💾 Saved stop-loss order ID {sl_order_id} to database")
+
+                order_data = {
+                    "order_id": sl_order_id,
+                    "algo_setup_id": setup_id,
+                    "user_id": None,  # Pass user_id if available
+                    "asset": None,    # If symbol available, put here
+                    "side": sl_side,
+                    "size": lot_size,
+                    "order_type": sl_order.get("order_type"),
+                    "status": sl_order.get("state", "submitted"),
+                    "limit_price": sl_order.get("limit_price"),
+                    "stop_price": sl_order.get("stop_price"),
+                    "reduce_only": sl_order.get("reduce_only"),
+                    "average_fill_price": sl_order.get("average_fill_price"),
+                    "extra_data": sl_order,
+                }
+                await create_order_record(order_data)
                 return sl_order_id
             else:
                 logger.warning(f"⚠️ Failed to place stop-loss order")
@@ -242,6 +295,24 @@ class PositionManager:
             exit_price = float(exit_order.get("average_fill_price", 0)) if exit_order else None
             if not exit_order:
                 return False
+
+            # Save order event
+            order_data = {
+                "order_id": exit_order.get("id"),
+                "algo_setup_id": setup_id,
+                "user_id": algo_setup.get("user_id"),
+                "asset": symbol,
+                "side": exit_side,
+                "size": lot_size,
+                "order_type": exit_order.get("order_type"),
+                "status": exit_order.get("state", "submitted"),
+                "limit_price": exit_order.get("limit_price"),
+                "stop_price": exit_order.get("stop_price"),
+                "reduce_only": exit_order.get("reduce_only"),
+                "average_fill_price": exit_order.get("average_fill_price"),
+                "extra_data": exit_order,
+            }
+            await create_order_record(order_data)
 
             # Cancel stop-loss after market exit
             if stop_loss_order_id:
