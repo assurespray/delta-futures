@@ -610,4 +610,12 @@ async def update_order_record(order_id: int, update_data: dict) -> bool:
     except Exception as e:
         logger.error(f"❌ Failed to update order record: {e}")
         return False
-        
+
+async def create_position_record(position_data: dict) -> str:
+    """
+    Save a new position to the `positions` collection.
+    """
+    db = await get_db()
+    result = await db.positions.insert_one(position_data)
+    return str(result.inserted_id)
+    
