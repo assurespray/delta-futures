@@ -131,6 +131,18 @@ class PositionManager:
                     "last_signal_time": datetime.utcnow(),
                     "position_lock_acquired": True
                 })
+                await create_position_record({
+                    "algo_setup_id": setup_id,
+                    "user_id": algo_setup.get("user_id"),
+                    "asset": symbol,
+                    "direction": entry_side,
+                    "size": lot_size,
+                    "entry_price": entry_price,
+                    "opened_at": datetime.utcnow(),
+                    "status": "open",
+                    "source": "algo"
+                })
+                
                 if algo_setup.get("additional_protection", False):
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sirusu_value, setup_id
@@ -298,9 +310,13 @@ class PositionManager:
                     "stop_loss_order_id": None,
                     "position_lock_acquired": False
                 })
+            
                 db = await get_db()
-                await release_position_lock(db, symbol, setup_id)
-                return True
+                await db.positions.update_many(
+                    {"algo_setup_id": setup_id, "status": "open"},
+                    {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+                )
+
 
             # Place market exit
             exit_side = "sell" if current_position == "long" else "buy"
