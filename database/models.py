@@ -194,6 +194,31 @@ class PositionLock(BaseModel):
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
 
 
+class OrderRecord(BaseModel):
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    order_id: int  # Exchange order ID
+    algo_setup_id: str
+    user_id: str
+    asset: str
+    side: str
+    size: int
+    order_type: str
+    status: str
+    limit_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    reduce_only: Optional[bool] = None
+    average_fill_price: Optional[float] = None
+    submitted_at: datetime = Field(default_factory=datetime.utcnow)
+    filled_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    extra_data: Optional[dict] = None  # Save raw or additional API fields if needed
+
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
+        
+
 # ========== SUMMARY OF FIELDS ==========
 """
 AlgoSetup Fields Organization:
