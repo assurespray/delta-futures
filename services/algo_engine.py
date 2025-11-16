@@ -470,6 +470,26 @@ async def reconcile_positions_on_startup():
                 "last_signal_time": datetime.utcnow(),
             })
 
+            # --- ACTIVITY RECORD CREATION ---
+            # Only create if none exists for this setup (avoid duplicates on every restart)
+            open_activity = await get_open_activity_by_setup(setup_id)
+            if not open_activity:
+                activity_data = {
+                    "user_id": setup.get("user_id"),
+                    "algo_setup_id": setup_id,
+                    "algo_setup_name": setup.get("setup_name"),
+                    "entry_time": datetime.utcnow(),   # Optional: use now, since real entry unknown
+                    "entry_price": entry_price,
+                    "direction": "long" if position_size > 0 else "short",
+                    "lot_size": abs(position_size),
+                    "asset": symbol,
+                    "perusu_entry_signal": "reconciled",
+                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "is_closed": False,
+                    "meta": {"reconciled": True}
+                }
+                await create_algo_activity(activity_data)
+
             # 2. Check open/pending orders (entry and stop-loss)
             open_orders = await get_open_orders(client, product_id)
             found_sl = False
