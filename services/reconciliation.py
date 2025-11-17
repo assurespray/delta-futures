@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 async def startup_reconciliation(logger_bot: LoggerBot):
     # Step 1: Remove old locks (startup cleanup)
-    await delete_position_lock()
-    logger.info("✅ Old stale position locks deleted")
+    #await delete_position_lock()
+    #logger.info("✅ Old stale position locks deleted")
 
     strategy = DualSuperTrendStrategy()
     position_manager = PositionManager()
