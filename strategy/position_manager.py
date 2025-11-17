@@ -45,6 +45,17 @@ class PositionManager:
             lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
 
+            db = await get_db()
+            lock = await get_position_lock(db, symbol)
+            if lock and lock['setup_id'] != setup_id:
+                logger.error(f"❌ ENTRY REJECTED: {symbol} is already traded by setup {lock['setup_id']} ({lock.get('setup_name')})")
+                return False
+
+            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
+            if not lock_acquired:
+                logger.error(f"❌ ENTRY REJECTED (acquire failed): {symbol} is already traded/locked")
+                return False
+
             current_position = algo_setup.get("current_position")
             if current_position:
                 logger.error(f"❌ ENTRY REJECTED: {setup_name} already has {current_position.upper()} position")
