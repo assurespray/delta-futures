@@ -182,26 +182,39 @@ async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, retry
     for attempt in range(retry_count):
         try:
             underlying_asset = symbol.replace("USD", "").replace("USDT", "")
+            logger.info(f"Attempt {attempt + 1}: Querying positions for symbol='{symbol}', underlying_asset='{underlying_asset}'")
             response = await client.get("/v2/positions", params={"underlying_asset_symbol": underlying_asset})
+            logger.info(f"API response for {underlying_asset}: {response}")
+
             if not response or not response.get("success"):
+                logger.warning(f"No valid response for {underlying_asset}; retrying.")
                 if attempt < retry_count - 1:
                     await asyncio.sleep(0.5)
                     continue
                 return None
+
             positions = response.get("result", [])
+            logger.info(f"Positions returned for {underlying_asset}: {positions}")
+
             for position in positions:
                 position_symbol = position.get("product", {}).get("symbol", "")
                 position_size = float(position.get("size", 0))
+                logger.info(f"Checking position: symbol={position_symbol}, size={position_size}")
                 if position_symbol == symbol and abs(position_size) > 0:
+                    logger.info(f"Match found: {position}")
                     return position
+
+            logger.info(f"No matching open position found for symbol: {symbol} in attempt {attempt + 1}")
+
             if attempt < retry_count - 1:
                 await asyncio.sleep(0.5)
                 continue
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Exception for {symbol} (attempt {attempt + 1}): {e}")
             if attempt < retry_count - 1:
                 await asyncio.sleep(0.5)
                 continue
             return None
+    logger.info(f"Finished all retries; no open position found for {symbol}")
     return None
-    
