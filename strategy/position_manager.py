@@ -66,16 +66,6 @@ class PositionManager:
                 logger.error(f"❌ ENTRY REJECTED: Pending entry order already exists")
                 return False
 
-            db = await get_db()
-            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
-            if not lock_acquired:
-                logger.error(f"❌ ENTRY REJECTED: {symbol} is already traded by another setup")
-                lock = await get_position_lock(db, symbol)
-                logger.error(f"Reconciliation: Asset {symbol} already locked by {lock['setup_id']} ({lock.get('setup_name')})")
-            else:
-                logger.info(f"Reconciliation: Lock acquired for {symbol} by setup {setup_id}")
-                return False
-
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
             if actual_size != 0:
