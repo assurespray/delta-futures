@@ -619,3 +619,25 @@ async def create_position_record(position_data: dict) -> str:
     result = await db.positions.insert_one(position_data)
     return str(result.inserted_id)
     
+async def create_position_lock(symbol: str, setup_id: str) -> bool:
+    """
+    Shortcut compatible with reconciliation routine.
+    """
+    db = await get_db()
+    # You can use the setup_id as setup_name, or fetch the name if needed
+    return await acquire_position_lock(db, symbol, setup_id, setup_name=setup_id)
+
+async def delete_position_lock(symbol: str = None) -> int:
+    """
+    If symbol is None, deletes ALL locks (startup cleanup).
+    If symbol given, deletes single lock.
+    """
+    db = await get_db()
+    collection = db["position_locks"]
+    if symbol:
+        result = await collection.delete_one({"symbol": symbol})
+        return result.deleted_count
+    else:
+        result = await collection.delete_many({})
+        return result.deleted_count
+        
