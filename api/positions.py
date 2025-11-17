@@ -197,9 +197,11 @@ async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, retry
             logger.info(f"Positions returned for {underlying_asset}: {positions}")
 
             for position in positions:
-                position_symbol = position.get("product", {}).get("symbol", "")
+                # Delta returns 'product' dict with 'symbol'
+                position_symbol = position.get("product_symbol") or position.get("product", {}).get("symbol", "")
                 position_size = float(position.get("size", 0))
                 logger.info(f"Checking position: symbol={position_symbol}, size={position_size}")
+                # Symbol must match _and_ position size must be nonzero/open
                 if position_symbol == symbol and abs(position_size) > 0:
                     logger.info(f"Match found: {position}")
                     return position
