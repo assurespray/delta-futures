@@ -66,7 +66,6 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             # --- END PLACEMENT ---
 
             position_side = "long" if position_size > 0 else "short"
-            await create_position_lock(symbol, setup_id)  # New asset/position lock
 
             # Step 3: Get SL details if present
             stop_loss_order_id = None
