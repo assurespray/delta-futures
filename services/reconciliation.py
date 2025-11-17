@@ -57,6 +57,14 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 })
                 continue
 
+            # --- PLACE THIS BLOCK HERE ---
+            db = await get_db()
+            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
+            if not lock_acquired:
+                lock = await get_position_lock(db, symbol)
+                logger.error(f"Reconciliation: {symbol} locked by {lock['setup_id']} ({lock.get('setup_name')}) already.")
+            # --- END PLACEMENT ---
+
             position_side = "long" if position_size > 0 else "short"
             await create_position_lock(symbol, setup_id)  # New asset/position lock
 
