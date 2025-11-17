@@ -56,10 +56,11 @@ class PositionManager:
                 return False
 
             db = await get_db()
-            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
+            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
             if not lock_acquired:
                 logger.error(f"❌ ENTRY REJECTED: {symbol} is already traded by another setup")
                 lock = await get_position_lock(db, symbol)
+                logger.warning(f"Asset {symbol} was already locked by setup {lock['setup_id']} ({lock['setup_name']})")
                 if lock:
                     logger.error(f"   Conflicting setup: {lock['setup_name']}")
                 return False
