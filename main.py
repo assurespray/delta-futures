@@ -49,13 +49,6 @@ async def lifespan(app: FastAPI):
         # Connect to MongoDB
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
-
-        # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)
-        from services.reconciliation import startup_reconciliation
-        logger.info("🔍 Reconciling positions with exchange...")  # ← ADD THIS LINE
-        await startup_reconciliation(logger_bot)
-        logger.info("✅ Position reconciliation completed")      # ← ADD THIS LINE
-
         
         # Setup position lock system
         logger.info("🔐 Setting up position lock system...")
@@ -65,6 +58,12 @@ async def lifespan(app: FastAPI):
         # Clean stale locks
         logger.info("🧹 Cleaning stale position locks...")
         from database.crud import cleanup_stale_locks
+
+        # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)
+        from services.reconciliation import startup_reconciliation
+        logger.info("🔍 Reconciling positions with exchange...")  # ← ADD THIS LINE
+        await startup_reconciliation(logger_bot)
+        logger.info("✅ Position reconciliation completed")      # ← ADD THIS LINE
         
         db = mongodb.get_db()
         cleaned = await cleanup_stale_locks(db, max_age_minutes=60)
