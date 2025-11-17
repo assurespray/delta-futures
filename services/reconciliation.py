@@ -42,13 +42,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             setup_name = setup.get("setup_name")
             addl_prot = setup.get("additional_protection", False)
 
-            # --- FIXED: Fetch all positions and filter for product_symbol ---
-            all_positions = await client.fetch_positions()   # or the appropriate fetch if you have a direct API
-            position = None
-            for pos in all_positions:
-                if pos.get("product_symbol") == symbol:
-                    position = pos
-                    break
+            position = await get_position_by_symbol(client, symbol)
 
             position_size = position.get("size", 0) if position else 0
             if position_size == 0:
