@@ -22,8 +22,8 @@ from services.logger_bot import LoggerBot
 logger = logging.getLogger(__name__)
 
 async def startup_reconciliation(logger_bot: LoggerBot):
-    # Step 1: Remove old locks
-    await delete_position_lock() # assuming this is a 'clear all' for startup
+    # Step 1: Remove old locks (startup cleanup)
+    await delete_position_lock()
     logger.info("✅ Old stale position locks deleted")
 
     strategy = DualSuperTrendStrategy()
@@ -43,9 +43,10 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             lot_size = setup.get("lot_size")
             timeframe = setup.get("timeframe")
             setup_id = str(setup["_id"])
+            setup_name = setup.get("setup_name")
             addl_prot = setup.get("additional_protection", False)
 
-            # Step 2: Fetch position & create lock
+            # Step 2: Fetch position
             position = await get_position_by_symbol(client, symbol)
             position_size = position.get("size", 0) if position else 0
             if position_size == 0:
@@ -55,19 +56,21 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     "position_lock_acquired": False,
                     "stop_loss_order_id": None,
                 })
+                await client.close()
                 continue
 
-            # --- PLACE THIS BLOCK HERE ---
+            # Step 3: Acquire position lock if needed (works for manual or old positions too)
             db = await get_db()
-            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
+            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
             if not lock_acquired:
                 lock = await get_position_lock(db, symbol)
                 logger.error(f"Reconciliation: {symbol} locked by {lock['setup_id']} ({lock.get('setup_name')}) already.")
-            # --- END PLACEMENT ---
+            else:
+                logger.info(f"Reconciliation: Acquired lock for {symbol} ({setup_name})")
 
             position_side = "long" if position_size > 0 else "short"
 
-            # Step 3: Get SL details if present
+            # Step 4: Get SL details if present
             stop_loss_order_id = None
             open_orders = await get_open_orders(client, product_id)
             for order in open_orders or []:
@@ -77,13 +80,13 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     stop_loss_order_id = order.get("id")
                     break
 
-            # Step 4: Wait for next boundary if needed
+            # Step 5: Wait for next boundary if needed (optional for signal accuracy)
             now = datetime.utcnow()
             time_until_boundary = (get_next_boundary_time(timeframe, now) - now).total_seconds()
             if time_until_boundary < 30:
                 await asyncio.sleep(time_until_boundary + 1)
 
-            # Step 5: Calculate Perusu & Sirusu
+            # Step 6: Calculate Perusu & Sirusu
             indicator_result = await strategy.calculate_indicators(client, symbol, timeframe)
             if not indicator_result:
                 logger.error(f"Indicator calculation failed for {symbol}")
@@ -93,7 +96,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             perusu_text, sirusu_text = indicator_result["perusu"]["signal_text"], indicator_result["sirusu"]["signal_text"]
             sirusu_value = indicator_result["sirusu"]["supertrend_value"]
 
-            # Step 6: Check for flip/exit logic
+            # Step 7: Check for flip/exit logic
             if position_side == "long":
                 valid = perusu_signal == 1 and sirusu_signal == 1
             else:
@@ -110,7 +113,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     await delete_position_lock(symbol)
                 continue
 
-            # Step 7: SL placement as needed
+            # Step 8: SL placement as needed
             if addl_prot and not stop_loss_order_id:
                 sl_order = await place_stop_loss_order(
                     client, product_id, abs(position_size),
@@ -119,7 +122,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 )
                 stop_loss_order_id = sl_order.get("id") if sl_order else None
 
-            # Step 8: Save DB state
+            # Step 9: Save DB state
             await update_algo_setup(setup_id, {
                 "current_position": position_side,
                 "last_entry_price": position.get("entry_price"),
@@ -140,4 +143,4 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             await client.close()
 
     logger.info("✅ Startup reconciliation complete")
-  
+    
