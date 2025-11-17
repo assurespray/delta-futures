@@ -131,6 +131,7 @@ class PositionManager:
                     "last_signal_time": datetime.utcnow(),
                     "position_lock_acquired": True
                 })
+                logger.info(f"🔍 About to create position record for {symbol}")
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": algo_setup.get("user_id"),
@@ -142,6 +143,7 @@ class PositionManager:
                     "status": "open",
                     "source": "algo"
                 })
+                logger.info(f"✅ Position record created successfully")
                 
                 if algo_setup.get("additional_protection", False):
                     sl_order_id = await self._place_stop_loss_protection(
@@ -416,6 +418,7 @@ class PositionManager:
                     "position_lock_acquired": True,
                     "last_signal_time": datetime.utcnow(),
                 })
+                logger.info(f"🔍 About to create position record for {symbol}")
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": setup.get("user_id"),
@@ -427,6 +430,7 @@ class PositionManager:
                     "status": "open",
                     "source": "reconciliation"
                 })
+                logger.info(f"✅ Position record created successfully")
                 
                 # Optionally recreate algo_activity here if needed
 
