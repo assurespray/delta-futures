@@ -136,8 +136,10 @@ class PositionManager:
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": algo_setup.get("user_id"),
+                    "product_id": product_id,  # <-- ADD THIS
                     "asset": symbol,
                     "direction": entry_side,
+                    "side": "buy" if entry_side == "long" else "sell",
                     "size": lot_size,
                     "entry_price": entry_price,
                     "opened_at": datetime.utcnow(),
@@ -319,7 +321,8 @@ class PositionManager:
                     {"algo_setup_id": setup_id, "status": "open"},
                     {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
                 )
-
+                await release_position_lock(db, symbol, setup_id)
+                return True  # <-- ADD THIS!
 
             # Place market exit
             exit_side = "sell" if current_position == "long" else "buy"
