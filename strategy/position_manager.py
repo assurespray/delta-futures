@@ -467,23 +467,42 @@ class PositionManager:
             setup_id = str(setup["_id"])
             product_id = setup.get("product_id")
 
+            # ✅ ADD THIS: Ensure product_id exists before fetching position
+            if not product_id:
+                product = await get_product_by_symbol(client, symbol)
+                if product:
+                    product_id = product["id"]
+                    await update_algo_setup(setup_id, {"product_id": product_id})
+                    logger.info(f"✅ Product ID {product_id} saved for {symbol}")
+                else:
+                    logger.error(f"❌ Product not found for {symbol}, skipping reconciliation")
+                    continue  # Skip this setup if product doesn't exist
+                
             # 1. Check for open position
             position = await get_position_by_symbol(client, symbol)
             position_size = position.get("size", 0) if position else 0
 
             if position_size != 0:
+                # Get direction from position size
+                direction = "long" if position_size > 0 else "short"
+                
                 await update_algo_setup(setup_id, {
                     "current_position": "long" if position_size > 0 else "short",
                     "last_entry_price": position.get("entry_price"),
                     "position_lock_acquired": True,
                     "last_signal_time": datetime.utcnow(),
                 })
-                logger.info(f"🔍 About to create position record for {symbol}")
+
+                # Create position record
+                logger.info(f"🔍 About to create position record for {symbol} (size={position_size})")
+                
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": setup.get("user_id"),
+                    "product_id": product_id,  # ✅ ADD THIS
                     "asset": symbol,
-                    "direction": "long" if position_size > 0 else "short",
+                    "direction": direction,
+                    "side": "buy" if direction == "long" else "sell",
                     "size": abs(position_size),
                     "entry_price": position.get("entry_price"),
                     "opened_at": datetime.utcnow(),
@@ -493,6 +512,25 @@ class PositionManager:
                 logger.info(f"✅ Position record created successfully")
                 
                 # Optionally recreate algo_activity here if needed
+                activity_data = {
+                    "user_id": setup.get("user_id"),
+                    "algo_setup_id": setup_id,
+                    "algo_setup_name": setup.get("setup_name"),
+                    "entry_time": datetime.utcnow(),
+                    "entry_price": position.get("entry_price"),
+                    "direction": direction,
+                    "lot_size": abs(position_size),
+                    "asset": symbol,
+                    "perusu_entry_signal": "uptrend" if direction == "long" else "downtrend",
+                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "is_closed": False
+                }
+                await create_algo_activity(activity_data)
+                logger.info(f"✅ Algo activity created for reconciled position: {symbol}")
+            
+                # Acquire position lock
+                db = await get_db()
+                await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
 
             # 2. Check for open orders (entry, stop-loss, etc.)
             open_orders = await get_open_orders(client, product_id)
