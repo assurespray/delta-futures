@@ -206,21 +206,77 @@ class PositionManager:
                                       sirusu_value: float) -> bool:
         try:
             setup_id = str(algo_setup["_id"])
-            pending_order_id = algo_setup.get("pending_entry_order_id")
+            setup_name = algo_setup["setup_name"]
+            symbol = algo_setup["asset"]
+            lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
+            pending_order_id = algo_setup.get("pending_entry_order_id")
+            
             if not pending_order_id or not product_id:
                 return False
 
             filled = await is_order_gone(client, pending_order_id, product_id)
             if filled:
+                logger.info(f"✅ Stop-market entry filled for {setup_name}")
                 # ✅ ADD THIS: Update order record to "filled"
                 await update_order_record(pending_order_id, {
                     "status": "filled",
                     "filled_at": datetime.utcnow()
                 })
-                
-                await update_algo_setup(setup_id, {"pending_entry_order_id": None})
+            
+                # Get entry details
+                entry_side = "long" if algo_setup.get("pending_entry_direction_signal") == 1 else "short"
+                entry_price = algo_setup.get("entry_trigger_price")
+            
+                # Create position record
+                logger.info(f"🔍 Creating position record for stop-market fill: {symbol}")
+                await create_position_record({
+                    "algo_setup_id": setup_id,
+                    "user_id": algo_setup.get("user_id"),
+                    "product_id": product_id,
+                    "asset": symbol,
+                    "direction": entry_side,
+                    "side": "buy" if entry_side == "long" else "sell",
+                    "size": lot_size,
+                    "entry_price": entry_price,
+                    "opened_at": datetime.utcnow(),
+                    "status": "open",
+                    "source": "algo"
+                })
+                logger.info(f"✅ Position record created")
+            
+                # Create activity
+                activity_data = {
+                    "user_id": algo_setup["user_id"],
+                    "algo_setup_id": setup_id,
+                    "algo_setup_name": setup_name,
+                    "entry_time": datetime.utcnow(),
+                    "entry_price": entry_price,
+                    "direction": entry_side,
+                    "lot_size": lot_size,
+                    "asset": symbol,
+                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
+                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "is_closed": False
+                }
+                await create_algo_activity(activity_data)
+            
+                # Update setup
+                await update_algo_setup(setup_id, {
+                    "pending_entry_order_id": None,
+                    "current_position": entry_side,
+                    "last_entry_price": entry_price,
+                    "last_signal_time": datetime.utcnow()
+                })
+            
+                # Place stop-loss if protection enabled
+                if algo_setup.get("additional_protection", False):
+                    await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, sirusu_value, setup_id
+                    )
+        
             return filled
+                
         except Exception as e:
             logger.error(f"❌ Exception checking entry order: {e}")
             import traceback
