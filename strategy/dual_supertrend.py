@@ -157,7 +157,14 @@ class DualSuperTrendStrategy:
             timeframe_seconds = get_timeframe_seconds(timeframe)
             start_time = end_time - (timeframe_seconds * int(required_candles * 1.2))
             candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
-        
+
+            logger.info(f"Fetched candles for {symbol} {timeframe}: count={len(candles) if candles else 0}, start={start_time}, end={end_time}, limit={required_candles}")
+            if candles:
+                logger.info(f"First candle: {candles[0]}")
+                logger.info(f"Last candle:  {candles[-1]}")
+            else:
+                logger.info("No candles returned from get_candles.")
+    
             if not candles:
                 logger.error("❌ No candles available for breakout")
                 return None
