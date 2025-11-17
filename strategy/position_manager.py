@@ -60,9 +60,9 @@ class PositionManager:
             if not lock_acquired:
                 logger.error(f"❌ ENTRY REJECTED: {symbol} is already traded by another setup")
                 lock = await get_position_lock(db, symbol)
-                logger.warning(f"Asset {symbol} was already locked by setup {lock['setup_id']} ({lock['setup_name']})")
-                if lock:
-                    logger.error(f"   Conflicting setup: {lock['setup_name']}")
+                logger.error(f"Reconciliation: Asset {symbol} already locked by {lock['setup_id']} ({lock.get('setup_name')})")
+            else:
+                logger.info(f"Reconciliation: Lock acquired for {symbol} by setup {setup_id}")
                 return False
 
             actual_position = await get_position_by_symbol(client, symbol)
