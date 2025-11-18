@@ -116,6 +116,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 )
                 if exit_success:
                     await delete_position_lock(symbol)
+                    logger.info(f"Deleted position lock for {symbol}")
                 continue
 
             if addl_prot and not stop_loss_order_id:
