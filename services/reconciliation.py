@@ -55,12 +55,22 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 setup["last_entry_price"] = position.get("entry_price")
                 setup["product_id"] = position.get("product_id")
                 setup["position_obj"] = position  # optional, for easy access anywhere
+
+                logger.info(
+                    f"[SYNC] symbol={symbol} product_id={product_id} "
+                    f"size={position['size']} current_position={setup['current_position']} "
+                    f"position_obj={setup['position_obj']}"
+                )
             else:
                 logger.warning(f"No matching position for {symbol} (wanted product_id={product_id} got {position.get('product_id') if position else None})")
                 setup["current_position"] = None
                 setup["last_entry_price"] = None
                 setup["product_id"] = product_id
                 setup["position_obj"] = None
+
+                logger.warning(
+                    f"[SYNC] symbol={symbol} - NO OPEN POSITION (wanted product_id={product_id}, got {position.get('product_id') if position else None})"
+                )
                 # optionally update algo setup DB here as well
                 await update_algo_setup(setup_id, setup)
                 await client.close()
