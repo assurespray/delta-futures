@@ -72,18 +72,14 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             logger.info(f"Open orders for {symbol}: {open_orders}")
 
             for order in open_orders or []:
-                # Normalize and robustly check order fields
                 state = (order.get("state") or "").lower()
                 order_type = (order.get("order_type") or "").lower()
+                stop_order_type = (order.get("stop_order_type") or "").lower()
                 reduce_only = order.get("reduce_only", False)
-                # Some exchanges use 'stop_market_order', some use 'stop_market', some may use 'stop_loss_order'
-                # Accept any stop order that is reduce_only and open/untriggered
-                if state in ("open", "untriggered") and \
-                    (
-                        "stop" in order_type or
-                        order_type in ("stop_loss_order", "stop_market_order", "stop_market")
-                    ) and \
-                    reduce_only:
+                # Accept orders in pending/untriggered/open, with stop_order_type AND reduce_only
+                if state in ("pending", "open", "untriggered") \
+                    and stop_order_type == "stop_loss_order" \
+                    and reduce_only:
                     stop_loss_order_id = order.get("id")
                     logger.info(f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id}")
                     break
