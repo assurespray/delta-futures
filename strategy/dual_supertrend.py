@@ -186,7 +186,7 @@ class DualSuperTrendStrategy:
                 logger.info("No candles returned from get_candles.")
 
             if not candles:
-                logger.error("❌ No candles available for breakout")
+                logger.error(f"❌ No candles available for breakout for {symbol} {timeframe}")
                 return None          
 
             # 3. Gather latest candle info and prevent duplicate processing
