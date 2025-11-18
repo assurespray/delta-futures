@@ -150,12 +150,32 @@ class DualSuperTrendStrategy:
                 "6h": 300, "8h": 300, "12h": 300, "1d": 600, "2d": 300, "3d": 300, "7d": 300, "1w": 300,
             }
             required_candles = timeframe_requirements.get(timeframe, 150)
-        
-            # 2. Fetch candles
-            logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
-            end_time = int(current_time.timestamp())
             timeframe_seconds = get_timeframe_seconds(timeframe)
-            start_time = end_time - (timeframe_seconds * int(required_candles * 1.2))
+            
+            # Efficient Step 1: Only fetch TWO latest candles to check last candle status
+            logger.info(f"🔍 Checking latest candle close status for {symbol} ({timeframe})")
+            end_time = int(current_time.timestamp())
+            start_time = end_time - timeframe_seconds * 2
+            latest_candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=2)
+
+            if not latest_candles:
+                logger.error("❌ Could not fetch latest candles for status check")
+                return None
+
+            candle_status = self._is_candle_closed(latest_candles, timeframe)
+            if not candle_status['is_closed']:
+                wait_time = candle_status['seconds_until_ready']
+                if wait_time > 0 and wait_time <= 10:
+                    logger.info(f"⏳ Candle not ready. Waiting {wait_time}s for buffer...")
+                    await asyncio.sleep(wait_time + 0.5)
+                else:
+                    logger.warning(f"⚠️ Wait time unreasonable: {wait_time}s")
+                    return None
+
+            # Efficient Step 2: Now fetch ALL candles in one call (guaranteed latest is closed)
+            logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
+            end_time = int(datetime.utcnow().timestamp())
+            start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
             candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
 
             logger.info(f"Fetched candles for {symbol} {timeframe}: count={len(candles) if candles else 0}, start={start_time}, end={end_time}, limit={required_candles}")
@@ -164,10 +184,10 @@ class DualSuperTrendStrategy:
                 logger.info(f"Last candle:  {candles[-1]}")
             else:
                 logger.info("No candles returned from get_candles.")
-    
+
             if not candles:
                 logger.error("❌ No candles available for breakout")
-                return None
+                return None          
 
             # 3. Gather latest candle info and prevent duplicate processing
             actual_count = len(candles)
