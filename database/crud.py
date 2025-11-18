@@ -465,13 +465,14 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
             "setup_name": setup_name,
             "locked_at": datetime.utcnow()
         }
-        
+        logger.error(f"[DEBUG] About to insert into: {db.name}.{collection.name} on client={db.client.address if hasattr(db.client,'address') else '[unknown]'}")
         result = await collection.insert_one(lock_data)
-        
+        logger.error(f"[DEBUG] Inserted lock: {lock_data} with result id={result.inserted_id}")
         logger.info(f"✅ Acquired lock on {symbol} for {setup_name}")
         return True
         
     except Exception as e:
+        logger.error(f"[DB ERROR] Failed to acquire lock: {e}")
         if "duplicate" in str(e).lower():
             # Lock already exists - get who owns it
             lock = await get_position_lock(db, symbol)
