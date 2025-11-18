@@ -104,14 +104,6 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     logger.info(f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id}")
                     logger.debug(f"Examining order for product_id={order.get('product_id')} (wanted {product_id}), symbol={order.get('product_symbol')}")
                     break
-                               
-                # Accept orders in pending/untriggered/open, with stop_order_type AND reduce_only
-                if state in ("pending", "open", "untriggered") \
-                    and stop_order_type == "stop_loss_order" \
-                    and reduce_only:
-                    stop_loss_order_id = order.get("id")
-                    logger.info(f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id}")
-                    break
 
             now = datetime.utcnow()
             time_until_boundary = (get_next_boundary_time(timeframe, now) - now).total_seconds()
