@@ -517,13 +517,14 @@ async def release_position_lock(db: AsyncIOMotorDatabase,
         True if lock released, False if error
     """
     try:
+        logger.error(f"[DEBUG] release_position_lock called for symbol={symbol}, setup_id={setup_id}")
         collection = db["position_locks"]
         
         result = await collection.delete_one({
             "symbol": symbol,
             "setup_id": setup_id
         })
-        
+        logger.error(f"[DEBUG] release_position_lock deleted_count={result.deleted_count} for symbol={symbol}, setup_id={setup_id}")
         if result.deleted_count > 0:
             logger.info(f"✅ Released lock on {symbol}")
             return True
