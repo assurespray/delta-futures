@@ -634,12 +634,15 @@ async def delete_position_lock(symbol: str = None) -> int:
     If symbol is None, deletes ALL locks (startup cleanup).
     If symbol given, deletes single lock.
     """
+    logger.error(f"[DEBUG] delete_position_lock called with symbol={symbol}")
     db = await get_db()
     collection = db["position_locks"]
     if symbol:
         result = await collection.delete_one({"symbol": symbol})
+        logger.error(f"[DEBUG] delete_position_lock deleted_count={result.deleted_count} for symbol={symbol}")
         return result.deleted_count
     else:
         result = await collection.delete_many({})
+        logger.error(f"[DEBUG] delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
         return result.deleted_count
         
