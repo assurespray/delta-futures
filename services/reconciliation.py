@@ -90,19 +90,26 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
             for order in open_orders or []:
                 state = (order.get("state") or "").lower()
-                order_type = (order.get("order_type") or "").lower()
                 stop_order_type = (order.get("stop_order_type") or "").lower()
                 reduce_only = order.get("reduce_only", False)
-                # STRICT: Must match order type, state, reduce_only, and product_id!
+                product_id_in_order = order.get("product_id")
+                # Defensive debug log
+                logger.debug(
+                    f"Order check: id={order.get('id')}, state={state}, stop_type={stop_order_type}, "
+                    f"reduce_only={reduce_only}, product_id={product_id_in_order}, "
+                    f"wanted={product_id}, symbol={order.get('product_symbol')}"
+                )
                 if (
                     state in ("pending", "open", "untriggered")
                     and stop_order_type == "stop_loss_order"
                     and reduce_only
-                    and order.get("product_id") == product_id  # <--- STRICT MATCH BY ID
+                    and product_id_in_order == product_id  # STRICT: Only process for correct symbol/product
                 ):
                     stop_loss_order_id = order.get("id")
-                    logger.info(f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id}")
-                    logger.debug(f"Examining order for product_id={order.get('product_id')} (wanted {product_id}), symbol={order.get('product_symbol')}")
+                    logger.info(
+                        f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id} "
+                        f"(product_id={product_id_in_order}, symbol={order.get('product_symbol')})"
+                    )            
                     break
 
             now = datetime.utcnow()
