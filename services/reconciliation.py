@@ -26,6 +26,12 @@ async def startup_reconciliation(logger_bot: LoggerBot):
     position_manager = PositionManager()
     setups = await get_all_active_algo_setups()
 
+    # ==== CRITICAL: WIPE ALL LOCKS BEFORE STARTUP ====
+    db = await get_db()
+    delete_result = await db["position_locks"].delete_many({})
+    logger.info(f"Startup: Deleted all position locks (count={delete_result.deleted_count}) before reconciliation")
+    # ==================================================
+
     for setup in setups:
         api_id = setup.get("api_id")
         cred = await get_api_credential_by_id(api_id, decrypt=True)
