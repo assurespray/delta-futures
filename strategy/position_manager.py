@@ -330,6 +330,13 @@ class PositionManager:
     async def execute_exit(self, client: DeltaExchangeClient, 
                           algo_setup: Dict[str, Any],
                           sirusu_signal_text: str) -> bool:
+        logger.info(
+        f"[MANAGER/EXIT] Called for symbol={algo_setup.get('asset')} "
+        f"current_position={algo_setup.get('current_position')}, "
+        f"product_id={algo_setup.get('product_id')}, "
+        f"position_obj={algo_setup.get('position_obj')}"
+        )
+        # ... rest of your logic...
         try:
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
