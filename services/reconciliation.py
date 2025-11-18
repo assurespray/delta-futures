@@ -50,6 +50,22 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
             position = await get_position_by_symbol(client, symbol)
 
+            if position and position.get("product_id") == product_id:
+                setup["current_position"] = "long" if position["size"] > 0 else "short"
+                setup["last_entry_price"] = position.get("entry_price")
+                setup["product_id"] = position.get("product_id")
+                setup["position_obj"] = position  # optional, for easy access anywhere
+            else:
+                logger.warning(f"No matching position for {symbol} (wanted product_id={product_id} got {position.get('product_id') if position else None})")
+                setup["current_position"] = None
+                setup["last_entry_price"] = None
+                setup["product_id"] = product_id
+                setup["position_obj"] = None
+                # optionally update algo setup DB here as well
+                await update_algo_setup(setup_id, setup)
+                await client.close()
+                continue
+
             position_size = position.get("size", 0) if position else 0
             if position_size == 0:
                 await update_algo_setup(setup_id, {
@@ -144,6 +160,8 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
             if not valid:
                 await logger_bot.send_info(f"Sirusu flip detected for {symbol} ({position_side}), exiting at market!")
+
+                logger.info(f"Passing to manager: symbol={symbol}, setup product_id={setup['product_id']}, position={setup.get('position_obj')}")
                 exit_success = await position_manager.execute_exit(
                     client=client,
                     algo_setup=setup,
