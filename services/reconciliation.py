@@ -107,8 +107,8 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 await asyncio.sleep(time_until_boundary + 1)
 
             # [Optional] Log or fetch candles here if you have direct access, e.g.:
-            candles = await fetch_candles(client, symbol, timeframe)
-            logger.info(f"{symbol}: Candle count for indicator calc = {len(candles)}, first candle: {candles[0] if candles else 'N/A'}")
+            # candles = await fetch_candles(client, symbol, timeframe)
+            # logger.info(f"{symbol}: Candle count for indicator calc = {len(candles)}, first candle: {candles[0] if candles else 'N/A'}")
 
             logger.info(f"Calling indicator calculation for {symbol}, timeframe={timeframe}")
 
