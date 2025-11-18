@@ -153,13 +153,13 @@ async def lifespan(app: FastAPI):
     
     try:
         # Release position locks
-        logger.info("🔐 Releasing all position locks...")
-        db = mongodb.get_db()
-        collection = db["position_locks"]
-        result = await collection.delete_many({})
+        #logger.info("🔐 Releasing all position locks...")
+        #db = mongodb.get_db()
+        #collection = db["position_locks"]
+        #result = await collection.delete_many({})
         
-        if result.deleted_count > 0:
-            logger.info(f"✅ Released {result.deleted_count} position locks")
+        #if result.deleted_count > 0:
+            #logger.info(f"✅ Released {result.deleted_count} position locks")
         
         # Stop scheduler
         scheduler_service.shutdown()
