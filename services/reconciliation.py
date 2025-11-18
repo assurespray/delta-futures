@@ -80,8 +80,8 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 # Accept any stop order that is reduce_only and open/untriggered
                 if state in ("open", "untriggered") and \
                     (
-                       "stop" in order_type or
-                       order_type in ("stop_loss_order", "stop_market_order", "stop_market")
+                        "stop" in order_type or
+                        order_type in ("stop_loss_order", "stop_market_order", "stop_market")
                     ) and \
                     reduce_only:
                     stop_loss_order_id = order.get("id")
