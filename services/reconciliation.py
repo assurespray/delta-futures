@@ -49,6 +49,19 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             addl_prot = setup.get("additional_protection", False)
 
             position = await get_position_by_symbol(client, symbol)
+            position_size = position.get("size", 0) if position else 0
+
+            # Check if no position exists
+            if position_size == 0:
+                logger.info(f"No open position for {symbol}, cleaning up setup")
+                await update_algo_setup(setup_id, {
+                    "current_position": None,
+                    "last_entry_price": None,
+                    "position_lock_acquired": False,
+                    "stop_loss_order_id": None,
+                })
+                await client.close()
+                continue
 
             if position and position.get("product_id") == product_id:
                 setup["current_position"] = "long" if position["size"] > 0 else "short"
