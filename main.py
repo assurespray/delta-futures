@@ -55,9 +55,15 @@ async def lifespan(app: FastAPI):
         await mongodb.setup_position_lock_indexes()
         logger.info("✅ Position lock indexes created")
         
-        # Clean stale locks
+        # Clean stale locks (DO THIS FIRST!!)
         logger.info("🧹 Cleaning stale position locks...")
         from database.crud import cleanup_stale_locks
+        db = mongodb.get_db()
+        cleaned = await cleanup_stale_locks(db, max_age_minutes=60)
+        if cleaned > 0:
+            logger.warning(f"🧹 Cleaned {cleaned} stale position locks from previous session")
+        else:
+            logger.info("✅ No stale locks found")
 
         # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)
         from services.reconciliation import startup_reconciliation
