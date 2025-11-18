@@ -58,6 +58,10 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             db = await get_db()
             # Always create a FRESH lock after startup lock cleanup
             lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
+            if not lock_acquired:
+                logger.error(f"❌ RECONCILIATION: Could not acquire lock for {symbol} by {setup_id}")
+            else:
+                logger.info(f"✅ RECONCILIATION: Lock acquired for {symbol} by {setup_id}")
             if lock_acquired:
                 logger.info(f"Startup: Created new position lock for {symbol} ({setup_name})")
             else:
