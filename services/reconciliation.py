@@ -61,7 +61,11 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             if lock_acquired:
                 logger.info(f"Startup: Created new position lock for {symbol} ({setup_name})")
             else:
-                logger.error(f"Startup: Failed to create lock for {symbol}. This should not happen after cleanup!")
+                existing_lock = await get_position_lock(db, symbol)
+                logger.error(
+                    f"Startup: Failed to create lock for {symbol}. "
+                    f"Existing lock: {existing_lock} | Requested by setup_id={setup_id}, setup_name={setup_name}"
+                )
                 continue  # Only move on to next setup if you can't lock
 
             position_side = "long" if position_size > 0 else "short"
