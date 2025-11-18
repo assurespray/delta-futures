@@ -89,6 +89,11 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             logger.info(f"Open orders for {symbol}: {open_orders}")
 
             for order in open_orders or []:
+                state = (order.get("state") or "").lower()
+                order_type = (order.get("order_type") or "").lower()
+                stop_order_type = (order.get("stop_order_type") or "").lower()
+                reduce_only = order.get("reduce_only", False)
+                # STRICT: Must match order type, state, reduce_only, and product_id!
                 if (
                     state in ("pending", "open", "untriggered")
                     and stop_order_type == "stop_loss_order"
@@ -99,11 +104,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     logger.info(f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id}")
                     logger.debug(f"Examining order for product_id={order.get('product_id')} (wanted {product_id}), symbol={order.get('product_symbol')}")
                     break
-                    
-                state = (order.get("state") or "").lower()
-                order_type = (order.get("order_type") or "").lower()
-                stop_order_type = (order.get("stop_order_type") or "").lower()
-                reduce_only = order.get("reduce_only", False)
+                               
                 # Accept orders in pending/untriggered/open, with stop_order_type AND reduce_only
                 if state in ("pending", "open", "untriggered") \
                     and stop_order_type == "stop_loss_order" \
