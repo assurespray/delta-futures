@@ -106,10 +106,18 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             if time_until_boundary < 30:
                 await asyncio.sleep(time_until_boundary + 1)
 
+            # [Optional] Log or fetch candles here if you have direct access, e.g.:
+            candles = await fetch_candles(client, symbol, timeframe)
+            logger.info(f"{symbol}: Candle count for indicator calc = {len(candles)}, first candle: {candles[0] if candles else 'N/A'}")
+
+            logger.info(f"Calling indicator calculation for {symbol}, timeframe={timeframe}")
+
             indicator_result = await strategy.calculate_indicators(client, symbol, timeframe)
             if not indicator_result:
-                logger.error(f"Indicator calculation failed for {symbol}")
+                logger.error(f"Indicator calculation failed for {symbol} (likely cause: not enough candles, bad input data, or server error!)")
                 continue
+            else:
+             b  logger.info(f"Indicator calculation SUCCESS for {symbol}: {indicator_result}")
 
             perusu_signal, sirusu_signal = indicator_result["perusu"]["signal"], indicator_result["sirusu"]["signal"]
             perusu_text, sirusu_text = indicator_result["perusu"]["signal_text"], indicator_result["sirusu"]["signal_text"]
