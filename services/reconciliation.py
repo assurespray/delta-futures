@@ -62,6 +62,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 logger.info(f"Startup: Created new position lock for {symbol} ({setup_name})")
             else:
                 existing_lock = await get_position_lock(db, symbol)
+                logger.debug(f"[DEBUG] Lock check for {symbol}: {existing_lock}")
                 logger.error(
                     f"Startup: Failed to create lock for {symbol}. "
                     f"Existing lock: {existing_lock} | Requested by setup_id={setup_id}, setup_name={setup_name}"
