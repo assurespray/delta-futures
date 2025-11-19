@@ -375,3 +375,40 @@ class AlgoEngine:
                 await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
                 await asyncio.sleep(60)
 
+async def monitor_pending_entries(self, poll_interval=3):
+    """
+    Polls all pending stop-market entries every few seconds and attaches stop-loss if filled.
+    """
+    logger.info("🚦 Starting fast fill-monitor for pending entries.")
+    while True:
+        try:
+            active_setups = await get_all_active_algo_setups()
+            for setup in active_setups:
+                # Only for setups with pending stop-market entries
+                if setup.get("pending_entry_order_id"):
+                    api_id = setup['api_id']
+                    cred = await get_api_credential_by_id(api_id, decrypt=True)
+                    if not cred:
+                        continue
+                    client = DeltaExchangeClient(
+                        api_key=cred['api_key'],
+                        api_secret=cred['api_secret']
+                    )
+                    # You need the SL value you'd use upon entry fill:
+                    # (Choose latest indicator, cached, or safe default, depending on your infra)
+                    sirusu_value = setup.get("last_sirusu_value")
+                    # If you have indicator cache for this setup, load the latest SL value
+                    cache = await get_indicator_cache(str(setup['_id']), "sirusu")
+                    if cache:
+                        sirusu_value = cache.get("last_value", sirusu_value)
+                    # Call your regular check fill logic
+                    await self.position_manager.check_entry_order_filled(
+                        client, setup, sirusu_value
+                    )
+                    await client.close()
+            await asyncio.sleep(poll_interval)
+        except Exception as e:
+            logger.error(f"[FILL-MONITOR] Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await asyncio.sleep(poll_interval)
