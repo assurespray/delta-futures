@@ -137,6 +137,11 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(algo_engine.monitor_pending_entries(poll_interval=5))
         logger.info("✅ Monitoring pending entry order")
         asyncio.create_task(screener_engine.run_continuous_monitoring())
+        logger.info("✅ Monitoring screener pending entry order")
+
+        # After starting algo/screener engines in lifespan()
+        asyncio.create_task(run_order_reconciliation())
+        logger.info("✅ Order reconciliation task started")
 
         # Send startup notification
         await logger_bot.send_info(
@@ -199,6 +204,13 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Shutdown error: {e}")
         import traceback
         logger.error(traceback.format_exc())
+
+
+async def run_order_reconciliation():
+    from services.order_reconciler import reconcile_pending_orders
+    while True:
+        await reconcile_pending_orders(logger_bot)
+        await asyncio.sleep(60)  # Check every 60 seconds; adjust as needed
 
 
 async def validate_setup_configuration():
