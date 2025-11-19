@@ -646,3 +646,48 @@ async def delete_position_lock(symbol: str = None) -> int:
         logger.error(f"[DEBUG] delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
         return result.deleted_count
         
+async def get_all_active_screener_setups():
+    """Get all active screener setups."""
+    db = await get_db()
+    setups = await db.screener_setups.find({"is_active": True}).to_list(None)
+    return setups
+
+async def get_screener_positions_by_asset(asset: str):
+    """Get all open screener positions for an asset."""
+    db = await get_db()
+    positions = await db.positions.find({
+        "asset": asset,
+        "status": "open",
+        "source": "screener"
+    }).to_list(None)
+    return positions
+
+async def create_screener_position_record(position_data: Dict[str, Any]):
+    """Create a screener position record."""
+    db = await get_db()
+    result = await db.positions.insert_one(position_data)
+    logger.info(f"✅ Screener position record created: {result.inserted_id}")
+    return result.inserted_id
+
+async def get_screener_indicator_cache(screener_setup_id: str, asset: str, indicator_name: str):
+    """Get cached indicator for screener asset."""
+    db = await get_db()
+    cache = await db.screener_indicator_cache.find_one({
+        "screener_setup_id": screener_setup_id,
+        "asset": asset,
+        "indicator_name": indicator_name
+    })
+    return cache
+
+async def upsert_screener_indicator_cache(cache_data: Dict[str, Any]):
+    """Update or insert screener indicator cache."""
+    db = await get_db()
+    await db.screener_indicator_cache.update_one(
+        {
+            "screener_setup_id": cache_data["screener_setup_id"],
+            "asset": cache_data["asset"],
+            "indicator_name": cache_data["indicator_name"]
+        },
+        {"$set": cache_data},
+        upsert=True
+    )
