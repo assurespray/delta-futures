@@ -223,4 +223,27 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             await client.close()
 
     logger.info("✅ Startup reconciliation complete")
-    
+
+def filter_orders_by_symbol_and_product_id(
+    orders: list,
+    target_symbol: str,
+    target_product_id: int
+) -> list:
+    """
+    Returns only those orders matching the given symbol and product_id.
+    Works for both top-level and nested product information.
+
+    :param orders: List of order dicts from exchange
+    :param target_symbol: Symbol to match (e.g., 'ADAUSD')
+    :param target_product_id: Integer product_id (from exchange metadata)
+    :return: List of filtered order dicts
+    """
+    filtered = []
+    for order in orders:
+        product_id_matches = order.get("product_id") == target_product_id
+        top_symbol = order.get("product_symbol")
+        nested_symbol = order.get("product", {}).get("symbol")
+        # Accept match if product_id matches and symbol matches (from either field)
+        if product_id_matches and (top_symbol == target_symbol or nested_symbol == target_symbol):
+            filtered.append(order)
+    return filtered
