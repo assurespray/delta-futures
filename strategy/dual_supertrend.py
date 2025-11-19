@@ -154,10 +154,8 @@ class DualSuperTrendStrategy:
             
             # Efficient Step 1: Only fetch TWO latest candles to check last candle status
             logger.info(f"🔍 Checking latest candle close status for {symbol} ({timeframe})")
-            end_time = int(current_time.timestamp())
-            start_time = end_time - timeframe_seconds * 2
-            latest_candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=2)
-
+            latest_candles = await get_candles(client, symbol, timeframe, limit=2)
+            
             if not latest_candles:
                 logger.error("❌ Could not fetch latest candles for status check")
                 return None
