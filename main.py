@@ -207,10 +207,11 @@ async def lifespan(app: FastAPI):
 
 
 async def run_order_reconciliation():
-    from services.order_reconciler import reconcile_pending_orders
-    while True:
-        await reconcile_pending_orders(logger_bot)
-        await asyncio.sleep(60)  # Check every 60 seconds; adjust as needed
+    try:
+        from services.order_reconciler import reconcile_pending_orders
+        while True:
+            await reconcile_pending_orders(logger_bot)
+            await asyncio.sleep(60)  # Check every 60 seconds; adjust as needed
 
 
 async def validate_setup_configuration():
