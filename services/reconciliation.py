@@ -163,7 +163,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             logger.info(f"Calling indicator calculation for {symbol}, timeframe={timeframe}")
 
             try:
-                indicator_result = await strategy.calculate_indicators(client, symbol, timeframe)
+                indicator_result = await strategy.calculate_indicators(client, symbol, timeframe, skip_boundary_check=True)
                 if not indicator_result:
                     logger.error(f"Indicator calculation failed for {symbol} (likely cause: not enough candles, bad input data, or server error!)")
                     continue
