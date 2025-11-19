@@ -129,7 +129,7 @@ class DualSuperTrendStrategy:
             'reason': 'Candle closed and buffered' if is_ready else f'Waiting {seconds_until_ready}s'
         }
     
-    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str) -> Optional[Dict[str, Any]]:
+    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False) -> Optional[Dict[str, Any]]:
         """
         Calculate both Perusu and Sirusu indicators with GUARANTEED FRESH DATA.
         Only one fetch and calculation per new candle, per asset/timeframe.
@@ -165,12 +165,16 @@ class DualSuperTrendStrategy:
             candle_status = self._is_candle_closed(latest_candles, timeframe)
             if not candle_status['is_closed']:
                 wait_time = candle_status['seconds_until_ready']
-                if wait_time > 0 and wait_time <= 10:
-                    logger.info(f"⏳ Candle not ready. Waiting {wait_time}s for buffer...")
-                    await asyncio.sleep(wait_time + 0.5)
+                if skip_boundary_check:
+                    logger.info(f"🔵 Skipping candle boundary check in reconciliation mode for {symbol}. Will use the last closed candle.")
+                    # Continue without waiting, using last closed candle even if 'not ready'
                 else:
-                    logger.warning(f"⚠️ Wait time unreasonable: {wait_time}s")
-                    return None
+                    if wait_time > 0 and wait_time <= 10:
+                        logger.info(f"⏳ Candle not ready. Waiting {wait_time}s for buffer...")
+                        await asyncio.sleep(wait_time + 0.5)
+                    else:
+                        logger.warning(f"⚠️ Wait time unreasonable: {wait_time}s")
+                        return None
 
             # Efficient Step 2: Now fetch ALL candles in one call (guaranteed latest is closed)
             logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
