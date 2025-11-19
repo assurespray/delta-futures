@@ -125,9 +125,12 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             # Step 4: Get SL details if present
             stop_loss_order_id = None
             open_orders = await get_open_orders(client, product_id)
-            logger.info(f"Open orders for {symbol}: {open_orders}")
+            matched_orders = filter_orders_by_symbol_and_product_id(
+                open_orders, symbol, product_id
+            )
+            logger.info(f"Filtered open orders for {symbol} (product_id={product_id}): {matched_orders}")
 
-            for order in open_orders or []:
+            for order in matched_orders:
                 state = (order.get("state") or "").lower()
                 stop_order_type = (order.get("stop_order_type") or "").lower()
                 reduce_only = order.get("reduce_only", False)
