@@ -12,6 +12,7 @@ from config.settings import settings
 from database.mongodb import mongodb
 from bot import create_application
 from services.algo_engine import AlgoEngine
+from services.screener_engine import ScreenerEngine
 from services.scheduler import scheduler_service
 from services.logger_bot import LoggerBot  # ✅ Import CLASS (not instance!)
 from utils.self_ping import self_ping
