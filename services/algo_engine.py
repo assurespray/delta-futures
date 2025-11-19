@@ -160,6 +160,16 @@ class AlgoEngine:
                     else:
                         pending_order_status = "pending"
 
+            if not current_position and algo_setup.get("pending_entry_order_id"):
+                sirusu_value = sirusu_data['supertrend_value']
+                filled = await self.position_manager.check_entry_order_filled(
+                    client, algo_setup, sirusu_value
+                )
+                if filled:
+                    updated_setup = await get_algo_setup_by_id(setup_id)
+                    current_position = updated_setup.get('current_position')
+                    algo_setup.update(updated_setup)
+
             if not current_position:
                 if pending_order_status == "filled":
                     logger.info(f"✅ [TEST] Position opened via pending order - skipping entry check")
