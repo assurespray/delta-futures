@@ -175,22 +175,24 @@ async def update_algo_setup(setup_id: str, update_data: Dict[str, Any]) -> bool:
 
 
 async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
-    """Delete algo setup."""
-    try:
-        result = await mongodb.get_db().algo_setups.delete_one({
-            "_id": ObjectId(setup_id),
-            "user_id": user_id
-        })
-        
-        if result.deleted_count > 0:
-            logger.info(f"✅ Algo setup deleted: {setup_id}")
-            return True
-        return False
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to delete algo setup: {e}")
-        return False
-
+    """
+    Delete algo setup and cascade delete all related data (orders, positions, activities, locks).
+    """
+    db = await get_db()
+    # Clean up all related DB records first
+    await db.orders.delete_many({"algo_setup_id": setup_id})
+    await db.positions.delete_many({"algo_setup_id": setup_id})
+    await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+    await db.position_locks.delete_many({"setup_id": setup_id})  # If you lock by setup_id
+    # Delete the setup itself
+    result = await db.algo_setups.delete_one({
+        "_id": ObjectId(setup_id),
+        "user_id": user_id
+    })
+    if result.deleted_count > 0:
+        logger.info(f"🗑️ Cascade deleted all related records for algo setup {setup_id}")
+        return True
+    return False
 
 async def get_all_active_algo_setups() -> List[Dict[str, Any]]:
     """Get all active algo setups across all users."""
