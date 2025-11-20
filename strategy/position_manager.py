@@ -289,12 +289,14 @@ class PositionManager:
             logger.error(traceback.format_exc())
             return False
 
-    async def _place_stop_loss_protection(self, client: DeltaExchangeClient, 
-                                         product_id: int, lot_size: int, 
-                                         position_side: str, stop_price: float,
-                                         setup_id: Optional[str] = None),
-                                         symbol: Optional[str] = None,  # ADD
-                                         user_id: Optional[str] = None) -> Optional[int]:  # ADD THIS
+    async def _place_stop_loss_protection(
+        self, client: DeltaExchangeClient, 
+        product_id: int, lot_size: int, 
+        position_side: str, stop_price: float,
+        setup_id: Optional[str] = None,
+        symbol: Optional[str] = None,  # ADD
+        user_id: Optional[str] = None
+    ) -> Optional[int]:  # ADD THIS
         try:
             sl_side = "sell" if position_side == "long" else "buy"
             sl_order = await place_stop_loss_order(
