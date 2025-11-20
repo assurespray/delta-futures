@@ -394,14 +394,15 @@ class AlgoEngine:
                             api_key=cred['api_key'],
                             api_secret=cred['api_secret']
                         )
-                        # You need the SL value you'd use upon entry fill:
-                        # (Choose latest indicator, cached, or safe default, depending on your infra)
-                        sirusu_value = setup.get("last_sirusu_value")
-                        # If you have indicator cache for this setup, load the latest SL value
-                        cache = await get_indicator_cache(str(setup['_id']), "sirusu")
-                        if cache:
-                            sirusu_value = cache.get("last_value", sirusu_value)
-                        # Call your regular check fill logic
+                        symbol = setup['asset']
+                        timeframe = setup.get('timeframe', '3m')
+                        try:
+                            from strategy.dual_supertrend import get_latest_sirusu
+                            sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
+                        except Exception as e:
+                            logger.error(f"❌ Could not fetch Sirusu for {symbol} {timeframe}: {e}")
+                            await client.close()
+                            continue
                         await self.position_manager.check_entry_order_filled(
                             client, setup, sirusu_value
                         )
