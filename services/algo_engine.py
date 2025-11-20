@@ -396,13 +396,7 @@ class AlgoEngine:
                         )
                         symbol = setup['asset']
                         timeframe = setup.get('timeframe', '3m')
-                        try:
-                            from strategy.dual_supertrend import get_latest_sirusu
-                            
-                        except Exception as e:
-                            logger.error(f"❌ Could not fetch Sirusu for {symbol} {timeframe}: {e}")
-                            await client.close()
-                            continue
+                        
                         await self.position_manager.check_entry_order_filled(client, setup, None) 
                         await client.close()
                 await asyncio.sleep(poll_interval)
