@@ -129,7 +129,7 @@ class DualSuperTrendStrategy:
             'reason': 'Candle closed and buffered' if is_ready else f'Waiting {seconds_until_ready}s'
         }
     
-    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False) -> Optional[Dict[str, Any]]:
+    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False, force_recalc: bool = False) -> Optional[Dict[str, Any]]:
         """
         Calculate both Perusu and Sirusu indicators with GUARANTEED FRESH DATA.
         Only one fetch and calculation per new candle, per asset/timeframe.
