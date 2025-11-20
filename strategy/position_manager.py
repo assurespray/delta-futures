@@ -396,7 +396,7 @@ class PositionManager:
                 # Check if it was by stop-loss fill
                 if stop_loss_order_id:
                     from api.orders import get_order_history
-                    history = await get_order_history(client, product_id, limit=20)
+                    history = await get_order_history(client, product_id)  # Uses default page_size=20
                     sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
         
                     exit_price = None
