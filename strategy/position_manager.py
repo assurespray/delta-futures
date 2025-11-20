@@ -287,13 +287,27 @@ class PositionManager:
                 })
             
                 # Place stop-loss if protection enabled
+                # Always recalculate Sirusu at entry fill!
                 if algo_setup.get("additional_protection", False):
-                    await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, sirusu_value,
-                        setup_id, symbol, algo_setup.get("user_id")  # ADD symbol and user_id
+                    from strategy.dual_supertrend import get_latest_sirusu
+                    timeframe = algo_setup.get("timeframe", "3m")
+                    try:
+                        fresh_sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
+                        logger.info(f"[SL] Fresh Sirusu calculated at entry fill: {fresh_sirusu_value}")
+                    except Exception as e:
+                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu: {e}")
+                        # Fallback to passed sirusu_value or abort for safety!
+                        fresh_sirusu_value = sirusu_value if sirusu_value else None
+                        if fresh_sirusu_value is None:
+                            logger.error("[SL] ❌ No valid Sirusu value available. SKIPPING stop-loss.")
+                            return filled
+                
+                    sl_order_id = await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, fresh_sirusu_value,
+                        setup_id, symbol, algo_setup.get("user_id")
                     )
-        
-            return filled
+                    logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")        
+                            return filled
                 
         except Exception as e:
             logger.error(f"❌ Exception checking entry order: {e}")
