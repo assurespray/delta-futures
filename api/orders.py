@@ -279,6 +279,37 @@ async def is_order_gone(client, order_id, product_id):
     status = await get_order_status_by_id(client, order_id, product_id)
     return status in {"filled", "cancelled", "rejected", "not_found"}
 
+async def get_order_history(
+    client: DeltaExchangeClient, 
+    product_id: int, 
+    page_size: int = 20,
+    state: Optional[str] = None
+) -> Optional[list]:
+    """
+    Get a user's order history for the specified product.
+
+    :param client: DeltaExchangeClient instance (authenticated)
+    :param product_id: Product ID of the symbol
+    :param page_size: Result page size (default 20, max 100)
+    :param state: Filter by state ('filled', 'cancelled', etc) or None for all
+    :return: List of order dicts or None on error
+    """
+    params = {"product_id": product_id, "page_size": page_size}
+    if state:
+        params["state"] = state
+
+    try:
+        resp = await client.get("/v2/orders/history", params)
+        if resp and resp.get("success", False):
+            return resp.get("result", [])
+        logger.warning(f"Order history fetch failed: {resp}")
+        return None
+    except Exception as e:
+        logger.error(f"Exception getting order history: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+        
 # DEPRECATED: Never use for SL/entry checks! Only keep for backward compatibility if legacy code exists.
 # async def check_stop_loss_filled(client: DeltaExchangeClient, stop_loss_order_id: Optional[int], product_id: int) -> bool:
 #     raise NotImplementedError("Use `is_order_gone` instead of `check_stop_loss_filled` for stop-loss/execution status.")
