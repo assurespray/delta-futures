@@ -437,3 +437,13 @@ class DualSuperTrendStrategy:
             import traceback
             logger.error(traceback.format_exc())
             return None
+
+strategy_instance = DualSuperTrendStrategy()
+
+async def get_latest_sirusu(client, symbol, timeframe):
+    indicators = await strategy_instance.calculate_indicators(
+        client, symbol, timeframe, skip_boundary_check=True
+    )
+    if indicators and indicators['sirusu']:
+        return indicators['sirusu']['supertrend_value']
+    raise RuntimeError(f"Sirusu could not be calculated for {symbol} {timeframe}")
