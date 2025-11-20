@@ -7,7 +7,9 @@ from api.orders import (
     place_stop_market_entry_order,
     place_stop_loss_order, 
     cancel_all_orders,
+    cancel_order,
     get_open_orders,
+    get_order_history,
     get_order_status_by_id,  # from the fixed orders.py
     is_order_gone
 )
@@ -274,7 +276,8 @@ class PositionManager:
                 # Place stop-loss if protection enabled
                 if algo_setup.get("additional_protection", False):
                     await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, sirusu_value, setup_id
+                        client, product_id, lot_size, entry_side, sirusu_value,
+                        setup_id, symbol, algo_setup.get("user_id")  # ADD symbol and user_id
                     )
         
             return filled
