@@ -154,10 +154,10 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     )            
                     break
 
-            now = datetime.utcnow()
-            time_until_boundary = (get_next_boundary_time(timeframe, now) - now).total_seconds()
-            if time_until_boundary < 30:
-                await asyncio.sleep(time_until_boundary + 1)
+            #now = datetime.utcnow()
+            #time_until_boundary = (get_next_boundary_time(timeframe, now) - now).total_seconds()
+            # if time_until_boundary < 30:
+            #   await asyncio.sleep(time_until_boundary + 1)
 
             # [Optional] Log or fetch candles here if you have direct access, e.g.:
             # candles = await fetch_candles(client, symbol, timeframe)
