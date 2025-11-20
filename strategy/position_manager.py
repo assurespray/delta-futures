@@ -11,7 +11,8 @@ from api.orders import (
     get_open_orders,
     get_order_history,
     get_order_status_by_id,  # from the fixed orders.py
-    is_order_gone
+    is_order_gone,
+    format_orders_display       # <-- Is used in orders_callback
 )
 from api.positions import get_position_by_symbol
 from api.market_data import get_product_by_symbol
