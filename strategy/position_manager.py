@@ -354,32 +354,53 @@ class PositionManager:
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
         
+            # ✅ CRITICAL FIX: Check actual position on exchange FIRST
             # If position is already closed on exchange
             if actual_size == 0:
                 logger.warning(f"⚠️ Position for {symbol} already closed on exchange")
-
-            # Check if stop-loss is already filled/cancelled
-            sl_executed = False
-            if stop_loss_order_id:
-                sl_executed = await is_order_gone(client, stop_loss_order_id, product_id)
-
-            if sl_executed:
-                logger.warning(f"⚠️ Position for {symbol} already closed by stop-loss!")
-                
-                # ✅ ADD THIS: Update SL order record
-                await update_order_record(stop_loss_order_id, {
-                    "status": "filled",
-                    "filled_at": datetime.utcnow()
-                })
-
-                activity = await get_open_activity_by_setup(setup_id)
-                if activity:
-                    await update_algo_activity(str(activity["_id"]), {
-                        "exit_time": datetime.utcnow(),
-                        "exit_price": None,
-                        "sirusu_exit_signal": f"Stop-loss triggered ({sirusu_signal_text})",
-                        "is_closed": True
-                    })
+    
+                # Check if it was by stop-loss fill
+                if stop_loss_order_id:
+                    from api.orders import get_order_history
+                    history = await get_order_history(client, product_id, limit=20)
+                    sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
+        
+                    exit_price = None
+                    exit_reason = "Manual close"
+        
+                    if sl_order and sl_order.get("state") == "filled":
+                        logger.info(f"✅ Confirmed: Position closed by stop-loss fill")
+                        exit_price = sl_order.get("average_fill_price")
+                        exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"
+            
+                        # Update SL order record
+                        await update_order_record(stop_loss_order_id, {
+                            "status": "filled",
+                            "filled_at": datetime.utcnow()
+                        })
+                    else:
+                        logger.warning(f"⚠️ SL order cancelled or not found - position closed manually")
+        
+                    # Update activity with PNL if we have exit price
+                    activity = await get_open_activity_by_setup(setup_id)
+                    if activity:
+                        update_data = {
+                            "exit_time": datetime.utcnow(),
+                            "exit_price": exit_price,
+                            "sirusu_exit_signal": exit_reason,
+                            "is_closed": True
+                        }
+            
+                        if exit_price:
+                            entry_price = activity.get("entry_price", 0)
+                            pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
+                            pnl_inr = pnl * settings.usd_to_inr_rate
+                            update_data["pnl"] = round(pnl, 4)
+                            update_data["pnl_inr"] = round(pnl_inr, 2)
+            
+                        await update_algo_activity(str(activity["_id"]), update_data)
+    
+                # Clean up database
                 await update_algo_setup(setup_id, {
                     "current_position": None,
                     "last_entry_price": None,
@@ -388,23 +409,26 @@ class PositionManager:
                     "stop_loss_order_id": None,
                     "position_lock_acquired": False
                 })
-            
+    
                 db = await get_db()
                 await db.positions.update_many(
                     {"algo_setup_id": setup_id, "status": "open"},
                     {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
                 )
                 await release_position_lock(db, symbol, setup_id)
-                return True  # <-- ADD THIS!
+    
+                logger.info(f"✅ Database synchronized with closed position on exchange")
+                return True
+
+            # ✅ Position is still open - proceed with normal exit
+            logger.info(f"📍 Position still open on exchange (size={actual_size}), executing market exit")
 
             # Place market exit
             # ===== STEP 1: Cancel stop-loss FIRST =====
             from services.reconciliation import filter_orders_by_symbol_and_product_id
 
             open_orders = await get_open_orders(client, product_id)
-            matched_orders = filter_orders_by_symbol_and_product_id(
-                open_orders, symbol, product_id
-            )
+            matched_orders = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
 
             cancelled_sl_count = 0
             for order in matched_orders:
@@ -435,9 +459,12 @@ class PositionManager:
             # ===== STEP 2: Now place market exit =====
             exit_side = "sell" if current_position == "long" else "buy"
             exit_order = await place_market_order(client, product_id, lot_size, exit_side)
-            exit_price = float(exit_order.get("average_fill_price", 0)) if exit_order else None
+            
             if not exit_order:
+                logger.error(f"❌ Failed to place exit order")
                 return False
+
+            exit_price = float(exit_order.get("average_fill_price", 0))
 
             # Save order event
             order_data = {
@@ -480,9 +507,17 @@ class PositionManager:
                 "stop_loss_order_id": None,
                 "position_lock_acquired": False
             })
+            
             db = await get_db()
+            await db.positions.update_many(
+                {"algo_setup_id": setup_id, "status": "open"},
+                {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+            )
             await release_position_lock(db, symbol, setup_id)
+        
+            logger.info(f"✅ Exit completed successfully")
             return True
+        
         except Exception as e:
             logger.error(f"❌ Exception in execute_exit: {e}")
             import traceback
