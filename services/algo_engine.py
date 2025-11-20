@@ -398,7 +398,7 @@ class AlgoEngine:
                         timeframe = setup.get('timeframe', '3m')
                         try:
                             from strategy.dual_supertrend import get_latest_sirusu
-                            sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
+                            
                         except Exception as e:
                             logger.error(f"❌ Could not fetch Sirusu for {symbol} {timeframe}: {e}")
                             await client.close()
