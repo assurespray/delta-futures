@@ -288,7 +288,9 @@ class PositionManager:
     async def _place_stop_loss_protection(self, client: DeltaExchangeClient, 
                                          product_id: int, lot_size: int, 
                                          position_side: str, stop_price: float,
-                                         setup_id: Optional[str] = None) -> Optional[int]:
+                                         setup_id: Optional[str] = None),
+                                         symbol: Optional[str] = None,  # ADD
+                                         user_id: Optional[str] = None) -> Optional[int]:  # ADD THIS
         try:
             sl_side = "sell" if position_side == "long" else "buy"
             sl_order = await place_stop_loss_order(
@@ -306,8 +308,8 @@ class PositionManager:
                 order_data = {
                     "order_id": sl_order_id,
                     "algo_setup_id": setup_id,
-                    "user_id": None,  # Pass user_id if available
-                    "asset": None,    # If symbol available, put here
+                    "user_id": user_id,  # Pass user_id if available
+                    "asset": symbol,    # If symbol available, put here
                     "side": sl_side,
                     "size": lot_size,
                     "order_type": sl_order.get("order_type"),
