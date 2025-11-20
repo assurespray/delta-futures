@@ -199,8 +199,11 @@ class DualSuperTrendStrategy:
             prev_low = float(latest_candle.get("low", 0))
             last_processed = self._last_processed_candle_time.get(cache_key)
             if last_processed is not None and latest_candle_time == last_processed:
-                logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
-                return None
+                if not force_recalc:
+                    logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
+                    return None
+                else:
+                    logger.info(f"🔄 Force recalculating indicators for {symbol} {timeframe} (for SL placement)")
 
             # 4. Check candle closed and buffered
             # 4. Check candle closed and buffered
@@ -442,7 +445,9 @@ strategy_instance = DualSuperTrendStrategy()
 
 async def get_latest_sirusu(client, symbol, timeframe):
     indicators = await strategy_instance.calculate_indicators(
-        client, symbol, timeframe, skip_boundary_check=True
+        client, symbol, timeframe, 
+        skip_boundary_check=True,
+        force_recalc=True  # <-- ADD THIS LINE
     )
     if indicators and indicators['sirusu']:
         return indicators['sirusu']['supertrend_value']
