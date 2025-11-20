@@ -234,6 +234,7 @@ class PositionManager:
 
             filled = await is_order_gone(client, pending_order_id, product_id)
             if filled:
+                sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
                 logger.info(f"✅ Stop-market entry filled for {setup_name}")
                 # ✅ ADD THIS: Update order record to "filled"
                 await update_order_record(pending_order_id, {
