@@ -87,21 +87,35 @@ async def get_api_credential_by_id(credential_id: str, decrypt: bool = True) -> 
 
 
 async def delete_api_credential(credential_id: str, user_id: str) -> bool:
-    """Delete API credential."""
-    try:
-        result = await mongodb.get_db().api_credentials.delete_one({
-            "_id": ObjectId(credential_id),
-            "user_id": user_id
-        })
-        
-        if result.deleted_count > 0:
-            logger.info(f"✅ API credential deleted: {credential_id}")
-            return True
-        return False
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to delete API credential: {e}")
-        return False
+    """
+    Delete API credential and cascade delete all related setups and their data using 'api_id'.
+    """
+    db = await get_db()
+
+    # Find all setups linked to this API credential
+    setups = await db.algo_setups.find({"api_id": credential_id}).to_list(100)
+
+    # For each setup, delete all related records by setup ID
+    for setup in setups:
+        setup_id = str(setup["_id"])
+        await db.orders.delete_many({"algo_setup_id": setup_id})
+        await db.positions.delete_many({"algo_setup_id": setup_id})
+        await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+        await db.position_locks.delete_many({"setup_id": setup_id})
+
+    # Delete setups linked to this credential
+    await db.algo_setups.delete_many({"api_id": credential_id})
+
+    # Finally, delete the credential itself
+    result = await db.api_credentials.delete_one({
+        "_id": ObjectId(credential_id),
+        "user_id": user_id
+    })
+
+    if result.deleted_count > 0:
+        logger.info(f"🗑️ Cascade deleted all setups/orders for credential {credential_id}")
+        return True
+    return False
 
 
 # ==================== Algo Setups CRUD ====================
