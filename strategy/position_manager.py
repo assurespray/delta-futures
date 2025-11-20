@@ -390,6 +390,41 @@ class PositionManager:
                 return True  # <-- ADD THIS!
 
             # Place market exit
+            # ===== STEP 1: Cancel stop-loss FIRST =====
+            from services.reconciliation import filter_orders_by_symbol_and_product_id
+
+            open_orders = await get_open_orders(client, product_id)
+            matched_orders = filter_orders_by_symbol_and_product_id(
+                open_orders, symbol, product_id
+            )
+
+            cancelled_sl_count = 0
+            for order in matched_orders:
+                if (order.get("stop_order_type") == "stop_loss_order" and 
+                    order.get("reduce_only") and
+                    order.get("state") in ("pending", "open", "untriggered")):
+        
+                    actual_sl_id = order.get("id")
+                    logger.info(f"🎯 Found active stop-loss order: {actual_sl_id}")
+        
+                    try:
+                        from api.orders import cancel_order
+                        cancelled = await cancel_order(client, actual_sl_id)
+                        if cancelled:
+                            cancelled_sl_count += 1
+                            logger.info(f"✅ Cancelled stop-loss order {actual_sl_id}")
+                
+                            await update_order_record(actual_sl_id, {
+                                "status": "cancelled",
+                                "updated_at": datetime.utcnow()
+                            })
+                    except Exception as cancel_ex:
+                        logger.warning(f"⚠️ Could not cancel SL {actual_sl_id}: {cancel_ex}")
+
+            if cancelled_sl_count == 0:
+                logger.warning(f"⚠️ No stop-loss orders found to cancel for {symbol}")
+
+            # ===== STEP 2: Now place market exit =====
             exit_side = "sell" if current_position == "long" else "buy"
             exit_order = await place_market_order(client, product_id, lot_size, exit_side)
             exit_price = float(exit_order.get("average_fill_price", 0)) if exit_order else None
@@ -415,19 +450,6 @@ class PositionManager:
             await create_order_record(order_data)
 
             # Cancel stop-loss after market exit
-            if stop_loss_order_id:
-                try:
-                    from api.orders import cancel_order
-                    cancelled = await cancel_order(client, stop_loss_order_id)
-        
-                    if cancelled:
-                        # ✅ ADD THIS: Mark as cancelled
-                        await update_order_record(stop_loss_order_id, {
-                            "status": "cancelled",
-                            "updated_at": datetime.utcnow()
-                        })
-                except Exception:
-                    pass
 
             activity = await get_open_activity_by_setup(setup_id)
             if activity and exit_price:
