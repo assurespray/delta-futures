@@ -106,11 +106,8 @@ async def reconcile_pending_orders(logger_bot=None):
                 api_secret=cred['api_secret']
             )
             
-            # Use last known sirusu or 0
-            sirusu_value = setup.get("last_sirusu_value", 0)
-            
             filled = await position_manager.check_entry_order_filled(
-                client, setup, sirusu_value
+                client, setup, None
             )
             
             if filled:
