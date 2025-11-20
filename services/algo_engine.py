@@ -403,9 +403,7 @@ class AlgoEngine:
                             logger.error(f"❌ Could not fetch Sirusu for {symbol} {timeframe}: {e}")
                             await client.close()
                             continue
-                        await self.position_manager.check_entry_order_filled(
-                            client, setup, sirusu_value
-                        )
+                        await self.position_manager.check_entry_order_filled(client, setup, None) 
                         await client.close()
                 await asyncio.sleep(poll_interval)
             except Exception as e:
