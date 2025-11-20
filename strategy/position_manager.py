@@ -307,7 +307,7 @@ class PositionManager:
                         setup_id, symbol, algo_setup.get("user_id")
                     )
                     logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")        
-                            return filled
+                return filled
                 
         except Exception as e:
             logger.error(f"❌ Exception checking entry order: {e}")
