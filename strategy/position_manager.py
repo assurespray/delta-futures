@@ -350,6 +350,14 @@ class PositionManager:
                 logger.warning(f"⚠️ No current position or product_id for {symbol}")
                 return False
 
+            # ✅ CRITICAL FIX: Check actual position on exchange FIRST
+            actual_position = await get_position_by_symbol(client, symbol)
+            actual_size = actual_position.get("size", 0) if actual_position else 0
+        
+            # If position is already closed on exchange
+            if actual_size == 0:
+                logger.warning(f"⚠️ Position for {symbol} already closed on exchange")
+
             # Check if stop-loss is already filled/cancelled
             sl_executed = False
             if stop_loss_order_id:
