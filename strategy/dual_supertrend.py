@@ -446,7 +446,6 @@ class DualSuperTrendStrategy:
 strategy_instance = DualSuperTrendStrategy()
 
 async def get_latest_sirusu(client, symbol, timeframe):
-    import traceback
     logger.warning(f"get_latest_sirusu() called for {symbol} {timeframe}, see trace below:")
     logger.warning("STACK TRACE for get_latest_sirusu:" + "".join(traceback.format_stack(limit=8)))
     indicators = await strategy_instance.calculate_indicators(
