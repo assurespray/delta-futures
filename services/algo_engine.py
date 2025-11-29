@@ -178,35 +178,45 @@ class AlgoEngine:
                     logger.info(f"🔄 Order cancelled - checking for new entry signal")
 
             # ✅ ENTRY SIGNAL CHECK (no position + no pending order)
+            # ✅ ENTRY SIGNAL CHECK (no position + no pending order)
             if not current_position and not algo_setup.get('pending_entry_order_id'):
-                entry_signal = None
-                
-                # Check for flip-based entry
-                if flip_info and flip_info.get("sirusu_flip"):
-                    sirusu_signal = sirusu_data['signal']
-                    
-                    if sirusu_signal == 1:  # Flip to uptrend
-                        logger.info(f"🎯 LONG ENTRY SIGNAL: Sirusu flipped to Uptrend for {asset}")
-                        entry_signal = {
-                            "side": "long",
-                            "trigger_price": perusu_data['latest_close'],
-                            "immediate": False,
-                            "reason": "Sirusu flip to uptrend"
-                        }
-                        
-                    elif sirusu_signal == -1:  # Flip to downtrend
-                        logger.info(f"🎯 SHORT ENTRY SIGNAL: Sirusu flipped to Downtrend for {asset}")
-                        entry_signal = {
-                            "side": "short",
-                            "trigger_price": perusu_data['latest_close'],
-                            "immediate": False,
-                            "reason": "Sirusu flip to downtrend"
-                        }
-                
-                # Execute entry if signal generated
+                # 1) Get last Perusu signal from cache
+                cached_perusu = await get_indicator_cache(setup_id, "perusu")
+                last_perusu_signal = cached_perusu.get("last_signal") if cached_perusu else None
+
+                # 2) Let strategy decide if Perusu has flipped and generate breakout levels
+                entry_signal = self.strategy.generate_entry_signal(
+                    setup_id,
+                    last_perusu_signal,
+                    indicator_result
+                )
+
+                # 3) Extra filter: Perusu & Sirusu must agree on direction
+                if entry_signal:
+                    perusu_signal = perusu_data["signal"]
+                    sirusu_signal = sirusu_data["signal"]
+
+                    aligned = (
+                        (entry_signal["side"] == "long"  and perusu_signal == 1  and sirusu_signal == 1) or
+                        (entry_signal["side"] == "short" and perusu_signal == -1 and sirusu_signal == -1)
+                    )
+
+                    if not aligned:
+                        logger.info(
+                            f"❌ Entry blocked for {setup_name}: "
+                            f"Perusu={perusu_signal}, Sirusu={sirusu_signal}, "
+                            f"side={entry_signal['side']}"
+                        )
+                        entry_signal = None  # cancel entry
+
+                # 4) Place order only if all conditions passed
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
-                    logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
+                    logger.info(
+                        f"🚀 Entry signal detected for {setup_name}: "
+                        f"{entry_signal['side'].upper()} "
+                        f"(reason: {entry_signal.get('entry_reason')})"
+                    )
                     entry_start = time.time()
                     success = await self.position_manager.place_breakout_entry_order(
                         client=client,
