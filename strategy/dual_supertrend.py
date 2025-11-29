@@ -14,6 +14,7 @@ from indicators.supertrend import SuperTrend, SIGNAL_UPTREND, SIGNAL_DOWNTREND
 from indicators.signal_generator import SignalGenerator
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_candles, get_product_by_symbol
+from database.crud import save_indicator_cache  # ✅ ADD THIS LINE
 from config.constants import (
     PERUSU_ATR_LENGTH, PERUSU_FACTOR,
     SIRUSU_ATR_LENGTH, SIRUSU_FACTOR,
