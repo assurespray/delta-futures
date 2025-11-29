@@ -391,7 +391,7 @@ class AlgoEngine:
                 next_boundary = get_next_boundary_time(shortest_tf, now)
                 time_until_boundary = (next_boundary - now).total_seconds()
                 sleep_time = max(1, time_until_boundary + 0.5)
-                logger.info(
+                logger.debug(
                     f"💤 Next check at {next_boundary.strftime('%H:%M:%S')} UTC "
                     f"(sleeping {sleep_time:.1f}s for {shortest_tf} boundary)"
                 )
