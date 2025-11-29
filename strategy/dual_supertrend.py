@@ -255,6 +255,7 @@ class DualSuperTrendStrategy:
             }
 
             # 8. Mark as processed and log
+            # 8. Mark as processed and log
             self._last_fetch_time[cache_key] = current_time
             self._last_candle_count[cache_key] = actual_count
             self._last_processed_candle_time[cache_key] = latest_candle_time
@@ -267,12 +268,6 @@ class DualSuperTrendStrategy:
             logger.info(f"   📊 ATR(20): {perusu_result.get('atr', 0):.6f}")
 
             return result
-    
-        except Exception as e:
-            logger.error(f"❌ Exception calculating indicators: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return None
 
     def detect_signal_flip(self, current_signal: int, 
                           last_signal: Optional[int]) -> Optional[str]:
