@@ -351,6 +351,70 @@ async def get_indicator_cache(algo_setup_id: str, indicator_name: str) -> Option
         logger.error(f"❌ Failed to get indicator cache: {e}")
         return None
 
+async def save_indicator_cache(
+    algo_setup_id: str,
+    indicator_name: str,
+    asset: str,
+    timeframe: str,
+    signal: int,
+    value: float
+) -> bool:
+    """
+    Save indicator to cache with signal flip detection.
+    Returns True if a signal flip occurred.
+    """
+    try:
+        db = mongodb.get_db()
+        
+        # 1. Get previous cache entry (if exists)
+        previous_cache = await db.indicator_cache.find_one({
+            "algo_setup_id": algo_setup_id,
+            "indicator_name": indicator_name,
+            "asset": asset,
+            "timeframe": timeframe
+        })
+        
+        # Extract previous signal
+        previous_signal = previous_cache.get("last_signal") if previous_cache else None
+        
+        # 2. Create new cache document
+        cache_doc = {
+            "algo_setup_id": algo_setup_id,
+            "indicator_name": indicator_name,
+            "asset": asset,
+            "timeframe": timeframe,
+            "calculated_at": datetime.utcnow(),
+            "last_signal": signal,              # Current signal
+            "previous_signal": previous_signal,  # ✅ Track previous for flip detection
+            "last_value": value
+        }
+        
+        # 3. Upsert to database
+        await db.indicator_cache.update_one(
+            {
+                "algo_setup_id": algo_setup_id,
+                "indicator_name": indicator_name,
+                "asset": asset,
+                "timeframe": timeframe
+            },
+            {"$set": cache_doc},
+            upsert=True
+        )
+        
+        # 4. Detect flip
+        flip_occurred = False
+        if previous_signal is not None and previous_signal != signal:
+            flip_occurred = True
+            logger.info(
+                f"🔄 SIGNAL FLIP: {indicator_name} for {asset} {timeframe} "
+                f"({previous_signal} → {signal})"
+            )
+        
+        return flip_occurred
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save indicator cache: {e}")
+        return False
 
 # ==================== Screener Setups CRUD ====================
 
