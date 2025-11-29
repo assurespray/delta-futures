@@ -29,6 +29,7 @@ def configure_logging():
     logging.getLogger("database").setLevel(logging.INFO)
     logging.getLogger("api").setLevel(logging.INFO)
     logging.getLogger("strategy").setLevel(logging.INFO)
+    logging.getLogger("api.authentication").setLevel(logging.WARNING)
     
     # Console handler
     handler = logging.StreamHandler(sys.stdout)
