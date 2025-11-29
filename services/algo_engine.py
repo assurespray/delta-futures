@@ -124,6 +124,9 @@ class AlgoEngine:
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
 
+            # ✅ FIRST: Cache indicators with flip detection (do this BEFORE any signal checks)
+            flip_info = await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
+
             # === Robust Pending Order & Sirusu reversal logic ===
             pending_order_status = None
             pending_order_id = algo_setup.get('pending_entry_order_id')
@@ -139,18 +142,16 @@ class AlgoEngine:
                     })
                     pending_order_status = "filled"
                 else:
-                    # Sirusu reversal check
-                    cached_sirusu = await get_indicator_cache(setup_id, "sirusu")
-                    last_sirusu_signal = cached_sirusu.get('last_signal') if cached_sirusu else None
+                    # Check if sirusu flipped (use flip_info from cache)
                     sirusu_flipped = False
-                    if last_sirusu_signal is not None:
-                        if pending_side == "long":
-                            if sirusu_data['signal'] == -1 and last_sirusu_signal == 1:
-                                sirusu_flipped = True
-                        elif pending_side == "short":
-                            if sirusu_data['signal'] == 1 and last_sirusu_signal == -1:
-                                sirusu_flipped = True
+                    if flip_info and flip_info.get("sirusu_flip"):
+                        if pending_side == "long" and sirusu_data['signal'] == -1:
+                            sirusu_flipped = True
+                        elif pending_side == "short" and sirusu_data['signal'] == 1:
+                            sirusu_flipped = True
+                    
                     if sirusu_flipped:
+                        logger.info(f"🔄 Sirusu flipped against pending {pending_side} order - cancelling")
                         await cancel_order(client, pending_order_id)
                         await update_algo_setup(setup_id, {
                             "pending_entry_order_id": None,
@@ -172,53 +173,37 @@ class AlgoEngine:
 
             if not current_position:
                 if pending_order_status == "filled":
-                    logger.info(f"✅ [TEST] Position opened via pending order - skipping entry check")
-                    current_position = "long"  # Will be updated, but set for flow
+                    logger.info(f"✅ Position opened via pending order - skipping entry check")
                 elif pending_order_status == "reversed":
-                    logger.info(f"🔄 [TEST] Order cancelled - checking for new entry signal")
+                    logger.info(f"🔄 Order cancelled - checking for new entry signal")
 
+            # ✅ ENTRY SIGNAL CHECK (no position + no pending order)
             if not current_position and not algo_setup.get('pending_entry_order_id'):
-                cache_start = time.time()
-                cached_perusu = await get_indicator_cache(setup_id, "perusu")
-                cache_time = time.time() - cache_start
-                last_perusu_signal = cached_perusu.get('last_signal') if cached_perusu else None
-                if cached_perusu:
-                    self.performance_stats["cache_hits"] += 1
-                else:
-                    self.performance_stats["cache_misses"] += 1
-
-                entry_signal = self.strategy.generate_entry_signal(
-                    setup_id,
-                    last_perusu_signal,
-                    indicator_result
-                )
-                # Cache indicators FIRST (before entry check)
-flip_info = await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
-
-# ✅ Then check for entry based on flip
-if flip_info and flip_info.get("sirusu_flip"):
-    sirusu_signal = sirusu_data['signal']
-    
-    if sirusu_signal == 1:  # Flip to uptrend
-        logger.info(f"🎯 LONG ENTRY SIGNAL: Sirusu flipped to Uptrend for {asset}")
-        entry_signal = {
-            "side": "long",
-            "trigger_price": perusu_data['latest_close'],
-            "immediate": False,
-            "reason": "Sirusu flip to uptrend"
-        }
-        # ... proceed with entry order placement ...
-        
-    elif sirusu_signal == -1:  # Flip to downtrend
-        logger.info(f"🎯 SHORT ENTRY SIGNAL: Sirusu flipped to Downtrend for {asset}")
-        entry_signal = {
-            "side": "short",
-            "trigger_price": perusu_data['latest_close'],
-            "immediate": False,
-            "reason": "Sirusu flip to downtrend"
-        }
-        # ... proceed with entry order placement ...
-
+                entry_signal = None
+                
+                # Check for flip-based entry
+                if flip_info and flip_info.get("sirusu_flip"):
+                    sirusu_signal = sirusu_data['signal']
+                    
+                    if sirusu_signal == 1:  # Flip to uptrend
+                        logger.info(f"🎯 LONG ENTRY SIGNAL: Sirusu flipped to Uptrend for {asset}")
+                        entry_signal = {
+                            "side": "long",
+                            "trigger_price": perusu_data['latest_close'],
+                            "immediate": False,
+                            "reason": "Sirusu flip to uptrend"
+                        }
+                        
+                    elif sirusu_signal == -1:  # Flip to downtrend
+                        logger.info(f"🎯 SHORT ENTRY SIGNAL: Sirusu flipped to Downtrend for {asset}")
+                        entry_signal = {
+                            "side": "short",
+                            "trigger_price": perusu_data['latest_close'],
+                            "immediate": False,
+                            "reason": "Sirusu flip to downtrend"
+                        }
+                
+                # Execute entry if signal generated
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
@@ -250,6 +235,8 @@ if flip_info and flip_info.get("sirusu_flip"):
                         )
                 else:
                     self.signal_counts["no_signals"] += 1
+                    
+            # ✅ EXIT SIGNAL CHECK (has position)
             elif current_position:
                 exit_signal = self.strategy.generate_exit_signal(
                     setup_id,
@@ -286,10 +273,11 @@ if flip_info and flip_info.get("sirusu_flip"):
                         await self.logger_bot.send_error(
                             f"Failed to execute exit for {setup_name}"
                         )
-            await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
+            
             await client.close()
             elapsed = time.time() - start_time
             self._update_performance_stats(elapsed)
+            
         except Exception as e:
             self.signal_counts["errors"] += 1
             elapsed = time.time() - start_time
