@@ -269,6 +269,12 @@ class DualSuperTrendStrategy:
 
             return result
 
+        except Exception as e:
+            logger.error(f"❌ Exception calculating indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
     def detect_signal_flip(self, current_signal: int, 
                           last_signal: Optional[int]) -> Optional[str]:
         """Detect if Perusu signal has flipped from last known state."""
