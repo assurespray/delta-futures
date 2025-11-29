@@ -1,6 +1,6 @@
 import logging
 from typing import List
-from database.mongodb import get_database
+from database.mongodb import mongodb
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,7 @@ async def cleanup_stale_indicator_cache():
     Should be called on bot startup.
     """
     try:
-        db = get_database()
+        db = mongodb.get_db()
         
         # 1. Get all active algo setup IDs
         active_algo_setups = await db.algo_setups.find(
