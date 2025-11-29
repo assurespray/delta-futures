@@ -302,27 +302,41 @@ class AlgoEngine:
     async def _cache_indicators(self, setup_id: str, perusu_data: Dict[str, Any],
                                 sirusu_data: Dict[str, Any], asset: str, timeframe: str):
         try:
-            cache_start = time.time()
-            await upsert_indicator_cache({
-                "algo_setup_id": setup_id,
-                "indicator_name": "perusu",
-                "asset": asset,
-                "timeframe": timeframe,
-                "last_signal": perusu_data['signal'],
-                "last_value": perusu_data['supertrend_value'],
-                "calculated_at": datetime.utcnow()
-            })
-            await upsert_indicator_cache({
-                "algo_setup_id": setup_id,
-                "indicator_name": "sirusu",
-                "asset": asset,
-                "timeframe": timeframe,
-                "last_signal": sirusu_data['signal'],
-                "last_value": sirusu_data['supertrend_value'],
-                "calculated_at": datetime.utcnow()
-            })
+            # ✅ Save indicators with flip detection
+            perusu_flip = await save_indicator_cache(
+                algo_setup_id=setup_id,
+                indicator_name="perusu",
+                asset=asset,
+                timeframe=timeframe,
+                signal=perusu_data['signal'],
+                value=perusu_data['supertrend_value']
+            )
+        
+            sirusu_flip = await save_indicator_cache(
+                algo_setup_id=setup_id,
+                indicator_name="sirusu",
+                asset=asset,
+                timeframe=timeframe,
+                signal=sirusu_data['signal'],
+                value=sirusu_data['supertrend_value']
+            )
+        
+            # ✅ Log flip detection results
+            logger.info(
+                f"📊 Indicator Cache Updated for {asset}:\n"
+                f"   Perusu: signal={perusu_data['signal']} (flip: {perusu_flip})\n"
+                f"   Sirusu: signal={sirusu_data['signal']} (flip: {sirusu_flip})"
+            )
+        
+            # ✅ Return flip info for potential use
+            return {
+                "perusu_flip": perusu_flip,
+                "sirusu_flip": sirusu_flip
+            }
+        
         except Exception as e:
             logger.error(f"❌ Failed to cache indicators: {e}")
+            return None
 
     async def run_continuous_monitoring(self):
         logger.info("🚀 Starting continuous algo monitoring...")
