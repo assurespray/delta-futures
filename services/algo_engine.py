@@ -192,6 +192,33 @@ class AlgoEngine:
                     last_perusu_signal,
                     indicator_result
                 )
+                # Cache indicators FIRST (before entry check)
+flip_info = await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
+
+# ✅ Then check for entry based on flip
+if flip_info and flip_info.get("sirusu_flip"):
+    sirusu_signal = sirusu_data['signal']
+    
+    if sirusu_signal == 1:  # Flip to uptrend
+        logger.info(f"🎯 LONG ENTRY SIGNAL: Sirusu flipped to Uptrend for {asset}")
+        entry_signal = {
+            "side": "long",
+            "trigger_price": perusu_data['latest_close'],
+            "immediate": False,
+            "reason": "Sirusu flip to uptrend"
+        }
+        # ... proceed with entry order placement ...
+        
+    elif sirusu_signal == -1:  # Flip to downtrend
+        logger.info(f"🎯 SHORT ENTRY SIGNAL: Sirusu flipped to Downtrend for {asset}")
+        entry_signal = {
+            "side": "short",
+            "trigger_price": perusu_data['latest_close'],
+            "immediate": False,
+            "reason": "Sirusu flip to downtrend"
+        }
+        # ... proceed with entry order placement ...
+
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
                     logger.info(f"🚀 Entry signal detected for {setup_name}: {entry_signal['side'].upper()}")
