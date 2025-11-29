@@ -16,6 +16,7 @@ from services.screener_engine import ScreenerEngine
 from services.scheduler import scheduler_service
 from services.logger_bot import LoggerBot  # ✅ Import CLASS (not instance!)
 from utils.self_ping import self_ping
+from database.cleanup import cleanup_stale_indicator_cache  # ← ADD THIS LINE
 
 # Configure logging
 logging.basicConfig(
@@ -65,6 +66,19 @@ async def lifespan(app: FastAPI):
             logger.warning(f"🧹 Cleaned {cleaned} stale position locks from previous session")
         else:
             logger.info("✅ No stale locks found")
+
+        # ✅ ADD THIS BLOCK HERE (after stale locks, before reconciliation)
+        # ========================================================
+        logger.info("🧹 Cleaning stale indicator cache...")
+        cleanup_result = await cleanup_stale_indicator_cache()
+        if cleanup_result.get("deleted", 0) > 0:
+            logger.info(
+                f"🗑️ Cleaned {cleanup_result['deleted']} stale cache entries "
+                f"(keeping {cleanup_result['active_setups']} active setups)"
+            )
+        else:
+            logger.info("✅ No stale indicator cache found")
+        # ========================================================
 
         # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)
         from services.reconciliation import startup_reconciliation
