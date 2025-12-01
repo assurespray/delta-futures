@@ -278,20 +278,24 @@ class DualSuperTrendStrategy:
     def detect_signal_flip(self, current_signal: int, 
                           last_signal: Optional[int]) -> Optional[str]:
         """Detect if Perusu signal has flipped from last known state."""
+    
+        # ✅ On first run, just populate cache and wait for next candle
         if last_signal is None:
-            # logger.info(f"📍 Initial Perusu state: {'Uptrend' if current_signal == 1 else 'Downtrend'}")
+            logger.info(f"📍 Initializing Perusu state: {'Uptrend' if current_signal == 1 else 'Downtrend'} (waiting for flip)")
             return None
-        
+    
+        # No flip
         if current_signal == last_signal:
             return None
-        
+    
+        # Flip detected
         if current_signal == 1 and last_signal == -1:
             logger.info(f"🔄 Perusu FLIP: Downtrend → Uptrend (LONG entry signal)")
             return "long"
         elif current_signal == -1 and last_signal == 1:
             logger.info(f"🔄 Perusu FLIP: Uptrend → Downtrend (SHORT entry signal)")
             return "short"
-        
+    
         return None
     
     def calculate_breakout_price(self, entry_side: str, 
