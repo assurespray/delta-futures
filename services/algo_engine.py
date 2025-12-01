@@ -181,14 +181,21 @@ class AlgoEngine:
             if not current_position and not algo_setup.get('pending_entry_order_id'):
                 # 1) Get PREVIOUS Perusu signal from cache (before this candle's update)
                 cached_perusu = await get_indicator_cache(setup_id, "perusu")
+                logger.info(f"🔍 Cache for {setup_name} ({asset} {timeframe}): {cached_perusu}")
                 last_perusu_signal = cached_perusu.get("previous_signal") if cached_perusu else None  # ✅ Changed from "last_signal"
+                logger.info(
+                    f"🔍 last_perusu_signal={last_perusu_signal}, "
+                    f"current_perusu={perusu_data['signal']}, "
+                    f"sirusu={sirusu_data['signal']}"
+                )
 
                 # 2) Let strategy decide if Perusu has flipped and generate breakout levels
                 entry_signal = self.strategy.generate_entry_signal(
                     setup_id,
                     last_perusu_signal,
                     indicator_result
-                )            
+                ) 
+                logger.info(f"🔍 generate_entry_signal returned: {entry_signal}")
 
                 # 3) Extra filter: Perusu & Sirusu must agree on direction
                 if entry_signal:
