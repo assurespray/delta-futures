@@ -399,6 +399,7 @@ class AlgoEngine:
             return None
 
     async def run_continuous_monitoring(self):
+        logger.info("AlgoEngine.run_continuous_monitoring() ENTERED")
         logger.info("🚀 Starting continuous algo monitoring...")
         await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups")
         loop_count = 0
