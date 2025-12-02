@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 ptb_app = None
 algo_engine = None
 logger_bot = None  # ✅ Will be initialized in startup
-
+async_tasks = []  # <--- ADD THIS LINE
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
