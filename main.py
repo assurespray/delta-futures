@@ -104,7 +104,13 @@ async def lifespan(app: FastAPI):
         from database.crud import get_all_active_algo_setups
 
         logger.info("🔥 Performing one-time indicator warm-up for all active setups...")
-        client = DeltaExchangeClient()  # use your normal init (api keys etc.)
+        
+        import os
+
+        api_key = os.environ["DELTA_API_KEY"]
+        api_secret = os.environ["DELTA_API_SECRET"]
+
+        client = DeltaExchangeClient(api_key=api_key, api_secret=api_secret)
         setups = await get_all_active_algo_setups()
 
         for setup in setups:
