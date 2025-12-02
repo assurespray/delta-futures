@@ -76,6 +76,7 @@ class AlgoEngine:
         logger.info(f"🚀 Processing Algo: {setup_name} ({asset} @ {timeframe})")
         now = datetime.utcnow()
         if not is_at_candle_boundary(timeframe, now):
+            logger.info(f"⏭️ SKIP {setup_name} {asset} {timeframe}: not at boundary, now={now}")
             next_boundary = get_next_boundary_time(timeframe, now)
             time_until = int((next_boundary - now).total_seconds())
             logger.debug(f"⏭️ [{setup_name}] Not at {timeframe} boundary - Next check in {time_until}s at {next_boundary.strftime('%H:%M:%S')} UTC")
