@@ -117,6 +117,7 @@ class AlgoEngine:
                 if retry_count < max_retries:
                     await asyncio.sleep(0.5)
             if not indicator_result:
+                logger.info(f"EXIT {setup_name}: indicator_result is None")
                 logger.warning(f"⚠️ Failed to calculate indicators for {setup_name} after {max_retries * 0.5}s")
                 self.signal_counts["errors"] += 1
                 await client.close()
