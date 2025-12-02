@@ -33,12 +33,14 @@ logger = logging.getLogger(__name__)
 ptb_app = None
 algo_engine = None
 logger_bot = None  # ✅ Will be initialized in startup
-async_tasks = []  # <--- ADD THIS LINE
+async_tasks = None  # <--- ADD THIS LINE
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown."""
     global ptb_app, algo_engine, logger_bot
+    global async_tasks
+    async_tasks = []  # reset for this process
     
     # ========== STARTUP ==========
     logger.info("🚀 Starting application...")
@@ -245,11 +247,15 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Telegram bot stopped")
 
         # --- CANCEL TASKS HERE ---
-        logger.info("🛑 Cancelling background tasks...")
-        for task in async_tasks:
-            task.cancel()
-        await asyncio.gather(*async_tasks, return_exceptions=True)
-        logger.info("✅ Background tasks cancelled")
+        if async_tasks:
+            logger.info("🛑 Cancelling background tasks...")
+            for task in async_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*async_tasks, return_exceptions=True)
+            logger.info("✅ Background tasks cancelled")
+        else:
+            logger.info("ℹ️ No background tasks to cancel")
         # --- END CANCEL ---
         
         # Close MongoDB
