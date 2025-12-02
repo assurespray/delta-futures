@@ -243,6 +243,14 @@ async def lifespan(app: FastAPI):
             await ptb_app.stop()
             await ptb_app.shutdown()
             logger.info("✅ Telegram bot stopped")
+
+        # --- CANCEL TASKS HERE ---
+        logger.info("🛑 Cancelling background tasks...")
+        for task in async_tasks:
+            task.cancel()
+        await asyncio.gather(*async_tasks, return_exceptions=True)
+        logger.info("✅ Background tasks cancelled")
+        # --- END CANCEL ---
         
         # Close MongoDB
         await mongodb.close_db()
