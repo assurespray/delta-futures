@@ -99,34 +99,50 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Setup configuration validated")
 
         # 🔥 ONE-TIME INDICATOR WARM-UP (force calculation)
+        # 🔥 ONE-TIME INDICATOR WARM-UP (using DB-stored API keys)
         from strategy.dual_supertrend import strategy_instance
         from api.delta_client import DeltaExchangeClient
-        from database.crud import get_all_active_algo_setups
+        from database.crud import (
+            get_all_active_algo_setups,
+            get_api_credential_by_id,
+        )
 
         logger.info("🔥 Performing one-time indicator warm-up for all active setups...")
-        
-        import os
 
-        api_key = os.environ["DELTA_API_KEY"]
-        api_secret = os.environ["DELTA_API_SECRET"]
-
-        client = DeltaExchangeClient(api_key=api_key, api_secret=api_secret)
         setups = await get_all_active_algo_setups()
 
         for setup in setups:
-            symbol = setup["asset"]
+            setup_id = str(setup["_id"])
+            setup_name = setup["setup_name"]
+            symbol = setup["asset"].upper()
             timeframe = setup.get("timeframe", "3m")
+            api_id = setup["api_id"]
+
             try:
-                logger.info(f"   🔄 Warm-up: {setup['setup_name']} ({symbol} {timeframe})")
+                cred = await get_api_credential_by_id(api_id, decrypt=True)
+                if not cred:
+                    logger.error(
+                        f"❌ Warm-up skipped for {setup_name}: API credentials not found"
+                    )
+                    continue
+
+                client = DeltaExchangeClient(
+                    api_key=cred["api_key"],
+                    api_secret=cred["api_secret"],
+                )
+
+                logger.info(f"   🔄 Warm-up: {setup_name} ({symbol} {timeframe})")
                 await strategy_instance.calculate_indicators(
                     client,
                     symbol,
                     timeframe,
-                    skip_boundary_check=True,
+                    skip_boundary_check=True,  # run regardless of candle boundary
                     force_recalc=True,
                 )
+                await client.close()
+
             except Exception as e:
-                logger.error(f"   ❌ Warm-up failed for {setup['setup_name']}: {e}")
+                logger.error(f"   ❌ Warm-up failed for {setup_name}: {e}")
 
         logger.info("🔥 Indicator warm-up complete")
 
