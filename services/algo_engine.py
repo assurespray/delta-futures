@@ -406,7 +406,7 @@ class AlgoEngine:
             try:
                 loop_count += 1
                 if loop_count % 2 == 0:
-                    logger.debug(f"❤️ AlgoEngine heartbeat loop={loop_count}")
+                    logger.info(f"❤️ AlgoEngine heartbeat loop={loop_count}")
                     
                 active_setups = await get_all_active_algo_setups()
                 if not active_setups:
