@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Setup configuration validated")
 
         # 🔥 ONE-TIME INDICATOR WARM-UP (force calculation)
-        from services.dual_supertrend import strategy_instance
+        from strategy.dual_supertrend import strategy_instance
         from api.delta_client import DeltaExchangeClient
         from database.crud import get_all_active_algo_setups
 
