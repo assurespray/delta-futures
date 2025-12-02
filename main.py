@@ -192,17 +192,14 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Screener engine initialized")
 
         # Start algo monitoring (SMART boundary-aligned scheduling!)
-        task = asyncio.create_task(algo_engine.run_continuous_monitoring())
-        logger.info(f"✅ Algo monitoring task started: {task!r}")
-        
-        # ----> Add this line right below to start the fill monitor:
-        asyncio.create_task(algo_engine.monitor_pending_entries(poll_interval=5))
-        logger.info("✅ Monitoring pending entry order")
-        asyncio.create_task(screener_engine.run_continuous_monitoring())
-        logger.info("✅ Monitoring screener pending entry order")
+        async_tasks.append(asyncio.create_task(algo_engine.run_continuous_monitoring()))
+        logger.info("✅ Algo monitoring task started")
 
-        # After starting algo/screener engines in lifespan()
-        asyncio.create_task(run_order_reconciliation())
+        async_tasks.append(asyncio.create_task(algo_engine.monitor_pending_entries(poll_interval=5)))
+        logger.info("✅ Monitoring pending entry order")
+        async_tasks.append(asyncio.create_task(screener_engine.run_continuous_monitoring()))
+        logger.info("✅ Monitoring screener pending entry order")
+        async_tasks.append(asyncio.create_task(run_order_reconciliation()))
         logger.info("✅ Order reconciliation task started")
 
         # Send startup notification
