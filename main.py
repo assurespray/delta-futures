@@ -254,7 +254,6 @@ async def lifespan(app: FastAPI):
         # Send shutdown notification
         if logger_bot:
             try:
-                import asyncio
                 await asyncio.wait_for(
                     logger_bot.send_warning(
                         "🔒 Trading Bot Shut Down\n\n"
