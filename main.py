@@ -253,12 +253,19 @@ async def lifespan(app: FastAPI):
         
         # Send shutdown notification
         if logger_bot:
-            await logger_bot.send_warning(
-                "🔒 Trading Bot Shut Down\n\n"
-                "✅ All position locks released\n"
-                "✅ All open orders cancelled\n"
-                "✅ Bot state cleaned"
-            )
+            try:
+                import asyncio
+                await asyncio.wait_for(
+                    logger_bot.send_warning(
+                        "🔒 Trading Bot Shut Down\n\n"
+                        "✅ All position locks released\n"
+                        "✅ All open orders cancelled\n"
+                        "✅ Bot state cleaned"
+                    )
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Shutdown notification timed out")
         
         logger.info("✅ Shutdown complete")
         
