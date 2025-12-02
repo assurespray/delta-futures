@@ -218,33 +218,60 @@ class AlgoEngine:
                         entry_signal = None  # cancel entry
 
                 # 4) Place order only if all conditions passed
+                # 4) Place order only if all conditions passed
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1
+                    side = entry_signal["side"]
                     logger.info(
                         f"🚀 Entry signal detected for {setup_name}: "
-                        f"{entry_signal['side'].upper()} "
-                        f"(reason: {entry_signal.get('entry_reason')})"
+                        f"{side.upper()} (reason: {entry_signal.get('entry_reason')})"
                     )
+
+                    # --- previous closed candle high/low ---
+                    prev_candle = indicator_result["latest_closed_candle"]  # ensure your strategy returns this
+                    prev_high = prev_candle["high"]
+                    prev_low = prev_candle["low"]
+                    current_price = perusu_data["latest_close"]
+
+                    # 1 pip – adjust per symbol tick size if needed
+                    pip = entry_signal.get("pip", 0.0001)
+                    breakout_price = prev_high + pip if side == "long" else prev_low - pip
+
+                    # Decide: market entry vs stop-market entry
+                    immediate_market = False
+                    if side == "long":
+                        # price already broke previous high → enter at market
+                        if current_price > prev_high:
+                            immediate_market = True
+                    else:  # short
+                        # price already broke previous low → enter at market
+                        if current_price < prev_low:
+                            immediate_market = True
+
                     entry_start = time.time()
+
                     success = await self.position_manager.place_breakout_entry_order(
                         client=client,
                         algo_setup=algo_setup,
-                        entry_side=entry_signal['side'],
-                        breakout_price=entry_signal.get('trigger_price', perusu_data['latest_close']),
-                        sirusu_value=sirusu_data['supertrend_value'],
-                        immediate=entry_signal.get('immediate', False)
+                        entry_side=side,
+                        breakout_price=breakout_price,
+                        # use Sirusu from previous closed candle as SL level
+                        sirusu_value=sirusu_data["supertrend_value"],
+                        immediate=immediate_market,
                     )
+
                     entry_time = time.time() - entry_start
+
                     if success:
                         self.signal_counts["successful_entries"] += 1
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
-                            direction=entry_signal['side'],
-                            entry_price=perusu_data['latest_close'],
-                            lot_size=algo_setup['lot_size'],
-                            perusu_signal=perusu_data['signal_text'],
-                            sirusu_sl=sirusu_data['supertrend_value']
+                            direction=side,
+                            entry_price=current_price,
+                            lot_size=algo_setup["lot_size"],
+                            perusu_signal=perusu_data["signal_text"],
+                            sirusu_sl=sirusu_data["supertrend_value"],
                         )
                     else:
                         self.signal_counts["failed_entries"] += 1
