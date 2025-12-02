@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
                         "✅ All position locks released\n"
                         "✅ All open orders cancelled\n"
                         "✅ Bot state cleaned"
-                    )
+                    ),
                     timeout=5.0,
                 )
             except asyncio.TimeoutError:
