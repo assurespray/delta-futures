@@ -97,7 +97,33 @@ async def lifespan(app: FastAPI):
         logger.info("🔍 Validating setup configuration...")
         await validate_setup_configuration()
         logger.info("✅ Setup configuration validated")
-        
+
+        # 🔥 ONE-TIME INDICATOR WARM-UP (force calculation)
+        from services.dual_supertrend import strategy_instance
+        from api.delta_client import DeltaExchangeClient
+        from database.crud import get_all_active_algo_setups
+
+        logger.info("🔥 Performing one-time indicator warm-up for all active setups...")
+        client = DeltaExchangeClient()  # use your normal init (api keys etc.)
+        setups = await get_all_active_algo_setups()
+
+        for setup in setups:
+            symbol = setup["asset"]
+            timeframe = setup.get("timeframe", "3m")
+            try:
+                logger.info(f"   🔄 Warm-up: {setup['setup_name']} ({symbol} {timeframe})")
+                await strategy_instance.calculate_indicators(
+                    client,
+                    symbol,
+                    timeframe,
+                    skip_boundary_check=True,
+                    force_recalc=True,
+                )
+            except Exception as e:
+                logger.error(f"   ❌ Warm-up failed for {setup['setup_name']}: {e}")
+
+        logger.info("🔥 Indicator warm-up complete")
+
         # Create Telegram bot application
         ptb_app = create_application()
         
