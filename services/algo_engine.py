@@ -380,16 +380,20 @@ class AlgoEngine:
                 loop_count += 1
                 if loop_count % 20 == 0:
                     logger.debug(f"❤️ AlgoEngine heartbeat loop={loop_count}")
+                    
                 active_setups = await get_all_active_algo_setups()
                 if not active_setups:
                     logger.debug("ℹ️ No active algo setups found")
                     await asyncio.sleep(60)
                     continue
+                    
                 logger.debug(f"📊 [Loop {loop_count}] Checking {len(active_setups)} active algo setup(s)")
+                
                 tasks = []
                 for setup in active_setups:
                     task = asyncio.create_task(self.process_algo_setup(setup))
                     tasks.append(task)
+                    
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for i, result in enumerate(results):
                     if isinstance(result, Exception):
