@@ -142,6 +142,10 @@ async def lifespan(app: FastAPI):
         
         screener_engine = ScreenerEngine(logger_bot)
         logger.info("✅ Screener engine initialized")
+
+        # Start algo monitoring (SMART boundary-aligned scheduling!)
+        task = asyncio.create_task(algo_engine.run_continuous_monitoring())
+        logger.info(f"✅ Algo monitoring task started: {task!r}")
         
         # Start algo monitoring (SMART boundary-aligned scheduling!)
         asyncio.create_task(algo_engine.run_continuous_monitoring())
