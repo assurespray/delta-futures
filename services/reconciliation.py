@@ -49,6 +49,31 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             setup_name = setup.get("setup_name")
             addl_prot = setup.get("additional_protection", False)
 
+            # 🔹 STARTUP: clear stale pending_entry_order_id if order is gone on exchange
+            pending_entry_id = setup.get("pending_entry_order_id")
+            if pending_entry_id and product_id:
+                try:
+                    gone = await is_order_gone(client, pending_entry_id, product_id)
+                    if gone:
+                        logger.info(
+                            f"🧹 [STARTUP] Clearing stale pending_entry_order_id={pending_entry_id} "
+                            f"for setup {setup_name}"
+                        )
+                        await update_algo_setup(setup_id, {
+                            "pending_entry_order_id": None,
+                            "pending_entry_direction_signal": None,
+                            "pending_entry_side": None,
+                        })
+                        # Also update local copy so later logic sees it as cleared
+                        setup["pending_entry_order_id"] = None
+                        setup["pending_entry_direction_signal"] = None
+                        setup["pending_entry_side"] = None
+                except Exception as e:
+                    logger.error(
+                        f"❌ [STARTUP] Failed pending-entry cleanup for {setup_name}: {e}"
+                    )
+
+            # continue with live position sync
             position = await get_position_by_symbol(client, symbol)
             position_size = position.get("size", 0) if position else 0
 
