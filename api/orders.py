@@ -277,6 +277,7 @@ async def get_order_status_by_id(client, order_id: int, product_id: int) -> str:
 
 async def is_order_gone(client, order_id, product_id):
     status = await get_order_status_by_id(client, order_id, product_id)
+    logger.info(f"[STARTUP] get_order_status_by_id({order_id},{product_id}) -> {status}")
     return status in {"filled", "cancelled", "rejected", "not_found"}
 
 async def get_order_history(
