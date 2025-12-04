@@ -250,7 +250,7 @@ class DualSuperTrendStrategy:
                 "candle_status": candle_status,
                 "perusu": perusu_result,
                 "sirusu": sirusu_result,
-                "previous_candle": {"high": prev_high, "low": prev_low},
+                "latest_closed_candle": {"high": prev_high, "low": prev_low},
                 "current_price": perusu_result.get('latest_close', 0)
             }
 
