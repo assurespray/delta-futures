@@ -4,6 +4,8 @@ from database.crud import get_api_credential_by_id, get_algo_setup_by_id, get_al
 from database.mongodb import mongodb
 from api.delta_client import DeltaExchangeClient
 from api.orders import get_order_status_by_id
+from api.orders import is_order_gone
+from database.crud import update_algo_setup
 from strategy.position_manager import PositionManager
 
 logger = logging.getLogger(__name__)
@@ -106,12 +108,28 @@ async def reconcile_pending_orders(logger_bot=None):
                 api_secret=cred['api_secret']
             )
             
+            product_id = setup.get("product_id")
+
             filled = await position_manager.check_entry_order_filled(
                 client, setup, None
             )
-            
+
             if filled:
                 logger.info(f"✅ Pending entry filled for {setup.get('setup_name')}")
+            else:
+                # If not filled, check if the order is completely gone (cancelled/not found)
+                if product_id:
+                    gone = await is_order_gone(client, pending_entry_id, product_id)
+                    if gone:
+                        logger.info(
+                            f"🧹 Pending entry {pending_entry_id} for {setup.get('setup_name')} "
+                            f"is gone on exchange – clearing from DB"
+                        )
+                        await update_algo_setup(str(setup["_id"]), {
+                            "pending_entry_order_id": None,
+                            "pending_entry_direction_signal": None,
+                            "pending_entry_side": None,
+                        })
             
         except Exception as e:
             logger.error(f"❌ Error checking pending entry for {setup.get('setup_name')}: {e}")
