@@ -12,6 +12,7 @@ from database.crud import (
     get_position_lock
 )
 from api.delta_client import DeltaExchangeClient
+from api.orders import is_order_gone   # you already use this elsewhere
 from api.positions import get_position_by_symbol
 from api.orders import get_open_orders, place_stop_loss_order
 from strategy.dual_supertrend import DualSuperTrendStrategy
