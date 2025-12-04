@@ -191,6 +191,13 @@ class AlgoEngine:
                     f"sirusu={sirusu_data['signal']}"
                 )
 
+                # If DB says Perusu flipped, reconstruct last signal from current
+                if flip_info and flip_info.get("perusu_flip"):
+                    if perusu_data['signal'] == 1:
+                        last_perusu_signal = -1
+                    elif perusu_data['signal'] == -1:
+                        last_perusu_signal = 1
+
                 # 2) Let strategy decide if Perusu has flipped and generate breakout levels
                 entry_signal = self.strategy.generate_entry_signal(
                     setup_id,
