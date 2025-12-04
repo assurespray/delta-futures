@@ -51,6 +51,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
             # 🔹 STARTUP: clear stale pending_entry_order_id if order is gone on exchange
             pending_entry_id = setup.get("pending_entry_order_id")
+            logger.info(f"[STARTUP] Setup {setup_name}: pending_entry_order_id={pending_entry_id}, product_id={product_id}")
             if pending_entry_id and product_id:
                 try:
                     gone = await is_order_gone(client, pending_entry_id, product_id)
