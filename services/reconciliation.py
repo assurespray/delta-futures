@@ -54,7 +54,10 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             if pending_entry_id and product_id:
                 try:
                     gone = await is_order_gone(client, pending_entry_id, product_id)
-                    logger.info(f"[STARTUP] is_order_gone result for {setup_name} {pending_entry_id} / {product_id}: {gone}")
+                    logger.info(
+                        f"[STARTUP] is_order_gone for {setup_name} "
+                        f"order_id={pending_entry_id}, product_id={product_id} -> {gone}"
+                    )
                     if gone:
                         logger.info(
                             f"🧹 [STARTUP] Clearing stale pending_entry_order_id={pending_entry_id} "
