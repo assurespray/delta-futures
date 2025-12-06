@@ -326,7 +326,7 @@ class DualSuperTrendStrategy:
         """Generate entry signal based on Perusu flip + breakout logic."""
         try:
             perusu = indicators_data.get("perusu")
-            previous_candle = indicators_data.get("previous_candle", {})
+            previous_candle = indicators_data.get("latest_closed_candle", {})
             current_price = indicators_data.get("current_price")
         
             if not perusu or not previous_candle or not current_price:
