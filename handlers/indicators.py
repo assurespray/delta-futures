@@ -211,7 +211,11 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
             api_secret=full_cred['api_secret']
         )
         strategy = DualSuperTrendStrategy()
-        result = await strategy.calculate_indicators(client, asset, timeframe)
+        result = await strategy.calculate_indicators(
+            client, asset, timeframe,
+            skip_boundary_check=True,   # <--
+            force_recalc=True           # optional but useful for fresh value
+        )
         await client.close()
 
         indicator_type = context.user_data.get('selected_indicator', 'perusu')
