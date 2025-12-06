@@ -163,31 +163,14 @@ class DualSuperTrendStrategy:
                 return None
 
             candle_status = self._is_candle_closed(latest_candles, timeframe)
-            if not candle_status['is_closed']:
-                wait_time = candle_status['seconds_until_ready']
-                if skip_boundary_check:
-                    logger.info(f"🔵 Skipping candle boundary check in reconciliation mode for {symbol}. Will use the last closed candle.")
-                    # Continue without waiting, using last closed candle even if 'not ready'
-                else:
-                    if wait_time > 0 and wait_time <= 10:
-                        logger.info(f"⏳ Candle not ready. Waiting {wait_time}s for buffer...")
-                        await asyncio.sleep(wait_time + 0.5)
-                    else:
-                        logger.warning(
-                            f"⚠️ Wait time unreasonable: {wait_time}s for {symbol} {timeframe}; "
-                            "skipping full indicator calculation."
-                        )
-                        return {
-                            "symbol": symbol,
-                            "timeframe": timeframe,
-                            "resolution": resolution,
-                            "calculated_at": current_time,
-                            "candles_used": 0,
-                            "candles_requested": required_candles,
-                            "candle_status": candle_status,
-                            "error": "candle_not_ready",
-                            "wait_time": wait_time,
-                        }
+            if not candle_status["is_closed"]:
+                wait_time = candle_status["seconds_until_ready"]
+                logger.warning(
+                    f"⚠️ Candle for {symbol} {timeframe} not fully closed "
+                    f"(~{wait_time}s remaining). Forcing indicator calculation "
+                    "using last closed candle."
+                )
+                # No waiting and no early return; continue to full fetch.
 
             # Efficient Step 2: Now fetch ALL candles in one call (guaranteed latest is closed)
             logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
