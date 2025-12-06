@@ -219,65 +219,75 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
 
         logger.info(f"Returned indicator result for both: {result}")
 
-        if result:
-            # Info block
-            info = (
-                f"🔹 **Symbol:** {asset}\n"
-                f"🔹 **Timeframe:** {timeframe}\n"
-                f"🔹 **API Account:** {api_name}\n"
-                f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
+        # NEW: handle candle-not-ready diagnostic
+        if result and isinstance(result, dict) and result.get("error") == "candle_not_ready":
+            wait = int(result.get("wait_time", 0))
+            minutes = max(1, wait // 60)
+            msg = (
+                f"⚠️ Current {timeframe} candle for {asset} is still forming.\n\n"
+                f"Approximate time until next closed candle: **{minutes} minute(s)**.\n\n"
+                "Please try again closer to the next candle close."
             )
-
-            if indicator_type == "perusu":
-                d = result['perusu']
-                msg = (
-                    info +
-                    f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
-                    f"├ ATR Length: {d['atr_length']}\n"
-                    f"├ Factor: {d['factor']}\n"
-                    f"├ ATR Value: {d['atr']}\n"
-                    f"├ Current Price: ${d['latest_close']}\n"
-                    f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
-                    f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
-                )
-            elif indicator_type == "sirusu":
-                d = result['sirusu']
-                msg = (
-                    info +
-                    f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
-                    f"├ ATR Length: {d['atr_length']}\n"
-                    f"├ Factor: {d['factor']}\n"
-                    f"├ ATR Value: {d['atr']}\n"
-                    f"├ Current Price: ${d['latest_close']}\n"
-                    f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
-                    f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
-                )
-            elif indicator_type == "both":
-                p, s = result['perusu'], result['sirusu']
-                msg = (
-                    info +
-                    f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
-                    f"├ ATR Length: {p['atr_length']}\n"
-                    f"├ Factor: {p['factor']}\n"
-                    f"├ ATR Value: {p['atr']}\n"
-                    f"├ Current Price: ${p['latest_close']}\n"
-                    f"├ Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']}\n"
-                    f"└ SuperTrend Value: ${p['supertrend_value']}\n\n"
-                    f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
-                    f"├ ATR Length: {s['atr_length']}\n"
-                    f"├ Factor: {s['factor']}\n"
-                    f"├ ATR Value: {s['atr']}\n"
-                    f"├ Current Price: ${s['latest_close']}\n"
-                    f"├ Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']}\n"
-                    f"└ SuperTrend Value: ${s['supertrend_value']}\n"
-                )
         else:
-            msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
-            msg += "**Possible reasons:**\n"
-            msg += "• Invalid symbol (check Delta Exchange product list)\n"
-            msg += "• Insufficient market data\n"
-            msg += "• API connection issues\n\n"
-            msg += "💡 Try a different symbol or timeframe"
+            if result:
+                # Info block
+                info = (
+                    f"🔹 **Symbol:** {asset}\n"
+                    f"🔹 **Timeframe:** {timeframe}\n"
+                    f"🔹 **API Account:** {api_name}\n"
+                    f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
+                )
+
+                if indicator_type == "perusu":
+                    d = result['perusu']
+                    msg = (
+                        info +
+                        f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
+                        f"├ ATR Length: {d['atr_length']}\n"
+                        f"├ Factor: {d['factor']}\n"
+                        f"├ ATR Value: {d['atr']}\n"
+                        f"├ Current Price: ${d['latest_close']}\n"
+                        f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
+                        f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
+                    )
+                elif indicator_type == "sirusu":
+                    d = result['sirusu']
+                    msg = (
+                        info +
+                        f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
+                        f"├ ATR Length: {d['atr_length']}\n"
+                        f"├ Factor: {d['factor']}\n"
+                        f"├ ATR Value: {d['atr']}\n"
+                        f"├ Current Price: ${d['latest_close']}\n"
+                        f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
+                        f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
+                    )
+                elif indicator_type == "both":
+                    p, s = result['perusu'], result['sirusu']
+                    msg = (
+                        info +
+                        f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
+                        f"├ ATR Length: {p['atr_length']}\n"
+                        f"├ Factor: {p['factor']}\n"
+                        f"├ ATR Value: {p['atr']}\n"
+                        f"├ Current Price: ${p['latest_close']}\n"
+                        f"├ Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']}\n"
+                        f"└ SuperTrend Value: ${p['supertrend_value']}\n\n"
+                        f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
+                        f"├ ATR Length: {s['atr_length']}\n"
+                        f"├ Factor: {s['factor']}\n"
+                        f"├ ATR Value: {s['atr']}\n"
+                        f"├ Current Price: ${s['latest_close']}\n"
+                        f"├ Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']}\n"
+                        f"└ SuperTrend Value: ${s['supertrend_value']}\n"
+                    )
+            else:
+                msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
+                msg += "**Possible reasons:**\n"
+                msg += "• Invalid symbol (check Delta Exchange product list)\n"
+                msg += "• Insufficient market data\n"
+                msg += "• API connection issues\n\n"
+                msg += "💡 Try a different symbol or timeframe"
 
     except Exception as e:
         logger.error(f"❌ Error calculating indicator: {e}")
