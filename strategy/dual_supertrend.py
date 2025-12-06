@@ -207,12 +207,18 @@ class DualSuperTrendStrategy:
             # 4. Check candle closed and buffered
             # 4. Check candle closed and buffered
             candle_status = self._is_candle_closed(candles, timeframe)
-            if not candle_status['is_closed']:
+            if not candle_status["is_closed"]:
                 if skip_boundary_check:
-                    logger.info(f"🔵 Skipping secondary candle closed check in reconciliation mode for {symbol}.")
-                    # Proceed even if the last candle is not closed
+                    logger.info(
+                        f"🔵 Secondary candle check: {symbol} {timeframe} not fully closed; "
+                        "continuing using last closed candle."
+                    )
                 else:
-                    return None
+                    logger.warning(
+                        f"⚠️ Secondary candle check: {symbol} {timeframe} not fully closed "
+                        "but Telegram requested indicators; forcing calculation using last closed candle."
+                    )
+                # In all cases we CONTINUE – no return here
                     
             # 5. Sufficient data?
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
