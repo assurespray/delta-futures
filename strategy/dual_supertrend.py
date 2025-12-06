@@ -173,8 +173,21 @@ class DualSuperTrendStrategy:
                         logger.info(f"⏳ Candle not ready. Waiting {wait_time}s for buffer...")
                         await asyncio.sleep(wait_time + 0.5)
                     else:
-                        logger.warning(f"⚠️ Wait time unreasonable: {wait_time}s")
-                        return None
+                        logger.warning(
+                            f"⚠️ Wait time unreasonable: {wait_time}s for {symbol} {timeframe}; "
+                            "skipping full indicator calculation."
+                        )
+                        return {
+                            "symbol": symbol,
+                            "timeframe": timeframe,
+                            "resolution": resolution,
+                            "calculated_at": current_time,
+                            "candles_used": 0,
+                            "candles_requested": required_candles,
+                            "candle_status": candle_status,
+                            "error": "candle_not_ready",
+                            "wait_time": wait_time,
+                        }
 
             # Efficient Step 2: Now fetch ALL candles in one call (guaranteed latest is closed)
             logger.info(f"🔄 FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
