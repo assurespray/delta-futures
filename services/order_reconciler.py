@@ -79,6 +79,7 @@ async def reconcile_pending_orders(logger_bot=None):
                             "stop_loss_order_id": None,
                             "current_position": None,
                             "last_entry_price": None,
+                            "pending_entry_order_id": None,
                         })
         
                 updated_count += 1
