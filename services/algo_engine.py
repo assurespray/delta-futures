@@ -158,6 +158,7 @@ class AlgoEngine:
                         await update_algo_setup(setup_id, {
                             "pending_entry_order_id": None,
                             "pending_entry_side": None
+                            "pending_entry_direction_signal": None,  # <--- ADD THIS LINE
                         })
                         pending_order_status = "reversed"
                     else:
