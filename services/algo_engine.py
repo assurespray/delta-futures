@@ -307,6 +307,9 @@ class AlgoEngine:
                         logger.warning(f"⚠️ Stop-loss already filled - skipping market exit")
                         logger.info(f"   execute_exit() will handle state sync")
                     exit_start = time.time()
+                    # Refresh setup so stop_loss_order_id is latest
+                    updated_setup = await get_algo_setup_by_id(setup_id)
+                    algo_setup.update(updated_setup)
                     success = await self.position_manager.execute_exit(
                         client=client,
                         algo_setup=algo_setup,
