@@ -71,6 +71,16 @@ async def reconcile_pending_orders(logger_bot=None):
                     {"order_id": order_id},
                     {"$set": {"status": status, "updated_at": datetime.utcnow()}}
                 )
+                # --- NEW: if this was a stop-loss and got filled, clear position on the setup ---
+                if status == "filled" and order.get("reduce_only"):
+                    algo_setup_id = order.get("algo_setup_id")
+                    if algo_setup_id:
+                        await update_algo_setup(algo_setup_id, {
+                            "stop_loss_order_id": None,
+                            "current_position": None,
+                            "last_entry_price": None,
+                        })
+        
                 updated_count += 1
                 logger.info(f"✅ Order {order_id} status updated to '{status}'")
 
