@@ -640,6 +640,23 @@ class PositionManager:
                 db = await get_db()
                 await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
 
+            # 1.5. Clean stale pending_entry_order_id if order no longer exists
+            pending_entry_id = setup.get("pending_entry_order_id")
+            if pending_entry_id:
+                open_orders_check = await get_open_orders(client, product_id)
+                order_exists = any(o.get("id") == pending_entry_id for o in (open_orders_check or []))
+    
+                if not order_exists:
+                    logger.warning(
+                        f"⚠️ Setup {setup.get('setup_name')} has pending_entry_order_id={pending_entry_id} "
+                        "but order not found on exchange. Clearing stale state."
+                    )
+                    await update_algo_setup(setup_id, {
+                        "pending_entry_order_id": None,
+                        "pending_entry_direction_signal": None,
+                        "entry_trigger_price": None,
+                    })
+
             # 2. Check for open orders (entry, stop-loss, etc.)
             open_orders = await get_open_orders(client, product_id)
             for order in (open_orders or []):
