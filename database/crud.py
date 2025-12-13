@@ -523,8 +523,9 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
                                setup_id: str,
                                setup_name: str) -> bool:
     """
-    ✅ NEW: Acquire exclusive lock on asset for this setup.
+    ✅ Acquire exclusive lock on asset for this setup.
     Only ONE setup can trade this asset at a time.
+    Uses UPSERT to prevent duplicate key errors on restart.
     
     Args:
         db: MongoDB database connection
@@ -533,35 +534,37 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
         setup_name: Setup name (for logging)
     
     Returns:
-        True if lock acquired, False if already locked
+        True if lock acquired, False if already locked by another setup
     """
     try:
         collection = db["position_locks"]
         
-        # Try to insert lock (unique index prevents duplicates)
+        # Check if locked by a DIFFERENT setup
+        existing = await collection.find_one({"symbol": symbol})
+        if existing and existing.get("setup_id") != setup_id:
+            logger.error(f"❌ {symbol} is LOCKED by: {existing.get('setup_name')}")
+            return False
+        
+        # Upsert: update if exists (same setup), insert if new
         lock_data = {
             "symbol": symbol,
             "setup_id": setup_id,
             "setup_name": setup_name,
             "locked_at": datetime.utcnow()
         }
-        logger.error(f"[DEBUG] About to insert into: {db.name}.{collection.name} on client={db.client.address if hasattr(db.client,'address') else '[unknown]'}")
-        result = await collection.insert_one(lock_data)
-        logger.error(f"[DEBUG] Inserted lock: {lock_data} with result id={result.inserted_id}")
-        logger.info(f"✅ Acquired lock on {symbol} for {setup_name}")
+        
+        result = await collection.update_one(
+            {"symbol": symbol},
+            {"$set": lock_data},
+            upsert=True
+        )
+        
+        logger.info(f"✅ Lock acquired/refreshed for {symbol} by {setup_name}")
         return True
         
     except Exception as e:
-        logger.error(f"[DB ERROR] Failed to acquire lock: {e}")
-        if "duplicate" in str(e).lower():
-            # Lock already exists - get who owns it
-            lock = await get_position_lock(db, symbol)
-            if lock:
-                logger.error(f"❌ {symbol} is LOCKED by: {lock['setup_name']}")
-            return False
-        
-        logger.error(f"⚠️ Error acquiring lock: {e}")
-        raise
+        logger.error(f"❌ Failed to acquire lock for {symbol}: {e}")
+        return False
 
 
 async def get_position_lock(db: AsyncIOMotorDatabase,
