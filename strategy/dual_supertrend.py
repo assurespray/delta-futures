@@ -165,10 +165,9 @@ class DualSuperTrendStrategy:
             candle_status = self._is_candle_closed(latest_candles, timeframe)
             if not candle_status["is_closed"]:
                 wait_time = candle_status["seconds_until_ready"]
-                logger.warning(
-                    f"⚠️ Candle for {symbol} {timeframe} not fully closed "
-                    f"(~{wait_time}s remaining). Forcing indicator calculation "
-                    "using last closed candle."
+                logger.info(
+                    f"ℹ️ Candle for {symbol} {timeframe} not fully closed "
+                    f"(~{wait_time}s remaining). Using last closed candle."
                 )
                 # No waiting and no early return; continue to full fetch.
 
@@ -208,16 +207,11 @@ class DualSuperTrendStrategy:
             # 4. Check candle closed and buffered
             candle_status = self._is_candle_closed(candles, timeframe)
             if not candle_status["is_closed"]:
-                if skip_boundary_check:
-                    logger.info(
-                        f"🔵 Secondary candle check: {symbol} {timeframe} not fully closed; "
-                        "continuing using last closed candle."
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ Secondary candle check: {symbol} {timeframe} not fully closed "
-                        "but Telegram requested indicators; forcing calculation using last closed candle."
-                    )
+                source_text = "manual check" if skip_boundary_check else "automated processing"
+                logger.info(
+                    f"ℹ️ Candle check ({source_text}): {symbol} {timeframe} not fully closed. "
+                    "Using last closed candle for calculation."
+                )
                 # In all cases we CONTINUE – no return here
                     
             # 5. Sufficient data?
