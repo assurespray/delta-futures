@@ -138,7 +138,8 @@ class SuperTrend:
         
         # Forward fill for initial NaN values, backfill for any remaining
         atr_series = pd.Series(atr, index=df.index)
-        atr_series = atr_series.replace(0, np.nan).ffill().bfill()
+        # ✅ Match TradingView: forward-fill only, no backfill
+        atr_series = atr_series.replace(0, np.nan).ffill()
         
         return atr_series
     
