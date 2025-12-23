@@ -144,46 +144,52 @@ class SuperTrend:
         return atr_series
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Calculate SuperTrend indicator with full trailing band logic.
+        
+        ✅ Complete Formula Steps:
+        
+        1. Convert candles to DataFrame
+        2. Calculate ATR using RMA
+        3. Calculate Basic Upper/Lower Bands:
+           - Basic UB = HL2 + (Factor × ATR)
+           - Basic LB = HL2 - (Factor × ATR)
+        4. Apply Trailing Logic to Final Bands:
+           - Final UB can only move down or stay same
+           - Final LB can only move up or stay same
+        5. Determine Trend Direction:
+           - Close > Final UB → Uptrend (use Final LB as SuperTrend)
+           - Close < Final LB → Downtrend (use Final UB as SuperTrend)
+        
+        Args:
+            candles: List of OHLC candle dictionaries
+        
+        Returns:
+            Dictionary with SuperTrend values and signal, or None on error
+        """
         try:
             # ===== STEP 1: Convert to DataFrame =====
             df = self.candles_to_dataframe(candles)
-        
-            # Clean any NaN OHLC rows
-            df = df.dropna(subset=["high", "low", "close", "open"]).reset_index(drop=True)
-        
+
+            # ✅ NEW: clean NaN OHLC rows here
+            df = df.dropna(subset=["high", "low", "close"]).reset_index(drop=True)
+            
             if len(df) < self.atr_length + 1:
                 logger.warning(
-                    f"⚠️ Insufficient data for {self.name} after cleaning: "
+                    f"⚠️ Insufficient data for {self.name} after dropping NaNs: "
                     f"need {self.atr_length + 1}, got {len(df)}"
                 )
                 return None
-        
+            
             # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
-        
+            # ✅ Guard: ATR must be valid at last index
             if atr is None or len(atr) != len(df) or atr.isna().iloc[-1]:
                 logger.warning(
                     f"⚠️ ATR invalid for {self.name}: "
                     f"len={len(atr) if atr is not None else 'None'}, "
                     f"last={atr.iloc[-1] if atr is not None else 'None'}"
                 )
-                return None
-        
-            # ✅ NEW: Skip rows where ATR is still NaN/zero (early candles before RMA stabilizes)
-            # Find first valid ATR index
-            valid_atr_mask = ~atr.isna() & (atr > 0)
-            if not valid_atr_mask.any():
-                logger.warning(f"⚠️ No valid ATR values for {self.name}")
-                return None
-        
-            first_valid_idx = valid_atr_mask.idxmax()  # first True index
-        
-            # Slice df and atr to only use data from first valid ATR onward
-            df = df.iloc[first_valid_idx:].reset_index(drop=True)
-            atr = atr.iloc[first_valid_idx:].reset_index(drop=True)
-        
-            if len(df) < 2:  # need at least 2 candles for trailing logic
-                logger.warning(f"⚠️ Insufficient valid data after ATR stabilization for {self.name}")
                 return None
             
             # ===== STEP 3: Calculate Basic Upper/Lower Bands (vectorized) =====
