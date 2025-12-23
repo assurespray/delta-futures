@@ -178,6 +178,10 @@ class SuperTrend:
             
             # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
+
+            if atr.isna().iloc[-1]:
+                logger.warning(f"⚠️ ATR latest value is NaN for {self.name}, insufficient data.")
+                return None
             
             # ===== STEP 3: Calculate Basic Upper/Lower Bands (vectorized) =====
             # HL2 = (High + Low) / 2
