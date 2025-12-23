@@ -361,16 +361,9 @@ class PositionManager:
             logger.error(f"❌ Exception placing stop-loss: {e}")
             return None
 
-    async def execute_exit(self, client: DeltaExchangeClient, 
-                          algo_setup: Dict[str, Any],
-                          sirusu_signal_text: str) -> bool:
-        logger.info(
-        f"[MANAGER/EXIT] Called for symbol={algo_setup.get('asset')} "
-        f"current_position={algo_setup.get('current_position')}, "
-        f"product_id={algo_setup.get('product_id')}, "
-        f"position_obj={algo_setup.get('position_obj')}"
-        )
-        # ... rest of your logic...
+    async def execute_exit(self, client: DeltaExchangeClient,
+                           algo_setup: Dict[str, Any],
+                           sirusu_signal_text: str) -> bool:
         try:
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
@@ -384,123 +377,159 @@ class PositionManager:
                 logger.warning(f"⚠️ No current position or product_id for {symbol}")
                 return False
 
-            # ✅ CRITICAL FIX: Check actual position on exchange FIRST
+            logger.info(f"🚪 Executing exit for {setup_name} - {current_position.upper()} position")
+            logger.info(f"   Reason: {sirusu_signal_text}")
+
+            # Check actual position on exchange
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
-        
-            # ✅ CRITICAL FIX: Check actual position on exchange FIRST
-            # If position is already closed on exchange
+            
+            # If position is already closed on exchange, just sync database
             if actual_size == 0:
-                logger.warning(f"⚠️ Position for {symbol} already closed on exchange")
-    
-                # Check if it was by stop-loss fill
-                if stop_loss_order_id:
-                    from api.orders import get_order_history
-                    history = await get_order_history(client, product_id)  # Uses default page_size=20
-                    sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
-        
-                    exit_price = None
-                    exit_reason = "Manual close"
-        
-                    if sl_order and sl_order.get("state") == "filled":
-                        logger.info(f"✅ Confirmed: Position closed by stop-loss fill")
-                        exit_price = sl_order.get("average_fill_price")
-                        exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"
-            
-                        # Update SL order record
-                        await update_order_record(stop_loss_order_id, {
-                            "status": "filled",
-                            "filled_at": datetime.utcnow()
-                        })
-                    else:
-                        logger.warning(f"⚠️ SL order cancelled or not found - position closed manually")
-        
-                    # Update activity with PNL if we have exit price
-                    activity = await get_open_activity_by_setup(setup_id)
-                    if activity:
-                        update_data = {
-                            "exit_time": datetime.utcnow(),
-                            "exit_price": exit_price,
-                            "sirusu_exit_signal": exit_reason,
-                            "is_closed": True
-                        }
-            
-                        if exit_price:
-                            entry_price = activity.get("entry_price", 0)
-                            pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
-                            pnl_inr = pnl * settings.usd_to_inr_rate
-                            update_data["pnl"] = round(pnl, 4)
-                            update_data["pnl_inr"] = round(pnl_inr, 2)
-            
-                        await update_algo_activity(str(activity["_id"]), update_data)
-    
-                # Clean up database
-                await update_algo_setup(setup_id, {
-                    "current_position": None,
-                    "last_entry_price": None,
-                    "pending_entry_order_id": None,
-                    "entry_trigger_price": None,
-                    "stop_loss_order_id": None,
-                    "position_lock_acquired": False
-                })
-    
-                db = await get_db()
-                await db.positions.update_many(
-                    {"algo_setup_id": setup_id, "status": "open"},
-                    {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
-                )
-                await release_position_lock(db, symbol, setup_id)
-    
-                logger.info(f"✅ Database synchronized with closed position on exchange")
-                return True
+                logger.warning(f"⚠️ Position for {symbol} already closed on exchange - syncing database")
+                return await self._sync_closed_position(setup_id, symbol, current_position, lot_size, sirusu_signal_text, stop_loss_order_id, client, product_id)
 
-            # ✅ Position is still open - proceed with normal exit
+            # Position is still open - execute market exit
             logger.info(f"📍 Position still open on exchange (size={actual_size}), executing market exit")
-
-            # Place market exit
-            # ===== STEP 1: Cancel stop-loss FIRST =====
-            from services.reconciliation import filter_orders_by_symbol_and_product_id
-
-            open_orders = await get_open_orders(client, product_id)
-            matched_orders = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
-
-            cancelled_sl_count = 0
-            for order in matched_orders:
-                if (order.get("stop_order_type") == "stop_loss_order" and 
-                    order.get("reduce_only") and
-                    order.get("state") in ("pending", "open", "untriggered")):
-        
-                    actual_sl_id = order.get("id")
-                    logger.info(f"🎯 Found active stop-loss order: {actual_sl_id}")
-        
-                    try:
-                        from api.orders import cancel_order
-                        cancelled = await cancel_order(client, actual_sl_id)
-                        if cancelled:
-                            cancelled_sl_count += 1
-                            logger.info(f"✅ Cancelled stop-loss order {actual_sl_id}")
-                
-                            await update_order_record(actual_sl_id, {
-                                "status": "cancelled",
-                                "updated_at": datetime.utcnow()
-                            })
-                    except Exception as cancel_ex:
-                        logger.warning(f"⚠️ Could not cancel SL {actual_sl_id}: {cancel_ex}")
-
-            if cancelled_sl_count == 0:
-                logger.warning(f"⚠️ No stop-loss orders found to cancel for {symbol}")
-
-            # ===== STEP 2: Now place market exit =====
+            
+            # Step 1: Cancel any active stop-loss orders
+            await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
+            
+            # Step 2: Place market exit order
             exit_side = "sell" if current_position == "long" else "buy"
             exit_order = await place_market_order(client, product_id, lot_size, exit_side)
             
             if not exit_order:
-                logger.error(f"❌ Failed to place exit order")
+                logger.error(f"❌ Failed to place exit order for {symbol}")
                 return False
 
             exit_price = float(exit_order.get("average_fill_price", 0))
+            logger.info(f"✅ Exit order executed: {exit_side.upper()} {lot_size} @ ${exit_price:.5f}")
+            
+            # Save exit order record
+            await self._save_exit_order_record(exit_order, setup_id, algo_setup, symbol, exit_side, lot_size)
+            
+            # Update activity and cleanup
+            await self._finalize_exit(setup_id, symbol, current_position, lot_size, exit_price, sirusu_signal_text)
+            
+            logger.info(f"✅ Exit completed successfully for {setup_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Exception in execute_exit for {algo_setup.get('setup_name')}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
 
-            # Save order event
+    async def _sync_closed_position(self, setup_id: str, symbol: str, current_position: str,
+                                   lot_size: int, sirusu_signal_text: str, stop_loss_order_id: Optional[str],
+                                   client: DeltaExchangeClient, product_id: int) -> bool:
+        """Sync database when position is already closed on exchange."""
+        try:
+            exit_price = None
+            exit_reason = "Manual close"
+            
+            # Check if it was closed by stop-loss
+            if stop_loss_order_id:
+                from api.orders import get_order_history
+                history = await get_order_history(client, product_id)
+                sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
+                
+                if sl_order and sl_order.get("state") == "filled":
+                    exit_price = sl_order.get("average_fill_price")
+                    exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"
+                    await update_order_record(stop_loss_order_id, {
+                        "status": "filled",
+                        "filled_at": datetime.utcnow()
+                    })
+                else:
+                    logger.warning(f"⚠️ SL order {stop_loss_order_id} not filled - position closed manually")
+            
+            # Update activity
+            activity = await get_open_activity_by_setup(setup_id)
+            if activity:
+                update_data = {
+                    "exit_time": datetime.utcnow(),
+                    "exit_price": exit_price,
+                    "sirusu_exit_signal": exit_reason,
+                    "is_closed": True
+                }
+                
+                if exit_price:
+                    entry_price = activity.get("entry_price", 0)
+                    pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
+                    pnl_inr = pnl * settings.usd_to_inr_rate
+                    update_data["pnl"] = round(pnl, 4)
+                    update_data["pnl_inr"] = round(pnl_inr, 2)
+                
+                await update_algo_activity(str(activity["_id"]), update_data)
+            
+            # Clean up database
+            await update_algo_setup(setup_id, {
+                "current_position": None,
+                "last_entry_price": None,
+                "pending_entry_order_id": None,
+                "entry_trigger_price": None,
+                "stop_loss_order_id": None,
+                "position_lock_acquired": False
+            })
+            
+            db = await get_db()
+            await db.positions.update_many(
+                {"algo_setup_id": setup_id, "status": "open"},
+                {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+            )
+            await release_position_lock(db, symbol, setup_id)
+            
+            logger.info(f"✅ Database synchronized for closed position: {symbol}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error syncing closed position {symbol}: {e}")
+            return False
+
+    async def _cancel_stop_loss_orders(self, client: DeltaExchangeClient, product_id: int,
+                                     symbol: str, stop_loss_order_id: Optional[str]) -> None:
+        """Cancel any active stop-loss orders."""
+        try:
+            from services.reconciliation import filter_orders_by_symbol_and_product_id
+            from api.orders import cancel_order
+            
+            open_orders = await get_open_orders(client, product_id)
+            matched_orders = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
+            
+            cancelled_count = 0
+            for order in matched_orders:
+                if (order.get("stop_order_type") == "stop_loss_order" and
+                    order.get("reduce_only") and
+                    order.get("state") in ("pending", "open", "untriggered")):
+                    
+                    sl_order_id = order.get("id")
+                    logger.info(f"🎯 Found active stop-loss order: {sl_order_id}")
+                    
+                    try:
+                        cancelled = await cancel_order(client, sl_order_id)
+                        if cancelled:
+                            cancelled_count += 1
+                            logger.info(f"✅ Cancelled stop-loss order {sl_order_id}")
+                            await update_order_record(sl_order_id, {
+                                "status": "cancelled",
+                                "updated_at": datetime.utcnow()
+                            })
+                    except Exception as cancel_ex:
+                        logger.warning(f"⚠️ Could not cancel SL {sl_order_id}: {cancel_ex}")
+            
+            if cancelled_count == 0:
+                logger.info(f"ℹ️ No active stop-loss orders found for {symbol}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error cancelling stop-loss orders: {e}")
+
+    async def _save_exit_order_record(self, exit_order: Dict[str, Any], setup_id: str,
+                                     algo_setup: Dict[str, Any], symbol: str, exit_side: str,
+                                     lot_size: int) -> None:
+        """Save exit order record to database."""
+        try:
             order_data = {
                 "order_id": exit_order.get("id"),
                 "algo_setup_id": setup_id,
@@ -517,14 +546,20 @@ class PositionManager:
                 "extra_data": exit_order,
             }
             await create_order_record(order_data)
+        except Exception as e:
+            logger.error(f"❌ Error saving exit order record: {e}")
 
-            # Cancel stop-loss after market exit
-
+    async def _finalize_exit(self, setup_id: str, symbol: str, current_position: str,
+                           lot_size: int, exit_price: float, sirusu_signal_text: str) -> None:
+        """Finalize exit by updating activity and cleaning up."""
+        try:
+            # Update activity with PNL
             activity = await get_open_activity_by_setup(setup_id)
-            if activity and exit_price:
+            if activity:
                 entry_price = activity.get("entry_price", 0)
                 pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
                 pnl_inr = pnl * settings.usd_to_inr_rate
+                
                 await update_algo_activity(str(activity["_id"]), {
                     "exit_time": datetime.utcnow(),
                     "exit_price": exit_price,
@@ -533,6 +568,8 @@ class PositionManager:
                     "sirusu_exit_signal": sirusu_signal_text,
                     "is_closed": True
                 })
+            
+            # Clean up setup
             await update_algo_setup(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
@@ -542,21 +579,16 @@ class PositionManager:
                 "position_lock_acquired": False
             })
             
+            # Close position records
             db = await get_db()
             await db.positions.update_many(
                 {"algo_setup_id": setup_id, "status": "open"},
                 {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
             )
             await release_position_lock(db, symbol, setup_id)
-        
-            logger.info(f"✅ Exit completed successfully")
-            return True
-        
+            
         except Exception as e:
-            logger.error(f"❌ Exception in execute_exit: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return False
+            logger.error(f"❌ Error finalizing exit: {e}")
 
     def _calculate_pnl(self, entry_price: float, exit_price: float, 
                       lot_size: int, position_side: str) -> float:
