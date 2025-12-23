@@ -190,22 +190,11 @@ class DualSuperTrendStrategy:
 
             # 3. Gather latest candle info and prevent duplicate processing
             actual_count = len(candles)
-
-            # ✅ Use CLOSED candles for indicator calculation
-            candle_status = self._is_candle_closed(candles, timeframe)
-            if not candle_status["is_closed"]:
-                candles_for_indicators = candles[:-1]  # drop forming candle
-            else:
-                candles_for_indicators = candles
-
-            closed_count = len(candles_for_indicators)  # ← ADD THIS LINE
-
-            latest_candle = candles_for_indicators[-1]  # latest CLOSED candle
+            latest_candle = candles[-1]
             latest_candle_time = latest_candle.get("time", 0)
             prev_high = float(latest_candle.get("high", 0))
             prev_low = float(latest_candle.get("low", 0))
             last_processed = self._last_processed_candle_time.get(cache_key)
-
             if last_processed is not None and latest_candle_time == last_processed:
                 if not force_recalc:
                     logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
@@ -227,22 +216,21 @@ class DualSuperTrendStrategy:
                     
             # 5. Sufficient data?
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
-            if closed_count < min_required:
-                logger.error(f"❌ INSUFFICIENT DATA: got {closed_count}, need at least {min_required}")
+            if actual_count < min_required:
+                logger.error(f"❌ INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
-
             if actual_count < required_candles:
                 logger.warning(f"⚠️ Got {actual_count} candles, wanted {required_candles}")
 
             # 6. Calculate Perusu & Sirusu
             logger.info(f"🔵 Calculating PERUSU (ATR period={PERUSU_ATR_LENGTH}, factor={PERUSU_FACTOR})")
-            perusu_result = self.perusu.calculate(candles_for_indicators)
+            perusu_result = self.perusu.calculate(candles)
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
         
             logger.info(f"🔴 Calculating SIRUSU (ATR period={SIRUSU_ATR_LENGTH}, factor={SIRUSU_FACTOR})")
-            sirusu_result = self.sirusu.calculate(candles_for_indicators)
+            sirusu_result = self.sirusu.calculate(candles)
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
                 return None
@@ -253,7 +241,7 @@ class DualSuperTrendStrategy:
                 "timeframe": timeframe,
                 "resolution": resolution,
                 "calculated_at": current_time,
-                "candles_used": closed_count,              # <-- use closed candles
+                "candles_used": actual_count,
                 "candles_requested": required_candles,
                 "candle_status": candle_status,
                 "perusu": perusu_result,
