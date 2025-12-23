@@ -133,16 +133,16 @@ class SuperTrend:
         
         # Subsequent RMA values using exponential smoothing
         # ATR[n] = ATR[n-1] × (1 - α) + TR[n] × α
-        for i in range(self.atr_length, len(df)):
-            atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
+            for i in range(self.atr_length, len(df)):
+                atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
         
         # Forward fill for initial NaN values, backfill for any remaining
         atr_series = pd.Series(atr, index=df.index)
         # ✅ Match TradingView: forward-fill only, no backfill
         atr_series = atr_series.replace(0, np.nan).ffill()
         
-        if atr_series.isna().all():
-            return atr_series
+        #if atr_series.isna().all():
+            #return atr_series
         return atr_series
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -179,6 +179,14 @@ class SuperTrend:
             
             # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
+                        # ✅ Guard: ATR must be valid at last index
+            if atr is None or len(atr) != len(df) or atr.isna().iloc[-1]:
+                logger.warning(
+                    f"⚠️ ATR invalid for {self.name}: "
+                    f"len={len(atr) if atr is not None else 'None'}, "
+                    f"last={atr.iloc[-1] if atr is not None else 'None'}"
+                )
+                return None
 
             if atr.isna().iloc[-1]:
                 logger.warning(f"⚠️ ATR latest value is NaN for {self.name}, insufficient data.")
