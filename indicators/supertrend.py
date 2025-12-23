@@ -170,9 +170,15 @@ class SuperTrend:
         try:
             # ===== STEP 1: Convert to DataFrame =====
             df = self.candles_to_dataframe(candles)
+
+            # ✅ NEW: clean NaN OHLC rows here
+            df = df.dropna(subset=["high", "low", "close"]).reset_index(drop=True)
             
             if len(df) < self.atr_length + 1:
-                logger.warning(f"⚠️ Insufficient data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
+                logger.warning(
+                    f"⚠️ Insufficient data for {self.name} after dropping NaNs: "
+                    f"need {self.atr_length + 1}, got {len(df)}"
+                )
                 return None
             
             # ===== STEP 2: Calculate ATR using RMA =====
