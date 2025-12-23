@@ -74,12 +74,14 @@ def create_application() -> Application:
     application.add_handler(api_conv_handler)
     
     # ✅ FIX: Indicators conversation handler (CORRECTED ENTRY POINT)
+    # ✅ FIX: Indicators conversation handler
     indicator_conv_handler = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")
+            CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_")
         ],
         states={
             INDICATOR_ASSET: [
+                CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_"),  # ← ADDED
                 MessageHandler(filters.TEXT & ~filters.COMMAND, indicator_asset_received),
                 CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
             ]
@@ -88,7 +90,8 @@ def create_application() -> Application:
             CommandHandler("cancel", cancel_indicator),
             CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
         ],
-        per_message=False
+        per_message=False,
+        allow_reentry=True  # ← ADDED
     )
     application.add_handler(indicator_conv_handler)
     
@@ -140,7 +143,7 @@ def create_application() -> Application:
     
     # ✅ Indicators handlers (ALL handlers needed)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
-    application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
+    #application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
     application.add_handler(CallbackQueryHandler(indicator_refresh_callback, pattern="^indicator_refresh$"))
     # Note: indicator_timeframe_callback is handled by ConversationHandler entry point above
     
