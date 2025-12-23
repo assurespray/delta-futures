@@ -227,9 +227,10 @@ class DualSuperTrendStrategy:
                     
             # 5. Sufficient data?
             min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
-            if actual_count < min_required:
-                logger.error(f"❌ INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
+            if closed_count < min_required:
+                logger.error(f"❌ INSUFFICIENT DATA: got {closed_count}, need at least {min_required}")
                 return None
+
             if actual_count < required_candles:
                 logger.warning(f"⚠️ Got {actual_count} candles, wanted {required_candles}")
 
