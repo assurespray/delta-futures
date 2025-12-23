@@ -127,7 +127,7 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
     
-    return INDICATOR_ASSET
+    #return INDICATOR_ASSET
 
 
 async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
