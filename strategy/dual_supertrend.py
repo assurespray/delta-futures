@@ -233,13 +233,13 @@ class DualSuperTrendStrategy:
 
             # 6. Calculate Perusu & Sirusu
             logger.info(f"🔵 Calculating PERUSU (ATR period={PERUSU_ATR_LENGTH}, factor={PERUSU_FACTOR})")
-            perusu_result = self.perusu.calculate(candles)
+            perusu_result = self.perusu.calculate(candles_for_indicators)
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
         
             logger.info(f"🔴 Calculating SIRUSU (ATR period={SIRUSU_ATR_LENGTH}, factor={SIRUSU_FACTOR})")
-            sirusu_result = self.sirusu.calculate(candles)
+            sirusu_result = self.sirusu.calculate(candles_for_indicators)
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
                 return None
@@ -250,7 +250,7 @@ class DualSuperTrendStrategy:
                 "timeframe": timeframe,
                 "resolution": resolution,
                 "calculated_at": current_time,
-                "candles_used": actual_count,
+                "candles_used": closed_count,              # <-- use closed candles
                 "candles_requested": required_candles,
                 "candle_status": candle_status,
                 "perusu": perusu_result,
