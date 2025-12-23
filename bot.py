@@ -74,25 +74,13 @@ def create_application() -> Application:
     application.add_handler(api_conv_handler)
     
     # ✅ FIX: Indicators conversation handler (CORRECTED ENTRY POINT)
-    # ============================================================
-    # INDICATORS CONVERSATION HANDLER
-    # ============================================================
-
-    # Step 1: Register the main menu callback FIRST (outside conversation)
-    application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
-
-    # Step 2: Register the conversation handler
     indicator_conv_handler = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_")
+            CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")
         ],
         states={
             INDICATOR_ASSET: [
-                # Handle timeframe button clicks
-                CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_"),
-                # Handle asset text input
                 MessageHandler(filters.TEXT & ~filters.COMMAND, indicator_asset_received),
-                # Handle back button
                 CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
             ]
         },
@@ -100,14 +88,10 @@ def create_application() -> Application:
             CommandHandler("cancel", cancel_indicator),
             CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
         ],
-        per_message=False,
-        allow_reentry=True
+        per_message=False
     )
     application.add_handler(indicator_conv_handler)
-
-    # Step 3: Register refresh handler (works after conversation ends)
-    application.add_handler(CallbackQueryHandler(indicator_refresh_callback, pattern="^indicator_refresh$"))
-   
+    
     # Algo Setup conversation handler
     algo_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(algo_add_start, pattern="^algo_add_start$")],
@@ -156,7 +140,7 @@ def create_application() -> Application:
     
     # ✅ Indicators handlers (ALL handlers needed)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
-    #application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
+    application.add_handler(CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"))
     application.add_handler(CallbackQueryHandler(indicator_refresh_callback, pattern="^indicator_refresh$"))
     # Note: indicator_timeframe_callback is handled by ConversationHandler entry point above
     
