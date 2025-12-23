@@ -198,6 +198,8 @@ class DualSuperTrendStrategy:
             else:
                 candles_for_indicators = candles
 
+            closed_count = len(candles_for_indicators)  # ← ADD THIS LINE
+
             latest_candle = candles_for_indicators[-1]  # latest CLOSED candle
             latest_candle_time = latest_candle.get("time", 0)
             prev_high = float(latest_candle.get("high", 0))
