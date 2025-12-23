@@ -87,6 +87,9 @@ async def indicator_select_callback(update: Update, context: ContextTypes.DEFAUL
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    # ✅ CRITICAL: Return state so conversation continues
+    return INDICATOR_ASSET
 
 
 async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
