@@ -130,17 +130,16 @@ class SuperTrend:
         # First RMA = SMA of first 'length' values
         if len(df) >= self.atr_length:
             atr[self.atr_length - 1] = np.mean(tr[:self.atr_length])
-            # Subsequent RMA values using exponential smoothing
-            for i in range(self.atr_length, len(df)):
-                atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
+        
+        # Subsequent RMA values using exponential smoothing
+        # ATR[n] = ATR[n-1] × (1 - α) + TR[n] × α
+        for i in range(self.atr_length, len(df)):
+            atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
         
         # Forward fill for initial NaN values, backfill for any remaining
         atr_series = pd.Series(atr, index=df.index)
-        # ✅ Match TradingView: forward-fill only, no backfill
-        atr_series = atr_series.replace(0, np.nan).ffill()
+        atr_series = atr_series.replace(0, np.nan).ffill().bfill()
         
-        #if atr_series.isna().all():
-            #return atr_series
         return atr_series
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -170,27 +169,13 @@ class SuperTrend:
         try:
             # ===== STEP 1: Convert to DataFrame =====
             df = self.candles_to_dataframe(candles)
-
-            # ✅ NEW: clean NaN OHLC rows here
-            df = df.dropna(subset=["high", "low", "close"]).reset_index(drop=True)
             
             if len(df) < self.atr_length + 1:
-                logger.warning(
-                    f"⚠️ Insufficient data for {self.name} after dropping NaNs: "
-                    f"need {self.atr_length + 1}, got {len(df)}"
-                )
+                logger.warning(f"⚠️ Insufficient data for {self.name}: need {self.atr_length + 1}, got {len(df)}")
                 return None
             
             # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
-            # ✅ Guard: ATR must be valid at last index
-            if atr is None or len(atr) != len(df) or atr.isna().iloc[-1]:
-                logger.warning(
-                    f"⚠️ ATR invalid for {self.name}: "
-                    f"len={len(atr) if atr is not None else 'None'}, "
-                    f"last={atr.iloc[-1] if atr is not None else 'None'}"
-                )
-                return None
             
             # ===== STEP 3: Calculate Basic Upper/Lower Bands (vectorized) =====
             # HL2 = (High + Low) / 2
@@ -240,37 +225,41 @@ class SuperTrend:
                 else:
                     final_lb[i] = final_lb[i-1]
             
-            # ===== STEP 5: Determine Trend & SuperTrend Line (direction-based) =====
+            # ===== STEP 5: Determine Trend & SuperTrend Line =====
             supertrend = np.zeros(n)
             signal = np.zeros(n, dtype=int)
-            direction = np.zeros(n, dtype=int)  # 1 = uptrend, -1 = downtrend
-
-            # Init first bar
+            
+            # Initialize first value
             if close_vals[0] > final_ub[0]:
-                direction[0] = SIGNAL_UPTREND
                 supertrend[0] = final_lb[0]
+                signal[0] = SIGNAL_UPTREND
             else:
-                direction[0] = SIGNAL_DOWNTREND
                 supertrend[0] = final_ub[0]
-            signal[0] = direction[0]
-
+                signal[0] = SIGNAL_DOWNTREND
+            
+            # ✅ Calculate subsequent values based on trend
             for i in range(1, n):
-                # if previous direction was downtrend
-                if direction[i-1] == SIGNAL_DOWNTREND:
+                # Previous bar was in downtrend (SuperTrend = Final UB)
+                if supertrend[i-1] == final_ub[i-1]:
                     if close_vals[i] > final_ub[i]:
-                        direction[i] = SIGNAL_UPTREND
+                        # Flip to uptrend
                         supertrend[i] = final_lb[i]
+                        signal[i] = SIGNAL_UPTREND
                     else:
-                        direction[i] = SIGNAL_DOWNTREND
+                        # Stay in downtrend
                         supertrend[i] = final_ub[i]
-                else:  # previous direction was uptrend
+                        signal[i] = SIGNAL_DOWNTREND
+                
+                # Previous bar was in uptrend (SuperTrend = Final LB)
+                else:
                     if close_vals[i] < final_lb[i]:
-                        direction[i] = SIGNAL_DOWNTREND
+                        # Flip to downtrend
                         supertrend[i] = final_ub[i]
+                        signal[i] = SIGNAL_DOWNTREND
                     else:
-                        direction[i] = SIGNAL_UPTREND
+                        # Stay in uptrend
                         supertrend[i] = final_lb[i]
-                signal[i] = direction[i]
+                        signal[i] = SIGNAL_UPTREND
             
             # ===== STEP 6: Extract Latest Values =====
             latest_idx = -1
