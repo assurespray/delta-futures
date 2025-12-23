@@ -143,6 +143,7 @@ class SuperTrend:
         
         if atr_series.isna().all():
             return atr_series
+        return atr_series
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
