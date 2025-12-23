@@ -190,11 +190,20 @@ class DualSuperTrendStrategy:
 
             # 3. Gather latest candle info and prevent duplicate processing
             actual_count = len(candles)
-            latest_candle = candles[-1]
+
+            # ✅ Use CLOSED candles for indicator calculation
+            candle_status = self._is_candle_closed(candles, timeframe)
+            if not candle_status["is_closed"]:
+                candles_for_indicators = candles[:-1]  # drop forming candle
+            else:
+                candles_for_indicators = candles
+
+            latest_candle = candles_for_indicators[-1]  # latest CLOSED candle
             latest_candle_time = latest_candle.get("time", 0)
             prev_high = float(latest_candle.get("high", 0))
             prev_low = float(latest_candle.get("low", 0))
             last_processed = self._last_processed_candle_time.get(cache_key)
+
             if last_processed is not None and latest_candle_time == last_processed:
                 if not force_recalc:
                     logger.debug(f"🔁 Already processed candle {latest_candle_time} for {symbol} {timeframe}, skipping.")
