@@ -130,9 +130,7 @@ class SuperTrend:
         # First RMA = SMA of first 'length' values
         if len(df) >= self.atr_length:
             atr[self.atr_length - 1] = np.mean(tr[:self.atr_length])
-        
-        # Subsequent RMA values using exponential smoothing
-        # ATR[n] = ATR[n-1] × (1 - α) + TR[n] × α
+            # Subsequent RMA values using exponential smoothing
             for i in range(self.atr_length, len(df)):
                 atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
         
@@ -179,17 +177,13 @@ class SuperTrend:
             
             # ===== STEP 2: Calculate ATR using RMA =====
             atr = self.calculate_atr(df)
-                        # ✅ Guard: ATR must be valid at last index
+            # ✅ Guard: ATR must be valid at last index
             if atr is None or len(atr) != len(df) or atr.isna().iloc[-1]:
                 logger.warning(
                     f"⚠️ ATR invalid for {self.name}: "
                     f"len={len(atr) if atr is not None else 'None'}, "
                     f"last={atr.iloc[-1] if atr is not None else 'None'}"
                 )
-                return None
-
-            if atr.isna().iloc[-1]:
-                logger.warning(f"⚠️ ATR latest value is NaN for {self.name}, insufficient data.")
                 return None
             
             # ===== STEP 3: Calculate Basic Upper/Lower Bands (vectorized) =====
