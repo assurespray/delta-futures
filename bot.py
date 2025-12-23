@@ -74,6 +74,7 @@ def create_application() -> Application:
     application.add_handler(api_conv_handler)
     
     # ✅ FIX: Indicators conversation handler (CORRECTED ENTRY POINT)
+    # ✅ Indicators conversation handler
     indicator_conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(indicator_timeframe_callback, pattern="^indicator_tf_")
