@@ -240,41 +240,37 @@ class SuperTrend:
                 else:
                     final_lb[i] = final_lb[i-1]
             
-            # ===== STEP 5: Determine Trend & SuperTrend Line =====
+            # ===== STEP 5: Determine Trend & SuperTrend Line (direction-based) =====
             supertrend = np.zeros(n)
             signal = np.zeros(n, dtype=int)
-            
-            # Initialize first value
+            direction = np.zeros(n, dtype=int)  # 1 = uptrend, -1 = downtrend
+
+            # Init first bar
             if close_vals[0] > final_ub[0]:
+                direction[0] = SIGNAL_UPTREND
                 supertrend[0] = final_lb[0]
-                signal[0] = SIGNAL_UPTREND
             else:
+                direction[0] = SIGNAL_DOWNTREND
                 supertrend[0] = final_ub[0]
-                signal[0] = SIGNAL_DOWNTREND
-            
-            # ✅ Calculate subsequent values based on trend
+            signal[0] = direction[0]
+
             for i in range(1, n):
-                # Previous bar was in downtrend (SuperTrend = Final UB)
-                if supertrend[i-1] == final_ub[i-1]:
+                # if previous direction was downtrend
+                if direction[i-1] == SIGNAL_DOWNTREND:
                     if close_vals[i] > final_ub[i]:
-                        # Flip to uptrend
+                        direction[i] = SIGNAL_UPTREND
                         supertrend[i] = final_lb[i]
-                        signal[i] = SIGNAL_UPTREND
                     else:
-                        # Stay in downtrend
+                        direction[i] = SIGNAL_DOWNTREND
                         supertrend[i] = final_ub[i]
-                        signal[i] = SIGNAL_DOWNTREND
-                
-                # Previous bar was in uptrend (SuperTrend = Final LB)
-                else:
+                else:  # previous direction was uptrend
                     if close_vals[i] < final_lb[i]:
-                        # Flip to downtrend
+                        direction[i] = SIGNAL_DOWNTREND
                         supertrend[i] = final_ub[i]
-                        signal[i] = SIGNAL_DOWNTREND
                     else:
-                        # Stay in uptrend
+                        direction[i] = SIGNAL_UPTREND
                         supertrend[i] = final_lb[i]
-                        signal[i] = SIGNAL_UPTREND
+                signal[i] = direction[i]
             
             # ===== STEP 6: Extract Latest Values =====
             latest_idx = -1
