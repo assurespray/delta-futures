@@ -141,7 +141,8 @@ class SuperTrend:
         # ✅ Match TradingView: forward-fill only, no backfill
         atr_series = atr_series.replace(0, np.nan).ffill()
         
-        return atr_series
+        if atr_series.isna().all():
+            return atr_series
     
     def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
