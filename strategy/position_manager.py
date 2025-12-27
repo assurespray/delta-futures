@@ -490,11 +490,38 @@ class PositionManager:
 
     async def _cancel_stop_loss_orders(self, client: DeltaExchangeClient, product_id: int,
                                      symbol: str, stop_loss_order_id: Optional[str]) -> None:
-        """Cancel any active stop-loss orders."""
+        """Cancel any active stop-loss orders - ENHANCED to specifically target the position's stop-loss."""
         try:
             from services.reconciliation import filter_orders_by_symbol_and_product_id
             from api.orders import cancel_order
             
+            # ✅ FIRST: Try to cancel the specific stop-loss order associated with this position
+            if stop_loss_order_id:
+                logger.info(f"🎯 Attempting to cancel specific stop-loss order: {stop_loss_order_id}")
+                try:
+                    # Check if the order exists and is cancellable
+                    order_status = await get_order_status_by_id(client, stop_loss_order_id, product_id)
+                    logger.info(f"   Order {stop_loss_order_id} status: {order_status}")
+                    
+                    if order_status in ("pending", "open", "untriggered"):
+                        cancelled = await cancel_order(client, stop_loss_order_id)
+                        if cancelled:
+                            logger.info(f"✅ Successfully cancelled stop-loss order {stop_loss_order_id}")
+                            await update_order_record(stop_loss_order_id, {
+                                "status": "cancelled",
+                                "updated_at": datetime.utcnow()
+                            })
+                        else:
+                            logger.warning(f"⚠️ Cancel request failed for stop-loss order {stop_loss_order_id}")
+                    elif order_status == "filled":
+                        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} already filled")
+                    else:
+                        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} in terminal state: {order_status}")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not cancel specific stop-loss order {stop_loss_order_id}: {e}")
+            
+            # ✅ SECOND: Scan for any other active stop-loss orders for this symbol
             open_orders = await get_open_orders(client, product_id)
             matched_orders = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
             
@@ -505,22 +532,28 @@ class PositionManager:
                     order.get("state") in ("pending", "open", "untriggered")):
                     
                     sl_order_id = order.get("id")
-                    logger.info(f"🎯 Found active stop-loss order: {sl_order_id}")
+                    # Skip if this is the one we already tried to cancel
+                    if sl_order_id == stop_loss_order_id:
+                        continue
+                        
+                    logger.info(f"🎯 Found additional active stop-loss order: {sl_order_id}")
                     
                     try:
                         cancelled = await cancel_order(client, sl_order_id)
                         if cancelled:
                             cancelled_count += 1
-                            logger.info(f"✅ Cancelled stop-loss order {sl_order_id}")
+                            logger.info(f"✅ Cancelled additional stop-loss order {sl_order_id}")
                             await update_order_record(sl_order_id, {
                                 "status": "cancelled",
                                 "updated_at": datetime.utcnow()
                             })
                     except Exception as cancel_ex:
-                        logger.warning(f"⚠️ Could not cancel SL {sl_order_id}: {cancel_ex}")
+                        logger.warning(f"⚠️ Could not cancel additional SL {sl_order_id}: {cancel_ex}")
             
-            if cancelled_count == 0:
-                logger.info(f"ℹ️ No active stop-loss orders found for {symbol}")
+            if stop_loss_order_id:
+                logger.info(f"✅ Stop-loss cancellation process completed for order {stop_loss_order_id}")
+            else:
+                logger.info(f"ℹ️ No specific stop-loss order ID provided for {symbol}")
                 
         except Exception as e:
             logger.error(f"❌ Error cancelling stop-loss orders: {e}")
