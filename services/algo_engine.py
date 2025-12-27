@@ -136,45 +136,17 @@ class AlgoEngine:
             pending_direction_signal = algo_setup.get('pending_entry_direction_signal')  # 1=long, -1=short
             
             if not current_position and pending_order_id and product_id:
-                gone = await is_order_gone(client, pending_order_id, product_id)
-                if gone:
-                    logger.info(f"✅ Pending entry order {pending_order_id} was FILLED or CANCELLED (gone from orderbook/history)")
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": None,
-                        "pending_entry_direction_signal": None
-                    })
-                    pending_order_status = "filled"
-                else:
-                    # Check if sirusu flipped (use flip_info from cache)
-                    sirusu_flipped = False
-                    if flip_info and flip_info.get("sirusu_flip") and pending_direction_signal:
-                        # Pending long (1) but Sirusu now bearish (-1)
-                        if pending_direction_signal == 1 and sirusu_data['signal'] == -1:
-                            sirusu_flipped = True
-                        elif pending_direction_signal == -1 and sirusu_data['signal'] == 1:
-                            sirusu_flipped = True
-                    
-                    if sirusu_flipped:
-                        pending_side_text = "LONG" if pending_direction_signal == 1 else "SHORT"
-                        logger.info(f"🔄 Sirusu flipped against pending {pending_side_text} order - cancelling {pending_order_id}")
-                        await cancel_order(client, pending_order_id)
-                        await update_algo_setup(setup_id, {
-                            "pending_entry_order_id": None,
-                            "pending_entry_direction_signal": None,  # <--- ADD THIS LINE
-                        })
-                        pending_order_status = "reversed"
-                    else:
-                        pending_order_status = "pending"
-
-            if not current_position and algo_setup.get("pending_entry_order_id"):
-                sirusu_value = sirusu_data['supertrend_value']
-                filled = await self.position_manager.check_entry_order_filled(
-                    client, algo_setup, sirusu_value
+                # Use OrderMonitor's comprehensive pending order check with Sirusu reversal detection
+                pending_order_status = await self.order_monitor.check_pending_entry_order(
+                    client=client,
+                    algo_setup=algo_setup,
+                    current_perusu_signal=perusu_data['signal'],
+                    current_sirusu_signal=sirusu_data['signal'],
+                    sirusu_value=sirusu_data['supertrend_value'],
+                    logger_bot=self.logger_bot
                 )
-                if filled:
-                    updated_setup = await get_algo_setup_by_id(setup_id)
-                    current_position = updated_setup.get('current_position')
-                    algo_setup.update(updated_setup)
+
+            # Remove redundant check since OrderMonitor.check_pending_entry_order already handles this
 
             if not current_position:
                 if pending_order_status == "filled":
