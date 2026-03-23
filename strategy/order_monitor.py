@@ -3,8 +3,8 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from api.delta_client import DeltaExchangeClient
-from api.orders import get_order_by_id, cancel_order, place_stop_loss_order
-from database.crud import update_algo_setup, create_algo_activity
+from api.orders import get_order_by_id, cancel_order, place_stop_loss_order, is_order_gone
+from database.crud import update_algo_setup, create_algo_activity, get_indicator_cache
 
 logger = logging.getLogger(__name__)
 
