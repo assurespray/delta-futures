@@ -138,8 +138,9 @@ class OrderMonitor:
         logger.info(f"   Entry: {entry_side.upper()} {lot_size} @ ${entry_price:.5f}")
         
         # Place stop-loss if enabled
+        stop_loss_order_id = None
         if algo_setup.get("additional_protection", False):
-            await self._place_stop_loss(
+            stop_loss_order_id = await self._place_stop_loss(
                 client, algo_setup, entry_side, sirusu_value
             )
         
@@ -168,6 +169,7 @@ class OrderMonitor:
             "pending_entry_order_id": None,
             "entry_trigger_price": None,
             "pending_entry_direction_signal": None,
+            "stop_loss_order_id": stop_loss_order_id,
             "last_signal_time": datetime.utcnow()
         })
         
@@ -264,9 +266,12 @@ class OrderMonitor:
         )
         
         if sl_order:
-            logger.info(f"✅ [MONITOR] Stop-loss placed (ID: {sl_order.get('id')})")
+            sl_order_id = sl_order.get('id')
+            logger.info(f"✅ [MONITOR] Stop-loss placed (ID: {sl_order_id})")
+            return sl_order_id
         else:
             logger.warning(f"⚠️ [MONITOR] Failed to place stop-loss")
+            return None
     
     async def _clean_pending_order(self, setup_id: str):
         """

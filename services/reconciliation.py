@@ -14,7 +14,7 @@ from database.crud import (
 from api.delta_client import DeltaExchangeClient
 from api.orders import is_order_gone   # you already use this elsewhere
 from api.positions import get_position_by_symbol
-from api.orders import get_open_orders, place_stop_loss_order
+from api.orders import get_open_orders, place_stop_loss_order, cancel_order
 from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from utils.timeframe import get_next_boundary_time
@@ -85,6 +85,31 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             # Check if no position exists
             if position_size == 0:
                 logger.info(f"No open position for {symbol}, cleaning up setup")
+                # Cancel any orphaned stop-loss orders before clearing DB
+                stored_sl_id = setup.get("stop_loss_order_id")
+                if stored_sl_id and product_id:
+                    logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} for closed position {symbol}")
+                    try:
+                        await cancel_order(client, stored_sl_id)
+                    except Exception as e:
+                        logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
+                # Also scan for any untracked stop-loss orders on exchange
+                if product_id:
+                    try:
+                        open_orders = await get_open_orders(client, product_id)
+                        for order in (open_orders or []):
+                            if (order.get("stop_order_type") == "stop_loss_order"
+                                    and order.get("reduce_only")
+                                    and order.get("state") in ("pending", "open", "untriggered")
+                                    and order.get("product_id") == product_id):
+                                orphan_id = order.get("id")
+                                logger.info(f"🧹 [RECONCILIATION] Cancelling untracked orphaned SL {orphan_id} for {symbol}")
+                                try:
+                                    await cancel_order(client, orphan_id)
+                                except Exception as e:
+                                    logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {orphan_id}: {e}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [RECONCILIATION] Failed to scan for orphaned SLs for {symbol}: {e}")
                 await update_algo_setup(setup_id, {
                     "current_position": None,
                     "last_entry_price": None,
@@ -122,6 +147,14 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
             position_size = position.get("size", 0) if position else 0
             if position_size == 0:
+                # Cancel any orphaned stop-loss orders before clearing DB
+                stored_sl_id = setup.get("stop_loss_order_id")
+                if stored_sl_id and product_id:
+                    logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} (2nd check) for {symbol}")
+                    try:
+                        await cancel_order(client, stored_sl_id)
+                    except Exception as e:
+                        logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
                 await update_algo_setup(setup_id, {
                     "current_position": None,
                     "last_entry_price": None,

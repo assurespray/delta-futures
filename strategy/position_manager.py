@@ -444,6 +444,9 @@ class PositionManager:
                     })
                 else:
                     logger.warning(f"⚠️ SL order {stop_loss_order_id} not filled - position closed manually")
+                    # Cancel orphaned stop-loss order on exchange
+                    logger.info(f"🧹 Cancelling orphaned stop-loss order {stop_loss_order_id}...")
+                    await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
             
             # Update activity
             activity = await get_open_activity_by_setup(setup_id)
