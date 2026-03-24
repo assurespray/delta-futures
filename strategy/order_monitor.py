@@ -3,8 +3,15 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from api.delta_client import DeltaExchangeClient
-from api.orders import get_order_by_id, cancel_order, place_stop_loss_order, is_order_gone
-from database.crud import update_algo_setup, create_algo_activity, get_indicator_cache
+from api.orders import (
+    get_order_by_id, cancel_order, place_stop_loss_order,
+    is_order_gone, get_order_status_by_id, get_open_orders,
+    cancel_all_orders
+)
+from database.crud import (
+    update_algo_setup, create_algo_activity, get_indicator_cache,
+    update_order_record, release_position_lock, get_db
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +33,12 @@ class OrderMonitor:
         logger_bot
     ) -> Optional[str]:
         """
-        Check pending entry order status (robust: using open+history only).
-        Cancels on SIRUSU reversal.
+        Check pending entry order status.
+        FIXED: Uses exact order status (not just is_order_gone).
+        Cancels BOTH entry AND stop-loss on SIRUSU reversal.
+        Releases position lock on invalidation.
 
-        Returns: "filled", "reversed", "pending", or None
+        Returns: "filled", "cancelled", "reversed", "pending", or None
         """
         pending_order_id = algo_setup.get('pending_entry_order_id')
         if not pending_order_id:
@@ -37,27 +46,41 @@ class OrderMonitor:
 
         setup_id = str(algo_setup['_id'])
         setup_name = algo_setup['setup_name']
-        pending_side = algo_setup.get('pending_entry_side')
+        symbol = algo_setup.get('asset')
+        pending_side = algo_setup.get('pending_entry_side') or \
+            ("long" if algo_setup.get('pending_entry_direction_signal') == 1 else "short")
         product_id = algo_setup.get('product_id')
+        stop_loss_order_id = algo_setup.get('stop_loss_order_id')
 
         logger.info(f"📋 Checking pending {pending_side} entry order: {pending_order_id}")
 
         try:
-            # Robust order state lookup
-            # Use only open orders and order history!
-            is_filled_or_gone = await is_order_gone(client, pending_order_id, product_id)
+            # FIXED: Get EXACT order status instead of just is_order_gone
+            order_status = await get_order_status_by_id(client, pending_order_id, product_id)
+            logger.info(f"   Order {pending_order_id} exact status: {order_status}")
 
-            if is_filled_or_gone:
-                logger.info(f"✅ Pending {pending_side} entry order FILLED or CANCELLED (gone from orderbook)")
-                await update_algo_setup(setup_id, {
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None
-                })
-                # You probably want to handle the "filled" case with follow-up DB/activity logic here
-                # (see _handle_filled_order, but with fresh history fetch if needed)
+            if order_status == "filled":
+                logger.info(f"✅ Pending {pending_side} entry order FILLED")
+                # Don't clear state here - let check_entry_order_filled handle the fill logic
                 return "filled"
 
-            # Still live - get last placed Sirusu signal for reversal logic
+            if order_status in ("cancelled", "rejected"):
+                # Order was already cancelled (by us or exchange) - clean up fully
+                logger.warning(f"⚠️ Pending entry order {pending_order_id} is {order_status}")
+                await self._invalidate_setup(
+                    client, setup_id, setup_name, symbol, product_id,
+                    pending_order_id, stop_loss_order_id,
+                    f"Entry order {order_status}", logger_bot
+                )
+                return "cancelled"
+
+            if order_status == "not_found":
+                # Order disappeared - check exchange position to decide
+                logger.warning(f"⚠️ Order {pending_order_id} not found anywhere")
+                # Leave it to the fill monitor to resolve via position check
+                return "pending"
+
+            # Order is still live (open/untriggered) - check for Sirusu reversal
             cached_sirusu = await get_indicator_cache(setup_id, "sirusu")
             last_sirusu_signal = cached_sirusu.get('last_signal') if cached_sirusu else None
 
@@ -69,28 +92,20 @@ class OrderMonitor:
             if pending_side == "long":
                 if current_sirusu_signal == -1 and last_sirusu_signal == 1:
                     sirusu_flipped = True
-                    logger.warning(f"🔄 SIRUSU REVERSAL: Uptrend → Downtrend")
+                    logger.warning(f"🔄 SIRUSU REVERSAL: Uptrend -> Downtrend")
             elif pending_side == "short":
                 if current_sirusu_signal == 1 and last_sirusu_signal == -1:
                     sirusu_flipped = True
-                    logger.warning(f"🔄 SIRUSU REVERSAL: Downtrend → Uptrend")
+                    logger.warning(f"🔄 SIRUSU REVERSAL: Downtrend -> Uptrend")
 
             if sirusu_flipped:
-                logger.warning(f"❌ Cancelling pending {pending_side} order - Sirusu signal reversed")
-                cancel_success = await cancel_order(client, pending_order_id)
-                if cancel_success:
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": None,
-                        "pending_entry_side": None
-                    })
-                    await logger_bot.send_info(
-                        f"⚠️ {setup_name}: {pending_side.upper()} entry cancelled\n"
-                        f"Reason: Sirusu signal reversed - trade no longer valid"
-                    )
-                    return "reversed"
-                else:
-                    logger.error(f"❌ Failed to cancel order {pending_order_id}")
-                    return "pending"
+                logger.warning(f"❌ Sirusu flipped - invalidating {pending_side} setup for {setup_name}")
+                await self._invalidate_setup(
+                    client, setup_id, setup_name, symbol, product_id,
+                    pending_order_id, stop_loss_order_id,
+                    "Sirusu signal reversed - trade no longer valid", logger_bot
+                )
+                return "reversed"
             else:
                 logger.info(f"⏳ Order still pending - Sirusu has not reversed")
                 logger.info(f"   Last Sirusu: {last_sirusu_signal}, Current: {current_sirusu_signal}")
@@ -101,6 +116,114 @@ class OrderMonitor:
             import traceback
             logger.error(traceback.format_exc())
             return None
+
+    async def _invalidate_setup(
+        self,
+        client,
+        setup_id: str,
+        setup_name: str,
+        symbol: str,
+        product_id: int,
+        pending_order_id,
+        stop_loss_order_id,
+        reason: str,
+        logger_bot
+    ):
+        """
+        Fully invalidate a pending trade setup:
+        1. Cancel the pending entry order on exchange
+        2. Cancel any stop-loss order on exchange
+        3. Clear all pending state from database
+        4. Release position lock
+        5. Notify via Telegram
+        """
+        cancelled_entry = False
+        cancelled_sl = False
+
+        # 1. Cancel the pending entry order
+        if pending_order_id:
+            logger.info(f"🗑️ Cancelling pending entry order {pending_order_id}...")
+            try:
+                cancelled_entry = await cancel_order(client, pending_order_id)
+                if cancelled_entry:
+                    logger.info(f"✅ Entry order {pending_order_id} cancelled")
+                    await update_order_record(pending_order_id, {
+                        "status": "cancelled",
+                        "updated_at": datetime.utcnow()
+                    })
+                else:
+                    logger.warning(f"⚠️ Failed to cancel entry order {pending_order_id}")
+            except Exception as e:
+                logger.error(f"❌ Error cancelling entry order: {e}")
+
+        # 2. Cancel the stop-loss order (placed at the same time as entry)
+        if stop_loss_order_id:
+            logger.info(f"🗑️ Cancelling stop-loss order {stop_loss_order_id}...")
+            try:
+                cancelled_sl = await cancel_order(client, stop_loss_order_id)
+                if cancelled_sl:
+                    logger.info(f"✅ Stop-loss order {stop_loss_order_id} cancelled")
+                    await update_order_record(stop_loss_order_id, {
+                        "status": "cancelled",
+                        "updated_at": datetime.utcnow()
+                    })
+                else:
+                    logger.warning(f"⚠️ Failed to cancel SL order {stop_loss_order_id}")
+            except Exception as e:
+                logger.error(f"❌ Error cancelling SL order: {e}")
+
+        # 2b. Safety sweep: cancel ALL remaining orders for this product
+        #     (catches any orphaned orders not tracked in DB)
+        if product_id:
+            try:
+                open_orders = await get_open_orders(client, product_id)
+                if open_orders:
+                    for order in open_orders:
+                        oid = order.get("id")
+                        if oid and oid != pending_order_id and oid != stop_loss_order_id:
+                            logger.info(f"🧹 Cancelling orphaned order {oid} for product {product_id}")
+                            await cancel_order(client, oid)
+            except Exception as e:
+                logger.warning(f"⚠️ Error during safety sweep: {e}")
+
+        # 3. Clear ALL pending state from database
+        await update_algo_setup(setup_id, {
+            "pending_entry_order_id": None,
+            "pending_entry_side": None,
+            "pending_entry_direction_signal": None,
+            "entry_trigger_price": None,
+            "pending_sl_price": None,
+            "stop_loss_order_id": None,
+            "position_lock_acquired": False
+        })
+
+        # 4. Release position lock
+        try:
+            db = await get_db()
+            await release_position_lock(db, symbol, setup_id)
+            logger.info(f"✅ Position lock released for {symbol}")
+        except Exception as e:
+            logger.error(f"❌ Error releasing position lock: {e}")
+
+        # 5. Send Telegram notification
+        if logger_bot:
+            try:
+                await logger_bot.send_info(
+                    f"⚠️ {setup_name}: Trade setup INVALIDATED\n"
+                    f"Asset: {symbol}\n"
+                    f"Entry order: {'cancelled' if cancelled_entry else 'failed to cancel'}\n"
+                    f"Stop-loss: {'cancelled' if cancelled_sl else ('N/A' if not stop_loss_order_id else 'failed to cancel')}\n"
+                    f"Reason: {reason}"
+                )
+            except Exception as e:
+                logger.error(f"❌ Error sending invalidation notification: {e}")
+
+        logger.info(
+            f"🧹 Setup {setup_name} fully invalidated: "
+            f"entry={'cancelled' if cancelled_entry else 'failed'}, "
+            f"sl={'cancelled' if cancelled_sl else 'N/A'}, "
+            f"reason={reason}"
+        )
 
     # Other helper methods would similarly use only /orders?state and /orders/history, not /orders/{order_id}
     
@@ -167,8 +290,10 @@ class OrderMonitor:
             "current_position": entry_side,
             "last_entry_price": entry_price,
             "pending_entry_order_id": None,
+            "pending_entry_side": None,
             "entry_trigger_price": None,
             "pending_entry_direction_signal": None,
+            "pending_sl_price": None,
             "stop_loss_order_id": stop_loss_order_id,
             "last_signal_time": datetime.utcnow()
         })
@@ -223,8 +348,10 @@ class OrderMonitor:
             # Clear pending order from database
             await update_algo_setup(setup_id, {
                 "pending_entry_order_id": None,
+                "pending_entry_side": None,
                 "entry_trigger_price": None,
-                "pending_entry_direction_signal": None
+                "pending_entry_direction_signal": None,
+                "pending_sl_price": None
             })
             
             # Send Telegram notification
@@ -282,8 +409,10 @@ class OrderMonitor:
         """
         await update_algo_setup(setup_id, {
             "pending_entry_order_id": None,
+            "pending_entry_side": None,
             "entry_trigger_price": None,
-            "pending_entry_direction_signal": None
+            "pending_entry_direction_signal": None,
+            "pending_sl_price": None
         })
         logger.info(f"🧹 [MONITOR] Pending order data cleaned")
         

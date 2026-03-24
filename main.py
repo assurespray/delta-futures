@@ -16,7 +16,7 @@ from services.screener_engine import ScreenerEngine
 from services.scheduler import scheduler_service
 from services.logger_bot import LoggerBot  # ✅ Import CLASS (not instance!)
 from utils.self_ping import self_ping
-from database.cleanup import cleanup_stale_indicator_cache  # ← ADD THIS LINE
+from database.cleanup import cleanup_stale_indicator_cache, run_full_cleanup
 
 # Configure logging
 logging.basicConfig(
@@ -80,6 +80,11 @@ async def lifespan(app: FastAPI):
             )
         else:
             logger.info("✅ No stale indicator cache found")
+        # ========================================================
+        # Full database cleanup (orders, positions, activities older than 7 days)
+        logger.info("🧹 Running full database cleanup (free-tier optimization)...")
+        cleanup_results = await run_full_cleanup(max_age_days=7)
+        logger.info("✅ Database cleanup completed")
         # ========================================================
 
         # ✅ NEW: Reconcile positions (AFTER MongoDB, BEFORE anything else!)

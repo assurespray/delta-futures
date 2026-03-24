@@ -146,13 +146,24 @@ class AlgoEngine:
                     logger_bot=self.logger_bot
                 )
 
-            # Remove redundant check since OrderMonitor.check_pending_entry_order already handles this
+                # CRITICAL: Sync in-memory dict after OrderMonitor modifies DB state
+                # Without this, the stale pending_entry_order_id in memory would block
+                # the entry signal check below from running
+                if pending_order_status in ("reversed", "cancelled"):
+                    algo_setup["pending_entry_order_id"] = None
+                    algo_setup["pending_entry_side"] = None
+                    algo_setup["pending_entry_direction_signal"] = None
+                    algo_setup["entry_trigger_price"] = None
+                    algo_setup["pending_sl_price"] = None
+                    algo_setup["stop_loss_order_id"] = None
+                    algo_setup["position_lock_acquired"] = False
+                    logger.info(f"🔄 In-memory setup synced after {pending_order_status}")
 
             if not current_position:
                 if pending_order_status == "filled":
                     logger.info(f"✅ Position opened via pending order - skipping entry check")
-                elif pending_order_status == "reversed":
-                    logger.info(f"🔄 Order cancelled - checking for new entry signal")
+                elif pending_order_status in ("reversed", "cancelled"):
+                    logger.info(f"🔄 Setup invalidated ({pending_order_status}) - ready for new signals")
 
             # ✅ ENTRY SIGNAL CHECK (no position + no pending order)
             if not current_position and not algo_setup.get('pending_entry_order_id'):

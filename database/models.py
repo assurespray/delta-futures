@@ -71,10 +71,12 @@ class AlgoSetup(BaseModel):
     pending_entry_order_id: Optional[int] = None  # Stop-market entry order ID
     entry_trigger_price: Optional[float] = None  # Breakout trigger price
     pending_entry_direction_signal: Optional[int] = None  # 1 for long, -1 for short
+    pending_entry_side: Optional[str] = None  # "long" or "short" - explicit side string
     
     # ========== STOP-LOSS TRACKING ==========
     # ✅ FIXED: Track stop-loss order ID for proper cancellation and state sync
     stop_loss_order_id: Optional[int] = None  # Stop-loss order ID (for cancellation)
+    pending_sl_price: Optional[float] = None  # Sirusu SL value stored at entry signal time
     
     # ========== ASSET LOCK TRACKING (✅ NEW) ==========
     # ✅ Track if position lock is held on the asset

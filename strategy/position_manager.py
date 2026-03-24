@@ -153,20 +153,21 @@ class PositionManager:
                 })
                 logger.info(f"✅ Position record created successfully")
                 
-                # Always recalculate Sirusu at entry fill!
+                # Place SL using the sirusu_value passed at signal time
                 if algo_setup.get("additional_protection", False):
-                    # --- START Fresh Sirusu Calculation ---
+                    sl_price = sirusu_value
+                    # Try fresh calculation, fallback to signal-time value
                     from strategy.dual_supertrend import get_latest_sirusu
                     timeframe = algo_setup.get("timeframe", "3m")
                     try:
                         fresh_sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
                         logger.info(f"[SL] Fresh Sirusu calculated at fill: {fresh_sirusu_value}")
+                        sl_price = fresh_sirusu_value
                     except Exception as e:
-                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu: {e}")
-                        # Fallback to old value if needed, but prefer to abort/fail safe
+                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu, using signal-time value: {e}")
         
-                    await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, fresh_sirusu_value,
+                    sl_order_id = await self._place_stop_loss_protection(
+                        client, product_id, lot_size, entry_side, sl_price,
                         setup_id, symbol, algo_setup.get("user_id")
                     )
                     logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")
@@ -202,6 +203,8 @@ class PositionManager:
                 "pending_entry_order_id": entry_order_id,
                 "entry_trigger_price": breakout_price,
                 "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
+                "pending_entry_side": entry_side,
+                "pending_sl_price": sirusu_value,
                 "last_signal_time": datetime.utcnow(),
                 "position_lock_acquired": True
             })
@@ -221,6 +224,11 @@ class PositionManager:
     async def check_entry_order_filled(self, client: DeltaExchangeClient,
                                       algo_setup: Dict[str, Any],
                                       sirusu_value: float) -> bool:
+        """
+        Check if a pending stop-market entry order has been filled.
+        FIXED: Distinguishes between filled vs cancelled/rejected orders.
+        Only creates position + SL if the order was actually FILLED.
+        """
         try:
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
@@ -232,17 +240,20 @@ class PositionManager:
             if not pending_order_id or not product_id:
                 return False
 
-            filled = await is_order_gone(client, pending_order_id, product_id)
-            if filled:
-                logger.info(f"✅ Stop-market entry filled for {setup_name}")
-                # ✅ ADD THIS: Update order record to "filled"
+            # CRITICAL FIX: Get EXACT order status, not just "is it gone?"
+            order_status = await get_order_status_by_id(client, pending_order_id, product_id)
+            logger.info(f"[FILL-MONITOR] Order {pending_order_id} status: {order_status}")
+
+            if order_status == "filled":
+                # ---- ORDER WAS GENUINELY FILLED ----
+                logger.info(f"✅ Stop-market entry FILLED for {setup_name}")
                 await update_order_record(pending_order_id, {
                     "status": "filled",
                     "filled_at": datetime.utcnow()
                 })
             
-                # Get entry details
-                entry_side = "long" if algo_setup.get("pending_entry_direction_signal") == 1 else "short"
+                entry_side = algo_setup.get("pending_entry_side") or \
+                    ("long" if algo_setup.get("pending_entry_direction_signal") == 1 else "short")
                 entry_price = algo_setup.get("entry_trigger_price")
             
                 # Create position record
@@ -278,36 +289,152 @@ class PositionManager:
                 }
                 await create_algo_activity(activity_data)
             
-                # Update setup
+                # Update setup - position is now open
                 await update_algo_setup(setup_id, {
                     "pending_entry_order_id": None,
+                    "pending_entry_side": None,
+                    "pending_entry_direction_signal": None,
+                    "entry_trigger_price": None,
+                    "pending_sl_price": None,
                     "current_position": entry_side,
                     "last_entry_price": entry_price,
                     "last_signal_time": datetime.utcnow()
                 })
             
                 # Place stop-loss if protection enabled
-                # Always recalculate Sirusu at entry fill!
                 if algo_setup.get("additional_protection", False):
+                    # Use stored SL price as fallback
+                    sl_price = algo_setup.get("pending_sl_price") or sirusu_value
                     from strategy.dual_supertrend import get_latest_sirusu
                     timeframe = algo_setup.get("timeframe", "3m")
                     try:
                         fresh_sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
                         logger.info(f"[SL] Fresh Sirusu calculated at entry fill: {fresh_sirusu_value}")
+                        sl_price = fresh_sirusu_value
                     except Exception as e:
-                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu: {e}")
-                        # Fallback to passed sirusu_value or abort for safety!
-                        fresh_sirusu_value = sirusu_value if sirusu_value else None
-                        if fresh_sirusu_value is None:
+                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu, using stored value: {e}")
+                        if sl_price is None:
                             logger.error("[SL] ❌ No valid Sirusu value available. SKIPPING stop-loss.")
-                            return filled
+                            return True
                 
                     sl_order_id = await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, fresh_sirusu_value,
+                        client, product_id, lot_size, entry_side, sl_price,
                         setup_id, symbol, algo_setup.get("user_id")
                     )
                     logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")        
-                return filled
+                return True
+
+            elif order_status in ("cancelled", "rejected"):
+                # ---- ORDER WAS CANCELLED/REJECTED - DO NOT create position or SL ----
+                logger.warning(
+                    f"⚠️ [FILL-MONITOR] Pending entry order {pending_order_id} was {order_status} "
+                    f"for {setup_name} - NOT creating position or SL"
+                )
+                await update_order_record(pending_order_id, {
+                    "status": order_status,
+                    "updated_at": datetime.utcnow()
+                })
+                # Clean up all pending state and release lock
+                await update_algo_setup(setup_id, {
+                    "pending_entry_order_id": None,
+                    "pending_entry_side": None,
+                    "pending_entry_direction_signal": None,
+                    "entry_trigger_price": None,
+                    "pending_sl_price": None,
+                    "stop_loss_order_id": None,
+                    "position_lock_acquired": False
+                })
+                db = await get_db()
+                await release_position_lock(db, symbol, setup_id)
+                logger.info(f"🧹 [FILL-MONITOR] Cleaned up invalidated setup state for {setup_name}")
+                return False
+
+            elif order_status == "not_found":
+                # Order disappeared entirely - check exchange position to be safe
+                logger.warning(f"⚠️ [FILL-MONITOR] Order {pending_order_id} not found in open or history")
+                actual_position = await get_position_by_symbol(client, symbol)
+                actual_size = actual_position.get("size", 0) if actual_position else 0
+                if actual_size == 0:
+                    # No position on exchange, order is gone -> treat as cancelled
+                    logger.warning(f"⚠️ [FILL-MONITOR] No position on exchange - treating as cancelled")
+                    await update_algo_setup(setup_id, {
+                        "pending_entry_order_id": None,
+                        "pending_entry_side": None,
+                        "pending_entry_direction_signal": None,
+                        "entry_trigger_price": None,
+                        "pending_sl_price": None,
+                        "stop_loss_order_id": None,
+                        "position_lock_acquired": False
+                    })
+                    db = await get_db()
+                    await release_position_lock(db, symbol, setup_id)
+                    return False
+                else:
+                    # Position exists! Order must have filled. Proceed with fill logic.
+                    logger.info(f"✅ [FILL-MONITOR] Position exists on exchange (size={actual_size}) - treating as filled")
+                    entry_side = algo_setup.get("pending_entry_side") or \
+                        ("long" if actual_size > 0 else "short")
+                    entry_price = algo_setup.get("entry_trigger_price") or \
+                        (actual_position.get("entry_price") if actual_position else None)
+
+                    await create_position_record({
+                        "algo_setup_id": setup_id,
+                        "user_id": algo_setup.get("user_id"),
+                        "product_id": product_id,
+                        "asset": symbol,
+                        "direction": entry_side,
+                        "side": "buy" if entry_side == "long" else "sell",
+                        "size": lot_size,
+                        "entry_price": entry_price,
+                        "opened_at": datetime.utcnow(),
+                        "status": "open",
+                        "source": "algo"
+                    })
+
+                    activity_data = {
+                        "user_id": algo_setup["user_id"],
+                        "algo_setup_id": setup_id,
+                        "algo_setup_name": setup_name,
+                        "entry_time": datetime.utcnow(),
+                        "entry_price": entry_price,
+                        "direction": entry_side,
+                        "lot_size": lot_size,
+                        "asset": symbol,
+                        "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
+                        "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                        "is_closed": False
+                    }
+                    await create_algo_activity(activity_data)
+
+                    await update_algo_setup(setup_id, {
+                        "pending_entry_order_id": None,
+                        "pending_entry_side": None,
+                        "pending_entry_direction_signal": None,
+                        "entry_trigger_price": None,
+                        "pending_sl_price": None,
+                        "current_position": entry_side,
+                        "last_entry_price": entry_price,
+                        "last_signal_time": datetime.utcnow()
+                    })
+
+                    if algo_setup.get("additional_protection", False):
+                        sl_price = algo_setup.get("pending_sl_price") or sirusu_value
+                        from strategy.dual_supertrend import get_latest_sirusu
+                        timeframe = algo_setup.get("timeframe", "3m")
+                        try:
+                            fresh_val = await get_latest_sirusu(client, symbol, timeframe)
+                            sl_price = fresh_val
+                        except Exception:
+                            pass
+                        if sl_price:
+                            await self._place_stop_loss_protection(
+                                client, product_id, lot_size, entry_side, sl_price,
+                                setup_id, symbol, algo_setup.get("user_id")
+                            )
+                    return True
+            else:
+                # Still open/untriggered/pending - not filled yet
+                return False
                 
         except Exception as e:
             logger.error(f"❌ Exception checking entry order: {e}")
@@ -472,7 +599,10 @@ class PositionManager:
                 "current_position": None,
                 "last_entry_price": None,
                 "pending_entry_order_id": None,
+                "pending_entry_side": None,
+                "pending_entry_direction_signal": None,
                 "entry_trigger_price": None,
+                "pending_sl_price": None,
                 "stop_loss_order_id": None,
                 "position_lock_acquired": False
             })
@@ -610,7 +740,10 @@ class PositionManager:
                 "current_position": None,
                 "last_entry_price": None,
                 "pending_entry_order_id": None,
+                "pending_entry_side": None,
+                "pending_entry_direction_signal": None,
                 "entry_trigger_price": None,
+                "pending_sl_price": None,
                 "stop_loss_order_id": None,
                 "position_lock_acquired": False
             })
@@ -719,10 +852,20 @@ class PositionManager:
                         f"⚠️ Setup {setup.get('setup_name')} has pending_entry_order_id={pending_entry_id} "
                         "but order not found on exchange. Clearing stale state."
                     )
+                    # Also cancel any associated SL order that was placed with the entry
+                    stale_sl_id = setup.get("stop_loss_order_id")
+                    if stale_sl_id:
+                        logger.info(f"🗑️ Cancelling orphaned SL order {stale_sl_id} for stale entry setup {setup.get('setup_name')}")
+                        await cancel_order(client, product_id, stale_sl_id)
+
                     await update_algo_setup(setup_id, {
                         "pending_entry_order_id": None,
                         "pending_entry_direction_signal": None,
+                        "pending_entry_side": None,
+                        "pending_sl_price": None,
                         "entry_trigger_price": None,
+                        "stop_loss_order_id": None,
+                        "position_lock_acquired": False,
                     })
 
             # 2. Check for open orders (entry, stop-loss, etc.)
@@ -737,6 +880,7 @@ class PositionManager:
                             "pending_entry_order_id": order.get("id"),
                             "entry_trigger_price": order.get("stop_price"),
                             "pending_entry_direction_signal": 1 if order.get("side")=="buy" else -1,
+                            "pending_entry_side": order.get("side"),
                             "last_signal_time": datetime.utcnow(),
                         })
                     elif order_type == "market_order" and order.get("reduce_only"):

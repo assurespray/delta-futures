@@ -68,11 +68,17 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                             "pending_entry_order_id": None,
                             "pending_entry_direction_signal": None,
                             "pending_entry_side": None,
+                            "entry_trigger_price": None,
+                            "pending_sl_price": None,
+                            "stop_loss_order_id": None,
+                            "position_lock_acquired": False,
                         })
                         # Also update local copy so later logic sees it as cleared
                         setup["pending_entry_order_id"] = None
                         setup["pending_entry_direction_signal"] = None
                         setup["pending_entry_side"] = None
+                        setup["entry_trigger_price"] = None
+                        setup["pending_sl_price"] = None
                 except Exception as e:
                     logger.error(
                         f"❌ [STARTUP] Failed pending-entry cleanup for {setup_name}: {e}"
@@ -115,6 +121,11 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     "last_entry_price": None,
                     "position_lock_acquired": False,
                     "stop_loss_order_id": None,
+                    "pending_entry_order_id": None,
+                    "pending_entry_side": None,
+                    "pending_entry_direction_signal": None,
+                    "entry_trigger_price": None,
+                    "pending_sl_price": None,
                 })
                 await client.close()
                 continue
