@@ -87,9 +87,12 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_indicator),
-            CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$")
+            CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"),
+            CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
         ],
-        per_message=False
+        per_message=False,
+        allow_reentry=True
     )
     application.add_handler(indicator_conv_handler)
     
@@ -108,8 +111,12 @@ def create_application() -> Application:
             SETUP_PROTECTION: [CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_")],
             SETUP_CONFIRM: [CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_algo_setup)],
-        per_message=False
+        fallbacks=[
+            CommandHandler("cancel", cancel_algo_setup),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
     )
     application.add_handler(algo_conv_handler)
     
@@ -168,8 +175,12 @@ def create_application() -> Application:
             SCREENER_PROTECTION: [CallbackQueryHandler(screener_protection_selected, pattern="^screener_prot_")],
             SCREENER_CONFIRM: [CallbackQueryHandler(screener_confirmed, pattern="^screener_confirm_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_screener_setup)],
-        per_message=False
+        fallbacks=[
+            CommandHandler("cancel", cancel_screener_setup),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
     )
     application.add_handler(screener_conv_handler)
     

@@ -144,7 +144,7 @@ class OrderMonitor:
         if pending_order_id:
             logger.info(f"🗑️ Cancelling pending entry order {pending_order_id}...")
             try:
-                cancelled_entry = await cancel_order(client, pending_order_id)
+                cancelled_entry = await cancel_order(client, product_id, pending_order_id)
                 if cancelled_entry:
                     logger.info(f"✅ Entry order {pending_order_id} cancelled")
                     await update_order_record(pending_order_id, {
@@ -160,7 +160,7 @@ class OrderMonitor:
         if stop_loss_order_id:
             logger.info(f"🗑️ Cancelling stop-loss order {stop_loss_order_id}...")
             try:
-                cancelled_sl = await cancel_order(client, stop_loss_order_id)
+                cancelled_sl = await cancel_order(client, product_id, stop_loss_order_id)
                 if cancelled_sl:
                     logger.info(f"✅ Stop-loss order {stop_loss_order_id} cancelled")
                     await update_order_record(stop_loss_order_id, {
@@ -182,7 +182,7 @@ class OrderMonitor:
                         oid = order.get("id")
                         if oid and oid != pending_order_id and oid != stop_loss_order_id:
                             logger.info(f"🧹 Cancelling orphaned order {oid} for product {product_id}")
-                            await cancel_order(client, oid)
+                            await cancel_order(client, product_id, oid)
             except Exception as e:
                 logger.warning(f"⚠️ Error during safety sweep: {e}")
 
@@ -340,7 +340,8 @@ class OrderMonitor:
         logger.warning(f"   Now: {new_signal} ({'Uptrend' if new_signal == 1 else 'Downtrend'})")
         
         # Cancel the order
-        cancelled = await cancel_order(client, pending_order_id)
+        product_id = algo_setup.get('product_id')
+        cancelled = await cancel_order(client, product_id, pending_order_id)
         
         if cancelled:
             logger.info(f"✅ [MONITOR] Pending order cancelled successfully")

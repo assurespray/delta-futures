@@ -637,7 +637,7 @@ class PositionManager:
                     logger.info(f"   Order {stop_loss_order_id} status: {order_status}")
                     
                     if order_status in ("pending", "open", "untriggered"):
-                        cancelled = await cancel_order(client, stop_loss_order_id)
+                        cancelled = await cancel_order(client, product_id, stop_loss_order_id)
                         if cancelled:
                             logger.info(f"✅ Successfully cancelled stop-loss order {stop_loss_order_id}")
                             await update_order_record(stop_loss_order_id, {
@@ -672,7 +672,7 @@ class PositionManager:
                     logger.info(f"🎯 Found additional active stop-loss order: {sl_order_id}")
                     
                     try:
-                        cancelled = await cancel_order(client, sl_order_id)
+                        cancelled = await cancel_order(client, product_id, sl_order_id)
                         if cancelled:
                             cancelled_count += 1
                             logger.info(f"✅ Cancelled additional stop-loss order {sl_order_id}")

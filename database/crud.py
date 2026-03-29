@@ -358,10 +358,17 @@ async def save_indicator_cache(
     timeframe: str,
     signal: int,
     value: float
-) -> bool:
+) -> dict:
     """
     Save indicator to cache with signal flip detection.
-    Returns True if a signal flip occurred.
+    Returns dict with flip details:
+        {
+            "flip": True/False,
+            "old_signal": int or None,
+            "new_signal": int,
+            "old_signal_text": str,
+            "new_signal_text": str
+        }
     """
     try:
         db = mongodb.get_db()
@@ -385,7 +392,7 @@ async def save_indicator_cache(
             "timeframe": timeframe,
             "calculated_at": datetime.utcnow(),
             "last_signal": signal,              # Current signal
-            "previous_signal": previous_signal,  # ✅ Track previous for flip detection
+            "previous_signal": previous_signal,  # Track previous for flip detection
             "last_value": value
         }
         
@@ -401,7 +408,14 @@ async def save_indicator_cache(
             upsert=True
         )
         
-        # 4. Detect flip
+        # 4. Detect flip and build result
+        def _signal_text(sig):
+            if sig == 1:
+                return "Uptrend"
+            elif sig == -1:
+                return "Downtrend"
+            return "Unknown"
+        
         flip_occurred = False
         if previous_signal is not None and previous_signal != signal:
             flip_occurred = True
@@ -410,11 +424,18 @@ async def save_indicator_cache(
                 f"({previous_signal} → {signal})"
             )
         
-        return flip_occurred
+        return {
+            "flip": flip_occurred,
+            "old_signal": previous_signal,
+            "new_signal": signal,
+            "old_signal_text": _signal_text(previous_signal),
+            "new_signal_text": _signal_text(signal),
+        }
         
     except Exception as e:
         logger.error(f"❌ Failed to save indicator cache: {e}")
-        return False
+        return {"flip": False, "old_signal": None, "new_signal": signal,
+                "old_signal_text": "Unknown", "new_signal_text": "Unknown"}
 
 # ==================== Screener Setups CRUD ====================
 
@@ -600,14 +621,14 @@ async def release_position_lock(db: AsyncIOMotorDatabase,
         True if lock released, False if error
     """
     try:
-        logger.error(f"[DEBUG] release_position_lock called for symbol={symbol}, setup_id={setup_id}")
+        logger.debug(f"release_position_lock called for symbol={symbol}, setup_id={setup_id}")
         collection = db["position_locks"]
         
         result = await collection.delete_one({
             "symbol": symbol,
             "setup_id": setup_id
         })
-        logger.error(f"[DEBUG] release_position_lock deleted_count={result.deleted_count} for symbol={symbol}, setup_id={setup_id}")
+        logger.debug(f"release_position_lock deleted_count={result.deleted_count} for symbol={symbol}, setup_id={setup_id}")
         if result.deleted_count > 0:
             logger.info(f"✅ Released lock on {symbol}")
             return True
@@ -717,16 +738,16 @@ async def delete_position_lock(symbol: str = None) -> int:
     If symbol is None, deletes ALL locks (startup cleanup).
     If symbol given, deletes single lock.
     """
-    logger.error(f"[DEBUG] delete_position_lock called with symbol={symbol}")
+    logger.debug(f"delete_position_lock called with symbol={symbol}")
     db = await get_db()
     collection = db["position_locks"]
     if symbol:
         result = await collection.delete_one({"symbol": symbol})
-        logger.error(f"[DEBUG] delete_position_lock deleted_count={result.deleted_count} for symbol={symbol}")
+        logger.debug(f"delete_position_lock deleted_count={result.deleted_count} for symbol={symbol}")
         return result.deleted_count
     else:
         result = await collection.delete_many({})
-        logger.error(f"[DEBUG] delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
+        logger.debug(f"delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
         return result.deleted_count
         
 async def get_all_active_screener_setups():

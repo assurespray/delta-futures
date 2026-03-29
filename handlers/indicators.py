@@ -38,6 +38,9 @@ async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    # End any active conversation state so buttons remain responsive
+    return ConversationHandler.END
 
 
 async def indicator_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

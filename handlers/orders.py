@@ -70,6 +70,7 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     for order in formatted:
                         order_id = order['order_id']
+                        product_id = order.get('product_id', 0)
                         if order.get('bracket_label'):
                             message += f"🏷️ {order['bracket_label']}\n"
                         message += f"📝 **{order['symbol']}** - {order['side']}\n"
@@ -84,11 +85,11 @@ async def orders_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         
                         message += f"└ Status: {order['status']}\n\n"
                         
-                        # Add cancel button
+                        # Add cancel button (includes product_id)
                         keyboard.append([
                             InlineKeyboardButton(
                                 f"❌ Cancel Order {order['symbol']} ({order['side']})",
-                                callback_data=f"order_cancel_{cred_id}_{order_id}"
+                                callback_data=f"order_cancel_{cred_id}_{order_id}_{product_id}"
                             )
                         ])
                     
@@ -130,10 +131,11 @@ async def order_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer("Cancelling order...")
     
-    # Parse callback data: order_cancel_{cred_id}_{order_id}
+    # Parse callback data: order_cancel_{cred_id}_{order_id}_{product_id}
     parts = query.data.split("_")
     cred_id = parts[2]
     order_id = int(parts[3])
+    product_id = int(parts[4]) if len(parts) > 4 else None
     
     try:
         # Get credentials
@@ -152,8 +154,24 @@ async def order_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TY
             api_secret=full_cred['api_secret']
         )
         
-        # Cancel order
-        success = await cancel_order(client, order_id)
+        # Cancel order (product_id required for Delta API)
+        if not product_id:
+            # Fallback: look up product_id from open orders
+            open_orders = await get_open_orders(client)
+            for o in (open_orders or []):
+                if o.get("id") == order_id:
+                    product_id = o.get("product_id")
+                    break
+        
+        if not product_id:
+            await client.close()
+            await query.edit_message_text(
+                f"❌ Could not determine product for order {order_id}.\n\n"
+                f"Use /start to return to main menu."
+            )
+            return
+        
+        success = await cancel_order(client, product_id, order_id)
         await client.close()
         
         if success:

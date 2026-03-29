@@ -96,7 +96,11 @@ class DeltaExchangeClient:
             elif method.upper() == "POST":
                 response = await self.client.post(url, headers=headers, content=body)
             elif method.upper() == "DELETE":
-                response = await self.client.delete(url, headers=headers)
+                if body:
+                    headers["Content-Type"] = "application/json"
+                    response = await self.client.request("DELETE", url, headers=headers, content=body)
+                else:
+                    response = await self.client.delete(url, headers=headers)
             else:
                 logger.error(f"❌ Unsupported HTTP method: {method}")
                 return None
@@ -137,9 +141,10 @@ class DeltaExchangeClient:
         """Make POST request."""
         return await self._request("POST", endpoint, json_data=json_data)
     
-    async def delete(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
-        """Make DELETE request."""
-        return await self._request("DELETE", endpoint, params=params)
+    async def delete(self, endpoint: str, params: Optional[Dict] = None,
+                    json_data: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """Make DELETE request with optional JSON body."""
+        return await self._request("DELETE", endpoint, params=params, json_data=json_data)
       
     async def get_assets(self):
         """

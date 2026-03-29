@@ -169,24 +169,44 @@ async def get_open_orders(client: DeltaExchangeClient,
         logger.error(traceback.format_exc())
         return None
 
-async def cancel_order(client: DeltaExchangeClient, order_id: int) -> bool:
+async def cancel_order(client: DeltaExchangeClient, product_id: int, order_id: int) -> bool:
+    """Cancel an order on Delta Exchange.
+    
+    Args:
+        client: DeltaExchangeClient instance
+        product_id: Product ID the order belongs to
+        order_id: Order ID to cancel
+    
+    Returns:
+        True if order was successfully cancelled, False otherwise
+    """
     try:
         if isinstance(order_id, str):
             order_id = int(order_id)
-        response = await client.delete(f"/v2/orders/{order_id}")
+        if isinstance(product_id, str):
+            product_id = int(product_id)
+        
+        # Delta Exchange requires DELETE /v2/orders with JSON body containing id and product_id
+        response = await client.delete("/v2/orders", json_data={
+            "id": order_id,
+            "product_id": product_id
+        })
+        
         if response is None:
-            return True
+            # None means non-200 status - cancellation FAILED
+            logger.warning(f"⚠️ Cancel order {order_id} returned None (API error)")
+            return False
+        
         if isinstance(response, dict) and response.get("success"):
+            logger.info(f"✅ Order {order_id} cancelled via API")
             return True
-        if isinstance(response, dict):
-            msg = response.get("message", "") or response.get("error", "")
-            if "404" in msg or "not found" in msg.lower():
-                return True
+        
+        # Log unexpected response
+        logger.warning(f"⚠️ Unexpected cancel response for {order_id}: {response}")
         return False
+        
     except Exception as e:
-        if "404" in str(e):
-            return True
-        logger.error(f"❌ Cancel error: {e}")
+        logger.error(f"❌ Cancel error for order {order_id}: {e}")
         return False
 
 async def cancel_all_orders(client: DeltaExchangeClient, 
@@ -199,7 +219,8 @@ async def cancel_all_orders(client: DeltaExchangeClient,
         cancelled_count = 0
         for order in orders:
             order_id = order.get("id")
-            if order_id and await cancel_order(client, order_id):
+            ord_product_id = order.get("product_id") or product_id
+            if order_id and ord_product_id and await cancel_order(client, ord_product_id, order_id):
                 cancelled_count += 1
         logger.info(f"✅ Cancelled {cancelled_count}/{len(orders)} orders")
         return cancelled_count
@@ -229,6 +250,7 @@ async def format_orders_display(orders: List[Dict[str, Any]]) -> List[Dict[str, 
             bracket_label = order.get("bracket_label")
             formatted_order = {
                 "order_id": order.get("id"),
+                "product_id": order.get("product_id"),
                 "symbol": symbol,
                 "side": order.get("side", "").capitalize(),
                 "size": order.get("size", 0),

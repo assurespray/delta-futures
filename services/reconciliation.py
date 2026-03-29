@@ -96,7 +96,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 if stored_sl_id and product_id:
                     logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} for closed position {symbol}")
                     try:
-                        await cancel_order(client, stored_sl_id)
+                        await cancel_order(client, product_id, stored_sl_id)
                     except Exception as e:
                         logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
                 # Also scan for any untracked stop-loss orders on exchange
@@ -111,7 +111,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                                 orphan_id = order.get("id")
                                 logger.info(f"🧹 [RECONCILIATION] Cancelling untracked orphaned SL {orphan_id} for {symbol}")
                                 try:
-                                    await cancel_order(client, orphan_id)
+                                    await cancel_order(client, product_id, orphan_id)
                                 except Exception as e:
                                     logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {orphan_id}: {e}")
                     except Exception as e:
@@ -163,7 +163,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 if stored_sl_id and product_id:
                     logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} (2nd check) for {symbol}")
                     try:
-                        await cancel_order(client, stored_sl_id)
+                        await cancel_order(client, product_id, stored_sl_id)
                     except Exception as e:
                         logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
                 await update_algo_setup(setup_id, {
@@ -179,7 +179,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             # Always create a FRESH lock after startup lock cleanup
             lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
             locks = await db["position_locks"].find().to_list(length=100)
-            logger.error(f"[DEBUG] Current locks after reconciliation: {locks}")
+            logger.debug(f"Current locks after reconciliation: {locks}")
             if not lock_acquired:
                 logger.error(f"❌ RECONCILIATION: Could not acquire lock for {symbol} by {setup_id}")
             else:

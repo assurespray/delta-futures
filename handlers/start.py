@@ -91,6 +91,8 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "🏠 Main Menu\n\nSelect an option:",
         reply_markup=reply_markup
     )
+    
+    return ConversationHandler.END
 
 
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

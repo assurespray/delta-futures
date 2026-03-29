@@ -126,8 +126,11 @@ class AlgoEngine:
             perusu_data = indicator_result['perusu']
             sirusu_data = indicator_result['sirusu']
 
-            # ✅ FIRST: Cache indicators with flip detection (do this BEFORE any signal checks)
-            flip_info = await self._cache_indicators(setup_id, perusu_data, sirusu_data, asset, timeframe)
+            # FIRST: Cache indicators with flip detection (do this BEFORE any signal checks)
+            flip_info = await self._cache_indicators(
+                setup_id, perusu_data, sirusu_data, asset, timeframe,
+                setup_name=setup_name, current_position=current_position
+            )
 
             # === Robust Pending Order & Sirusu reversal logic ===
             pending_order_status = None
@@ -257,6 +260,7 @@ class AlgoEngine:
 
                     if success:
                         self.signal_counts["successful_entries"] += 1
+                        # Send to log bot (existing)
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
@@ -266,6 +270,26 @@ class AlgoEngine:
                             perusu_signal=perusu_data["signal_text"],
                             sirusu_sl=sirusu_data["supertrend_value"],
                         )
+                        # Send detailed entry to user's main bot chat
+                        user_id = algo_setup.get("user_id")
+                        if user_id:
+                            try:
+                                await self.logger_bot.send_trade_entry_detail(
+                                    setup_name=setup_name,
+                                    asset=asset,
+                                    timeframe=timeframe,
+                                    direction=side,
+                                    entry_price=current_price,
+                                    lot_size=algo_setup["lot_size"],
+                                    perusu_signal_text=perusu_data["signal_text"],
+                                    sirusu_signal_text=sirusu_data["signal_text"],
+                                    perusu_value=perusu_data["supertrend_value"],
+                                    sirusu_value=sirusu_data["supertrend_value"],
+                                    stop_loss_price=sirusu_data["supertrend_value"],
+                                    entry_type="market" if immediate_market else "stop-market",
+                                )
+                            except Exception as notify_err:
+                                logger.warning(f"⚠️ Failed to send entry detail to user: {notify_err}")
                     else:
                         self.signal_counts["failed_entries"] += 1
                         await self.logger_bot.send_error(
@@ -303,12 +327,49 @@ class AlgoEngine:
                     exit_time = time.time() - exit_start
                     if success:
                         self.signal_counts["successful_exits"] += 1
+                        # Send to log bot (existing)
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
                             asset=asset,
                             direction=current_position,
                             sirusu_signal=sirusu_data['signal_text']
                         )
+                        # Send detailed exit to user's main bot chat
+                        user_id = algo_setup.get("user_id")
+                        entry_price = algo_setup.get("last_entry_price", 0)
+                        exit_price = perusu_data.get("latest_close", 0)
+                        lot_size = algo_setup.get("lot_size", 0)
+                        if user_id:
+                            try:
+                                # Calculate PnL for the notification
+                                try:
+                                    ep = float(entry_price) if entry_price else 0
+                                    xp = float(exit_price) if exit_price else 0
+                                    if current_position == "long":
+                                        pnl_usd = (xp - ep) * lot_size
+                                    else:
+                                        pnl_usd = (ep - xp) * lot_size
+                                    from config.settings import settings as app_settings
+                                    pnl_inr = pnl_usd * app_settings.usd_to_inr_rate
+                                except Exception:
+                                    pnl_usd = None
+                                    pnl_inr = None
+
+                                await self.logger_bot.send_trade_exit_detail(
+                                    setup_name=setup_name,
+                                    asset=asset,
+                                    timeframe=timeframe,
+                                    direction=current_position,
+                                    entry_price=float(entry_price) if entry_price else 0,
+                                    exit_price=float(exit_price) if exit_price else 0,
+                                    lot_size=lot_size,
+                                    pnl_usd=pnl_usd,
+                                    pnl_inr=pnl_inr,
+                                    sirusu_signal_text=sirusu_data['signal_text'],
+                                    exit_reason=f"Sirusu flip to {sirusu_data['signal_text']}",
+                                )
+                            except Exception as notify_err:
+                                logger.warning(f"⚠️ Failed to send exit detail to user: {notify_err}")
                     else:
                         self.signal_counts["failed_exits"] += 1
                         await self.logger_bot.send_error(
@@ -356,10 +417,11 @@ class AlgoEngine:
         )
 
     async def _cache_indicators(self, setup_id: str, perusu_data: Dict[str, Any],
-                                sirusu_data: Dict[str, Any], asset: str, timeframe: str):
+                                sirusu_data: Dict[str, Any], asset: str, timeframe: str,
+                                setup_name: str = "", current_position: str = None):
         try:
-            # ✅ Save indicators with flip detection
-            perusu_flip = await save_indicator_cache(
+            # Save indicators with flip detection (returns dict now)
+            perusu_result = await save_indicator_cache(
                 algo_setup_id=setup_id,
                 indicator_name="perusu",
                 asset=asset,
@@ -368,7 +430,7 @@ class AlgoEngine:
                 value=perusu_data['supertrend_value']
             )
         
-            sirusu_flip = await save_indicator_cache(
+            sirusu_result = await save_indicator_cache(
                 algo_setup_id=setup_id,
                 indicator_name="sirusu",
                 asset=asset,
@@ -377,17 +439,96 @@ class AlgoEngine:
                 value=sirusu_data['supertrend_value']
             )
         
-            # ✅ Log flip detection results
+            perusu_flip = perusu_result.get("flip", False)
+            sirusu_flip = sirusu_result.get("flip", False)
+        
+            # Log flip detection results
             logger.info(
                 f"📊 Indicator Cache Updated for {asset}:\n"
                 f"   Perusu: signal={perusu_data['signal']} (flip: {perusu_flip})\n"
                 f"   Sirusu: signal={sirusu_data['signal']} (flip: {sirusu_flip})"
             )
-        
-            # ✅ Return flip info for potential use
+
+            # Send detailed flip notifications to log bot
+            current_price = perusu_data.get("latest_close")
+
+            if perusu_flip:
+                # Determine what action will be taken
+                perusu_sig = perusu_data['signal']
+                sirusu_sig = sirusu_data['signal']
+                aligned = (perusu_sig == sirusu_sig)
+
+                if not current_position and aligned:
+                    action = "ENTRY SIGNAL - Perusu flipped and Sirusu aligned"
+                elif not current_position and not aligned:
+                    action = "No Entry - Perusu flipped but Sirusu NOT aligned (waiting)"
+                elif current_position:
+                    action = f"Perusu flipped while in {current_position.upper()} position (monitoring)"
+                else:
+                    action = "Perusu flipped - evaluating"
+
+                try:
+                    await self.logger_bot.send_flip_log(
+                        setup_name=setup_name,
+                        asset=asset,
+                        timeframe=timeframe,
+                        indicator_name="perusu",
+                        old_signal_text=perusu_result.get("old_signal_text", "Unknown"),
+                        new_signal_text=perusu_result.get("new_signal_text", "Unknown"),
+                        perusu_signal=perusu_data['signal'],
+                        sirusu_signal=sirusu_data['signal'],
+                        current_position=current_position,
+                        action=action,
+                        perusu_value=perusu_data.get('supertrend_value'),
+                        sirusu_value=sirusu_data.get('supertrend_value'),
+                        current_price=current_price,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to send perusu flip log: {e}")
+
+            if sirusu_flip:
+                sirusu_sig = sirusu_data['signal']
+
+                if current_position:
+                    # Check if sirusu flipped against the position (exit signal)
+                    exit_trigger = (
+                        (current_position == "long" and sirusu_sig == -1) or
+                        (current_position == "short" and sirusu_sig == 1)
+                    )
+                    if exit_trigger:
+                        action = f"EXIT SIGNAL - Sirusu flipped against {current_position.upper()} position"
+                    else:
+                        action = f"Sirusu flipped in favor of {current_position.upper()} position (no action)"
+                elif not current_position:
+                    action = "No Signal - Sirusu flipped but no position open (post-exit wandering)"
+                else:
+                    action = "Sirusu flipped - evaluating"
+
+                try:
+                    await self.logger_bot.send_flip_log(
+                        setup_name=setup_name,
+                        asset=asset,
+                        timeframe=timeframe,
+                        indicator_name="sirusu",
+                        old_signal_text=sirusu_result.get("old_signal_text", "Unknown"),
+                        new_signal_text=sirusu_result.get("new_signal_text", "Unknown"),
+                        perusu_signal=perusu_data['signal'],
+                        sirusu_signal=sirusu_data['signal'],
+                        current_position=current_position,
+                        action=action,
+                        perusu_value=perusu_data.get('supertrend_value'),
+                        sirusu_value=sirusu_data.get('supertrend_value'),
+                        current_price=current_price,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to send sirusu flip log: {e}")
+
+            # Return flip info for potential use
             return {
                 "perusu_flip": perusu_flip,
-                "sirusu_flip": sirusu_flip
+                "sirusu_flip": sirusu_flip,
+                "perusu_result": perusu_result,
+                "sirusu_result": sirusu_result,
             }
         
         except Exception as e:
