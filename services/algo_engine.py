@@ -13,6 +13,7 @@ from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust me
 from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from strategy.order_monitor import OrderMonitor
+from api.positions import get_ticker_mark_price
 from services.logger_bot import LoggerBot
 from utils.timeframe import (
     is_at_candle_boundary,
@@ -227,7 +228,17 @@ class AlgoEngine:
                     prev_candle = indicator_result["latest_closed_candle"]  # ensure your strategy returns this
                     prev_high = prev_candle["high"]
                     prev_low = prev_candle["low"]
-                    current_price = perusu_data["latest_close"]
+
+                    # FIX: Use LIVE mark price from exchange, not candle close.
+                    # Candle close can never exceed its own high, so the old
+                    # comparison (close > high) was always False.
+                    live_price = await get_ticker_mark_price(client, asset)
+                    if live_price <= 0:
+                        # Fallback to candle close if ticker API fails
+                        live_price = perusu_data["latest_close"]
+                        logger.warning(f"⚠️ Mark price unavailable, falling back to candle close: {live_price}")
+                    else:
+                        logger.info(f"📡 Live mark price for {asset}: ${live_price}")
 
                     # 1 pip – adjust per symbol tick size if needed
                     pip = entry_signal.get("pip", 0.0001)
@@ -236,13 +247,15 @@ class AlgoEngine:
                     # Decide: market entry vs stop-market entry
                     immediate_market = False
                     if side == "long":
-                        # price already broke previous high → enter at market
-                        if current_price > prev_high:
+                        # live price already broke previous high → enter at market
+                        if live_price > prev_high:
                             immediate_market = True
+                            logger.info(f"🚀 IMMEDIATE MARKET ENTRY: live ${live_price} > prev_high ${prev_high}")
                     else:  # short
-                        # price already broke previous low → enter at market
-                        if current_price < prev_low:
+                        # live price already broke previous low → enter at market
+                        if live_price < prev_low:
                             immediate_market = True
+                            logger.info(f"🚀 IMMEDIATE MARKET ENTRY: live ${live_price} < prev_low ${prev_low}")
 
                     entry_start = time.time()
 
@@ -260,12 +273,19 @@ class AlgoEngine:
 
                     if success:
                         self.signal_counts["successful_entries"] += 1
+                        # Re-read setup to get order IDs saved by position_manager
+                        refreshed_setup = await get_algo_setup_by_id(setup_id)
+                        entry_order_id = refreshed_setup.get("last_entry_order_id") if refreshed_setup else None
+                        sl_order_id = refreshed_setup.get("stop_loss_order_id") if refreshed_setup else None
+                        # Also get the actual entry price from DB (may differ from live_price for stop-market)
+                        actual_entry_price = refreshed_setup.get("last_entry_price", live_price) if refreshed_setup else live_price
+
                         # Send to log bot (existing)
                         await self.logger_bot.send_trade_entry(
                             setup_name=setup_name,
                             asset=asset,
                             direction=side,
-                            entry_price=current_price,
+                            entry_price=actual_entry_price,
                             lot_size=algo_setup["lot_size"],
                             perusu_signal=perusu_data["signal_text"],
                             sirusu_sl=sirusu_data["supertrend_value"],
@@ -279,7 +299,7 @@ class AlgoEngine:
                                     asset=asset,
                                     timeframe=timeframe,
                                     direction=side,
-                                    entry_price=current_price,
+                                    entry_price=actual_entry_price,
                                     lot_size=algo_setup["lot_size"],
                                     perusu_signal_text=perusu_data["signal_text"],
                                     sirusu_signal_text=sirusu_data["signal_text"],
@@ -287,6 +307,8 @@ class AlgoEngine:
                                     sirusu_value=sirusu_data["supertrend_value"],
                                     stop_loss_price=sirusu_data["supertrend_value"],
                                     entry_type="market" if immediate_market else "stop-market",
+                                    entry_order_id=entry_order_id,
+                                    sl_order_id=sl_order_id,
                                 )
                             except Exception as notify_err:
                                 logger.warning(f"⚠️ Failed to send entry detail to user: {notify_err}")
@@ -327,6 +349,10 @@ class AlgoEngine:
                     exit_time = time.time() - exit_start
                     if success:
                         self.signal_counts["successful_exits"] += 1
+                        # Grab order IDs before setup gets cleaned up
+                        entry_order_id = algo_setup.get("last_entry_order_id")
+                        sl_order_id = algo_setup.get("stop_loss_order_id")
+
                         # Send to log bot (existing)
                         await self.logger_bot.send_trade_exit(
                             setup_name=setup_name,
@@ -367,6 +393,8 @@ class AlgoEngine:
                                     pnl_inr=pnl_inr,
                                     sirusu_signal_text=sirusu_data['signal_text'],
                                     exit_reason=f"Sirusu flip to {sirusu_data['signal_text']}",
+                                    entry_order_id=entry_order_id,
+                                    sl_order_id=sl_order_id,
                                 )
                             except Exception as notify_err:
                                 logger.warning(f"⚠️ Failed to send exit detail to user: {notify_err}")

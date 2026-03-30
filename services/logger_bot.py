@@ -277,7 +277,8 @@ class LoggerBot:
                                      perusu_signal_text: str, sirusu_signal_text: str,
                                      perusu_value: float, sirusu_value: float,
                                      stop_loss_price: float = None,
-                                     entry_type: str = "market"):
+                                     entry_type: str = "market",
+                                     entry_order_id=None, sl_order_id=None):
         """
         Send detailed trade entry notification (for main bot user chat).
         """
@@ -299,6 +300,11 @@ class LoggerBot:
         if stop_loss_price:
             message += f"├ 🛡️ Stop Loss: ${stop_loss_price:.5f}\n"
         
+        if entry_order_id:
+            message += f"├ 📋 Entry Order ID: {entry_order_id}\n"
+        if sl_order_id:
+            message += f"├ 🛡️ SL Order ID: {sl_order_id}\n"
+        
         message += f"└ ⏰ Time: {self._get_timestamp()}"
         
         await self.send_message(message)
@@ -307,7 +313,8 @@ class LoggerBot:
                                     direction: str, entry_price: float, exit_price: float,
                                     lot_size: int, pnl_usd: float = None, pnl_inr: float = None,
                                     sirusu_signal_text: str = "",
-                                    exit_reason: str = "Sirusu flip"):
+                                    exit_reason: str = "Sirusu flip",
+                                    entry_order_id=None, sl_order_id=None, exit_order_id=None):
         """
         Send detailed trade exit notification (for main bot user chat).
         """
@@ -331,6 +338,13 @@ class LoggerBot:
             if pnl_inr is not None:
                 message += f" (₹{pnl_inr:.2f})"
             message += "\n"
+        
+        if entry_order_id:
+            message += f"├ 📋 Entry Order ID: {entry_order_id}\n"
+        if sl_order_id:
+            message += f"├ 🛡️ SL Order ID: {sl_order_id}\n"
+        if exit_order_id:
+            message += f"├ 📋 Exit Order ID: {exit_order_id}\n"
         
         message += f"└ ⏰ Time: {self._get_timestamp()}"
         

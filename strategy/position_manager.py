@@ -116,7 +116,10 @@ class PositionManager:
                 await create_order_record(order_data)
 
                 entry_order_id = entry_order.get("id")
-                entry_price = float(entry_order.get("average_fill_price", breakout_price))
+                # FIX: average_fill_price can be null for instant market orders.
+                # Fall back to breakout_price to avoid float(None) crash.
+                raw_fill_price = entry_order.get("average_fill_price")
+                entry_price = float(raw_fill_price) if raw_fill_price is not None else float(breakout_price)
                 activity_data = {
                     "user_id": algo_setup["user_id"],
                     "algo_setup_id": setup_id,
@@ -134,6 +137,7 @@ class PositionManager:
                 await update_algo_setup(setup_id, {
                     "current_position": entry_side,
                     "last_entry_price": entry_price,
+                    "last_entry_order_id": entry_order_id,
                     "last_signal_time": datetime.utcnow(),
                     "position_lock_acquired": True
                 })
@@ -298,6 +302,7 @@ class PositionManager:
                     "pending_sl_price": None,
                     "current_position": entry_side,
                     "last_entry_price": entry_price,
+                    "last_entry_order_id": pending_order_id,
                     "last_signal_time": datetime.utcnow()
                 })
             
@@ -414,6 +419,7 @@ class PositionManager:
                         "pending_sl_price": None,
                         "current_position": entry_side,
                         "last_entry_price": entry_price,
+                        "last_entry_order_id": pending_order_id,
                         "last_signal_time": datetime.utcnow()
                     })
 
@@ -522,15 +528,22 @@ class PositionManager:
             # Step 1: Cancel any active stop-loss orders
             await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
             
-            # Step 2: Place market exit order
+            # Step 2: Place market exit order (reduce_only prevents accidental position flip)
             exit_side = "sell" if current_position == "long" else "buy"
-            exit_order = await place_market_order(client, product_id, lot_size, exit_side)
+            exit_size = min(lot_size, abs(actual_size))  # Use actual position size to avoid overshoot
+            exit_order = await place_market_order(client, product_id, exit_size, exit_side,
+                                                  reduce_only=True)
             
             if not exit_order:
                 logger.error(f"❌ Failed to place exit order for {symbol}")
                 return False
 
-            exit_price = float(exit_order.get("average_fill_price", 0))
+            # FIX: average_fill_price can be null for instant market orders.
+            # Fall back to 0 to avoid float(None) crash; caller should handle 0.
+            raw_exit_fill = exit_order.get("average_fill_price")
+            exit_price = float(raw_exit_fill) if raw_exit_fill is not None else 0.0
+            if exit_price == 0.0:
+                logger.warning(f"⚠️ Exit order average_fill_price is null — PnL will be inaccurate")
             logger.info(f"✅ Exit order executed: {exit_side.upper()} {lot_size} @ ${exit_price:.5f}")
             
             # Save exit order record
@@ -598,6 +611,7 @@ class PositionManager:
             await update_algo_setup(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
+                "last_entry_order_id": None,
                 "pending_entry_order_id": None,
                 "pending_entry_side": None,
                 "pending_entry_direction_signal": None,
@@ -739,6 +753,7 @@ class PositionManager:
             await update_algo_setup(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
+                "last_entry_order_id": None,
                 "pending_entry_order_id": None,
                 "pending_entry_side": None,
                 "pending_entry_direction_signal": None,

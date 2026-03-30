@@ -47,8 +47,10 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
         return None
 
 async def place_market_order(client: DeltaExchangeClient, product_id: int, 
-                            size: int, side: str) -> Optional[Dict[str, Any]]:
-    return await place_order(client, product_id, size, side, ORDER_TYPE_MARKET)
+                            size: int, side: str,
+                            reduce_only: bool = False) -> Optional[Dict[str, Any]]:
+    return await place_order(client, product_id, size, side, ORDER_TYPE_MARKET,
+                             reduce_only=reduce_only)
 
 async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id: int,
                                         size: int, side: str, 
