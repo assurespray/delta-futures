@@ -258,8 +258,23 @@ class PositionManager:
             
                 entry_side = algo_setup.get("pending_entry_side") or \
                     ("long" if algo_setup.get("pending_entry_direction_signal") == 1 else "short")
+                
+                # Fetch actual fill price from order history to avoid slippage issues
                 entry_price = algo_setup.get("entry_trigger_price")
-            
+                try:
+                    from api.orders import get_order_history
+                    history = await get_order_history(client, product_id)
+                    if history:
+                        filled_order = next((o for o in history if str(o.get("id")) == str(pending_order_id)), None)
+                        if filled_order and filled_order.get("average_fill_price") is not None:
+                            entry_price = float(filled_order.get("average_fill_price"))
+                            logger.info(f"   Actual fill price from history: ${entry_price}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch actual fill price for entry {pending_order_id}: {e}")
+                
+                if entry_price is None:
+                    entry_price = 0.0
+
                 # Create position record
                 logger.info(f"🔍 Creating position record for stop-market fill: {symbol}")
                 await create_position_record({
@@ -379,8 +394,9 @@ class PositionManager:
                     logger.info(f"✅ [FILL-MONITOR] Position exists on exchange (size={actual_size}) - treating as filled")
                     entry_side = algo_setup.get("pending_entry_side") or \
                         ("long" if actual_size > 0 else "short")
-                    entry_price = algo_setup.get("entry_trigger_price") or \
+                    raw_entry_price = algo_setup.get("entry_trigger_price") or \
                         (actual_position.get("entry_price") if actual_position else None)
+                    entry_price = float(raw_entry_price) if raw_entry_price is not None else 0.0
 
                     await create_position_record({
                         "algo_setup_id": setup_id,
@@ -436,6 +452,12 @@ class PositionManager:
                             await self._place_stop_loss_protection(
                                 client, product_id, lot_size, entry_side, sl_price,
                                 setup_id, symbol, algo_setup.get("user_id")
+                            )
+                        else:
+                            logger.error(
+                                f"[SL] ❌ POSITION LEFT UNPROTECTED for {symbol}! "
+                                f"No valid Sirusu value: pending_sl_price={algo_setup.get('pending_sl_price')}, "
+                                f"sirusu_value={sirusu_value}"
                             )
                     return True
             else:

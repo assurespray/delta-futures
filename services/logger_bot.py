@@ -158,12 +158,14 @@ class LoggerBot:
             pnl_usd: PnL in USD
             pnl_inr: PnL in INR
         """
-        emoji = "💰" if pnl_usd >= 0 else "📉"
+        emoji = "💰" if (pnl_usd is not None and pnl_usd >= 0) else "📉"
+        pnl_usd_str = f"${float(pnl_usd):.2f}" if pnl_usd is not None else "N/A"
+        pnl_inr_str = f"₹{float(pnl_inr):.2f}" if pnl_inr is not None else "N/A"
         
         message = f"{emoji} **PnL UPDATE**\n\n"
         message += f"**Setup:** {setup_name}\n"
         message += f"**Asset:** {asset}\n"
-        message += f"**PnL:** ${pnl_usd:.2f} (₹{pnl_inr:.2f})\n"
+        message += f"**PnL:** {pnl_usd_str} ({pnl_inr_str})\n"
         message += f"\n_Time: {self._get_timestamp()}_"
         
         await self.send_message(message)
