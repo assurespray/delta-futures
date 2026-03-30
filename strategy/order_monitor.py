@@ -251,9 +251,11 @@ class OrderMonitor:
         logger.info(f"✅ [MONITOR] Pending order FILLED: {order.get('id')}")
         
         # Get fill details
-        entry_price = float(order.get("average_fill_price", 0))
+        raw_fill_price = order.get("average_fill_price")
+        entry_price = float(raw_fill_price) if raw_fill_price is not None else 0.0
         if entry_price == 0:
-            entry_price = float(order.get("stop_price", 0))
+            raw_stop = order.get("stop_price")
+            entry_price = float(raw_stop) if raw_stop is not None else 0.0
         
         entry_side = "long" if order.get("side") == "buy" else "short"
         lot_size = algo_setup['lot_size']

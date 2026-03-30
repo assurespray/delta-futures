@@ -221,7 +221,7 @@ class PositionManager:
                 db = await get_db()
                 await release_position_lock(db, symbol, setup_id)
                 logger.warning(f"⚠️ Lock released due to exception")
-            except:
+            except Exception:
                 pass
             return False
 
@@ -773,14 +773,32 @@ class PositionManager:
             
         except Exception as e:
             logger.error(f"❌ Error finalizing exit: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Ensure lock is released even if earlier steps failed
+            try:
+                db = await get_db()
+                await release_position_lock(db, symbol, setup_id)
+                logger.warning(f"⚠️ Position lock released in _finalize_exit error handler")
+            except Exception as lock_err:
+                logger.error(f"❌ CRITICAL: Could not release lock for {symbol}: {lock_err}")
 
-    def _calculate_pnl(self, entry_price: float, exit_price: float, 
+    def _calculate_pnl(self, entry_price, exit_price, 
                       lot_size: int, position_side: str) -> float:
-        if position_side == "long":
-            pnl = (exit_price - entry_price) * lot_size
-        else:
-            pnl = (entry_price - exit_price) * lot_size
-        return pnl
+        try:
+            ep = float(entry_price) if entry_price is not None else 0.0
+            xp = float(exit_price) if exit_price is not None else 0.0
+            if ep == 0.0 or xp == 0.0:
+                logger.warning(f"⚠️ PnL calculation with zero price: entry={ep}, exit={xp}")
+                return 0.0
+            if position_side == "long":
+                pnl = (xp - ep) * lot_size
+            else:
+                pnl = (ep - xp) * lot_size
+            return pnl
+        except (TypeError, ValueError) as e:
+            logger.error(f"❌ PnL calculation error: entry={entry_price}, exit={exit_price}: {e}")
+            return 0.0
 
     async def sync_exchange_positions_and_orders(self, client: DeltaExchangeClient, all_setups: list):
         """
@@ -891,14 +909,17 @@ class PositionManager:
                     # Re-save as pending order if needed
                     order_type = order.get("order_type")
                     if order_type == "stop_market_order":
+                        # FIX: Convert exchange side (buy/sell) to position side (long/short)
+                        exchange_side = order.get("side")
+                        position_side = "long" if exchange_side == "buy" else "short"
                         await update_algo_setup(setup_id, {
                             "pending_entry_order_id": order.get("id"),
                             "entry_trigger_price": order.get("stop_price"),
-                            "pending_entry_direction_signal": 1 if order.get("side")=="buy" else -1,
-                            "pending_entry_side": order.get("side"),
+                            "pending_entry_direction_signal": 1 if exchange_side == "buy" else -1,
+                            "pending_entry_side": position_side,
                             "last_signal_time": datetime.utcnow(),
                         })
-                    elif order_type == "market_order" and order.get("reduce_only"):
+                    elif order.get("reduce_only") and order.get("stop_order_type") == "stop_loss_order":
                         await update_algo_setup(setup_id, {
                             "stop_loss_order_id": order.get("id"),
                         })

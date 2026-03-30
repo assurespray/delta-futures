@@ -110,16 +110,19 @@ class LoggerBot:
         """
         emoji = "🟢" if direction == "long" else "🔴"
         
+        # Guard against None values in formatting
+        price_str = f"${float(entry_price):.2f}" if entry_price is not None else "N/A"
+        
         message = f"{emoji} **TRADE ENTRY**\n\n"
         message += f"**Setup:** {setup_name}\n"
         message += f"**Asset:** {asset}\n"
         message += f"**Direction:** {direction.upper()}\n"
-        message += f"**Entry Price:** ${entry_price:.2f}\n"
+        message += f"**Entry Price:** {price_str}\n"
         message += f"**Lot Size:** {lot_size} contracts\n"
         message += f"**Perusu Signal:** {perusu_signal}\n"
         
-        if sirusu_sl:
-            message += f"**Stop-Loss:** ${sirusu_sl:.2f}\n"
+        if sirusu_sl is not None:
+            message += f"**Stop-Loss:** ${float(sirusu_sl):.2f}\n"
         
         message += f"\n_Time: {self._get_timestamp()}_"
         
@@ -284,21 +287,26 @@ class LoggerBot:
         """
         emoji = "🟢" if direction == "long" else "🔴"
         
+        # Guard against None values in formatting
+        ep_str = f"${float(entry_price):.5f}" if entry_price is not None else "N/A"
+        pv_str = f"${float(perusu_value):.5f}" if perusu_value is not None else "N/A"
+        sv_str = f"${float(sirusu_value):.5f}" if sirusu_value is not None else "N/A"
+        
         message = (
             f"{emoji} **TRADE ENTRY**\n\n"
             f"**Setup:** {setup_name}\n"
             f"**Asset:** {asset} @ {timeframe}\n"
             f"**Direction:** {direction.upper()}\n"
             f"**Entry Type:** {entry_type.upper()}\n"
-            f"**Entry Price:** ${entry_price:.5f}\n"
+            f"**Entry Price:** {ep_str}\n"
             f"**Lot Size:** {lot_size} contracts\n\n"
             f"**Indicators at Entry:**\n"
-            f"├ 🟢 Perusu: {perusu_signal_text} (${perusu_value:.5f})\n"
-            f"├ 🔴 Sirusu: {sirusu_signal_text} (${sirusu_value:.5f})\n"
+            f"├ 🟢 Perusu: {perusu_signal_text} ({pv_str})\n"
+            f"├ 🔴 Sirusu: {sirusu_signal_text} ({sv_str})\n"
         )
         
-        if stop_loss_price:
-            message += f"├ 🛡️ Stop Loss: ${stop_loss_price:.5f}\n"
+        if stop_loss_price is not None:
+            message += f"├ 🛡️ Stop Loss: ${float(stop_loss_price):.5f}\n"
         
         if entry_order_id:
             message += f"├ 📋 Entry Order ID: {entry_order_id}\n"
@@ -320,6 +328,10 @@ class LoggerBot:
         """
         pnl_emoji = "💰" if (pnl_usd and pnl_usd >= 0) else "📉"
         
+        # Guard against None values in formatting
+        ep_str = f"${float(entry_price):.5f}" if entry_price is not None else "N/A"
+        xp_str = f"${float(exit_price):.5f}" if exit_price is not None else "N/A"
+        
         message = (
             f"🚪 **TRADE EXIT**\n\n"
             f"**Setup:** {setup_name}\n"
@@ -327,8 +339,8 @@ class LoggerBot:
             f"**Direction:** {direction.upper()}\n"
             f"**Exit Reason:** {exit_reason}\n\n"
             f"**Trade Details:**\n"
-            f"├ Entry Price: ${entry_price:.5f}\n"
-            f"├ Exit Price: ${exit_price:.5f}\n"
+            f"├ Entry Price: {ep_str}\n"
+            f"├ Exit Price: {xp_str}\n"
             f"├ Lot Size: {lot_size} contracts\n"
             f"├ 🔴 Sirusu Signal: {sirusu_signal_text}\n"
         )

@@ -335,12 +335,18 @@ class AlgoEngine:
                     if stop_loss_order_id and product_id:
                         sl_filled = await is_order_gone(client, stop_loss_order_id, product_id)
                     if sl_filled:
-                        logger.warning(f"⚠️ Stop-loss already filled - skipping market exit")
-                        logger.info(f"   execute_exit() will handle state sync")
+                        # SL already filled on exchange — execute_exit will detect
+                        # zero position and call _sync_closed_position to clean up DB.
+                        # This is correct behavior: we still call execute_exit so it
+                        # can reconcile DB state, but it won't place a new market order.
+                        logger.warning(f"⚠️ Stop-loss already filled - execute_exit will sync DB state")
                     exit_start = time.time()
                     # Refresh setup so stop_loss_order_id is latest
                     updated_setup = await get_algo_setup_by_id(setup_id)
-                    algo_setup.update(updated_setup)
+                    if updated_setup:
+                        algo_setup.update(updated_setup)
+                    else:
+                        logger.warning(f"⚠️ Could not refresh setup {setup_id} from DB — using stale data")
                     success = await self.position_manager.execute_exit(
                         client=client,
                         algo_setup=algo_setup,
@@ -415,6 +421,11 @@ class AlgoEngine:
             import traceback
             logger.error(traceback.format_exc())
             await self.logger_bot.send_error(f"Exception in {setup_name}: {str(e)[:200]}")
+            # Ensure client is closed even on exception
+            try:
+                await client.close()
+            except Exception:
+                pass
 
     def _update_performance_stats(self, elapsed: float):
         self.performance_stats["total_processing_time"] += elapsed
@@ -571,7 +582,7 @@ class AlgoEngine:
         while True:
             try:
                 loop_count += 1
-                if loop_count % 1 == 0:
+                if loop_count % 10 == 0:
                     logger.info(f"❤️ AlgoEngine heartbeat loop={loop_count}")
                     
                 active_setups = await get_all_active_algo_setups()

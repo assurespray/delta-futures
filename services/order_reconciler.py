@@ -114,18 +114,23 @@ async def _handle_sl_fill(order, setup, client, logger_bot=None):
     # 5. Send Telegram notifications
     if logger_bot:
         try:
-            # Log channel notification
-            await logger_bot.send_message(
+            # Log channel notification — build message safely
+            entry_price_str = f"${float(entry_price):.5f}" if entry_price else "N/A"
+            exit_price_str = f"${exit_price:.5f}" if exit_price else "N/A"
+            pnl_str = f"${pnl:.4f} (₹{pnl_inr:.2f})" if pnl is not None else "N/A"
+
+            log_msg = (
                 f"🛡️ **STOP-LOSS TRIGGERED**\n\n"
                 f"**Setup:** {setup_name}\n"
                 f"**Asset:** {symbol}\n"
                 f"**Direction:** {current_position.upper() if current_position else 'N/A'}\n"
                 f"**SL Order ID:** {order_id}\n"
-                f"**Entry Price:** ${float(entry_price):.5f}" if entry_price else "N/A" + "\n"
-                f"**Exit Price:** ${exit_price:.5f}" if exit_price else "N/A" + "\n"
-                f"**PnL:** ${pnl:.4f} (₹{pnl_inr:.2f})" if pnl is not None else "N/A" + "\n\n"
+                f"**Entry Price:** {entry_price_str}\n"
+                f"**Exit Price:** {exit_price_str}\n"
+                f"**PnL:** {pnl_str}\n\n"
                 f"_Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}_"
             )
+            await logger_bot.send_message(log_msg)
         except Exception as e:
             logger.warning(f"⚠️ Failed to send SL log notification: {e}")
 
