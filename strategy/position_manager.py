@@ -518,7 +518,7 @@ class PositionManager:
 
     async def execute_exit(self, client: DeltaExchangeClient,
                            algo_setup: Dict[str, Any],
-                           sirusu_signal_text: str) -> bool:
+                           sirusu_signal_text: str) -> tuple[bool, float, str]:
         try:
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
@@ -530,7 +530,7 @@ class PositionManager:
 
             if not current_position or not product_id:
                 logger.warning(f"⚠️ No current position or product_id for {symbol}")
-                return False
+                return False, 0.0, ""
 
             logger.info(f"🚪 Executing exit for {setup_name} - {current_position.upper()} position")
             logger.info(f"   Reason: {sirusu_signal_text}")
@@ -558,14 +558,27 @@ class PositionManager:
             
             if not exit_order:
                 logger.error(f"❌ Failed to place exit order for {symbol}")
-                return False
+                return False, 0.0, ""
 
             # FIX: average_fill_price can be null for instant market orders.
-            # Fall back to 0 to avoid float(None) crash; caller should handle 0.
             raw_exit_fill = exit_order.get("average_fill_price")
             exit_price = float(raw_exit_fill) if raw_exit_fill is not None else 0.0
+            
+            # Fetch actual fill price from order history to avoid slippage/null issues
+            if exit_price == 0.0 and exit_order.get("id"):
+                try:
+                    from api.orders import get_order_history
+                    history = await get_order_history(client, product_id)
+                    if history:
+                        filled_order = next((o for o in history if str(o.get("id")) == str(exit_order.get("id"))), None)
+                        if filled_order and filled_order.get("average_fill_price") is not None:
+                            exit_price = float(filled_order.get("average_fill_price"))
+                            logger.info(f"   Actual exit fill price from history: ${exit_price}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch actual exit fill price from history: {e}")
+            
             if exit_price == 0.0:
-                logger.warning(f"⚠️ Exit order average_fill_price is null — PnL will be inaccurate")
+                logger.warning(f"⚠️ Exit order average_fill_price is still 0.0 — PnL will be inaccurate")
             logger.info(f"✅ Exit order executed: {exit_side.upper()} {lot_size} @ ${exit_price:.5f}")
             
             # Save exit order record
@@ -575,20 +588,20 @@ class PositionManager:
             await self._finalize_exit(setup_id, symbol, current_position, lot_size, exit_price, sirusu_signal_text)
             
             logger.info(f"✅ Exit completed successfully for {setup_name}")
-            return True
+            return True, exit_price, f"Sirusu flip to {sirusu_signal_text}"
             
         except Exception as e:
             logger.error(f"❌ Exception in execute_exit for {algo_setup.get('setup_name')}: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return False
+            return False, 0.0, ""
 
     async def _sync_closed_position(self, setup_id: str, symbol: str, current_position: str,
                                    lot_size: int, sirusu_signal_text: str, stop_loss_order_id: Optional[str],
-                                   client: DeltaExchangeClient, product_id: int) -> bool:
+                                   client: DeltaExchangeClient, product_id: int) -> tuple[bool, float, str]:
         """Sync database when position is already closed on exchange."""
         try:
-            exit_price = None
+            exit_price = 0.0
             exit_reason = "Manual close"
             
             # Check if it was closed by stop-loss
@@ -598,7 +611,8 @@ class PositionManager:
                 sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
                 
                 if sl_order and sl_order.get("state") == "filled":
-                    exit_price = sl_order.get("average_fill_price")
+                    raw_exit = sl_order.get("average_fill_price")
+                    exit_price = float(raw_exit) if raw_exit is not None else 0.0
                     exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"
                     await update_order_record(stop_loss_order_id, {
                         "status": "filled",
@@ -620,7 +634,7 @@ class PositionManager:
                     "is_closed": True
                 }
                 
-                if exit_price:
+                if exit_price != 0.0:
                     entry_price = activity.get("entry_price", 0)
                     pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
                     pnl_inr = pnl * settings.usd_to_inr_rate
@@ -649,13 +663,11 @@ class PositionManager:
                 {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
             )
             await release_position_lock(db, symbol, setup_id)
-            
-            logger.info(f"✅ Database synchronized for closed position: {symbol}")
-            return True
-            
+            logger.info(f"✅ State successfully synced for {symbol}")
+            return True, exit_price, exit_reason
         except Exception as e:
-            logger.error(f"❌ Error syncing closed position {symbol}: {e}")
-            return False
+            logger.error(f"❌ Error syncing closed position: {e}")
+            return False, 0.0, ""
 
     async def _cancel_stop_loss_orders(self, client: DeltaExchangeClient, product_id: int,
                                      symbol: str, stop_loss_order_id: Optional[str]) -> None:

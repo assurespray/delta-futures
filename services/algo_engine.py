@@ -347,7 +347,7 @@ class AlgoEngine:
                         algo_setup.update(updated_setup)
                     else:
                         logger.warning(f"⚠️ Could not refresh setup {setup_id} from DB — using stale data")
-                    success = await self.position_manager.execute_exit(
+                    success, real_exit_price, exit_reason = await self.position_manager.execute_exit(
                         client=client,
                         algo_setup=algo_setup,
                         sirusu_signal_text=sirusu_data['signal_text']
@@ -369,8 +369,11 @@ class AlgoEngine:
                         # Send detailed exit to user's main bot chat
                         user_id = algo_setup.get("user_id")
                         entry_price = algo_setup.get("last_entry_price", 0)
-                        exit_price = perusu_data.get("latest_close", 0)
+                        
+                        # Use actual exit price from the exchange (fallback to candle close if 0.0)
+                        exit_price = real_exit_price if real_exit_price != 0.0 else perusu_data.get("latest_close", 0)
                         lot_size = algo_setup.get("lot_size", 0)
+                        
                         if user_id:
                             try:
                                 # Calculate PnL for the notification
@@ -398,7 +401,7 @@ class AlgoEngine:
                                     pnl_usd=pnl_usd,
                                     pnl_inr=pnl_inr,
                                     sirusu_signal_text=sirusu_data['signal_text'],
-                                    exit_reason=f"Sirusu flip to {sirusu_data['signal_text']}",
+                                    exit_reason=exit_reason,
                                     entry_order_id=entry_order_id,
                                     sl_order_id=sl_order_id,
                                 )
