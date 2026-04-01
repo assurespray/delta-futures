@@ -328,7 +328,7 @@ class LoggerBot:
         """
         Send detailed trade exit notification (for main bot user chat).
         """
-        pnl_emoji = "💰" if (pnl_usd and pnl_usd >= 0) else "📉"
+        pnl_emoji = "💰" if (pnl_usd is not None and pnl_usd >= 0) else "📉"
         
         # Guard against None values in formatting
         ep_str = f"${float(entry_price):.5f}" if entry_price is not None else "N/A"

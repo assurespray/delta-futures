@@ -96,6 +96,7 @@ class AlgoEngine:
                 await self.logger_bot.send_error(f"Failed to load API credentials for setup: {setup_name}")
                 return
 
+            client = None
             client = DeltaExchangeClient(
                 api_key=cred['api_key'],
                 api_secret=cred['api_secret']
@@ -233,7 +234,7 @@ class AlgoEngine:
                     # Candle close can never exceed its own high, so the old
                     # comparison (close > high) was always False.
                     live_price = await get_ticker_mark_price(client, asset)
-                    if live_price <= 0:
+                    if not live_price or live_price <= 0:
                         # Fallback to candle close if ticker API fails
                         live_price = perusu_data["latest_close"]
                         logger.warning(f"⚠️ Mark price unavailable, falling back to candle close: {live_price}")
@@ -281,15 +282,18 @@ class AlgoEngine:
                         actual_entry_price = refreshed_setup.get("last_entry_price", live_price) if refreshed_setup else live_price
 
                         # Send to log bot (existing)
-                        await self.logger_bot.send_trade_entry(
-                            setup_name=setup_name,
-                            asset=asset,
-                            direction=side,
-                            entry_price=actual_entry_price,
-                            lot_size=algo_setup["lot_size"],
-                            perusu_signal=perusu_data["signal_text"],
-                            sirusu_sl=sirusu_data["supertrend_value"],
-                        )
+                        try:
+                            await self.logger_bot.send_trade_entry(
+                                setup_name=setup_name,
+                                asset=asset,
+                                direction=side,
+                                entry_price=actual_entry_price,
+                                lot_size=algo_setup["lot_size"],
+                                perusu_signal=perusu_data["signal_text"],
+                                sirusu_sl=sirusu_data["supertrend_value"],
+                            )
+                        except Exception as notify_err:
+                            logger.warning(f"⚠️ Failed to send trade entry log notification: {notify_err}")
                         # Send detailed entry to user's main bot chat
                         user_id = algo_setup.get("user_id")
                         if user_id:
@@ -360,18 +364,21 @@ class AlgoEngine:
                         sl_order_id = algo_setup.get("stop_loss_order_id")
 
                         # Send to log bot (existing)
-                        await self.logger_bot.send_trade_exit(
-                            setup_name=setup_name,
-                            asset=asset,
-                            direction=current_position,
-                            sirusu_signal=sirusu_data['signal_text']
-                        )
+                        try:
+                            await self.logger_bot.send_trade_exit(
+                                setup_name=setup_name,
+                                asset=asset,
+                                direction=current_position,
+                                sirusu_signal=sirusu_data['signal_text']
+                            )
+                        except Exception as notify_err:
+                            logger.warning(f"⚠️ Failed to send trade exit log notification: {notify_err}")
                         # Send detailed exit to user's main bot chat
                         user_id = algo_setup.get("user_id")
                         entry_price = algo_setup.get("last_entry_price", 0)
                         
-                        # Use actual exit price from the exchange (fallback to candle close if 0.0)
-                        exit_price = real_exit_price if real_exit_price != 0.0 else perusu_data.get("latest_close", 0)
+                        # Use actual exit price from the exchange (fallback to candle close if 0.0 or None)
+                        exit_price = real_exit_price if (real_exit_price is not None and real_exit_price != 0.0) else perusu_data.get("latest_close", 0)
                         lot_size = algo_setup.get("lot_size", 0)
                         
                         if user_id:
@@ -413,22 +420,21 @@ class AlgoEngine:
                             f"Failed to execute exit for {setup_name}"
                         )
             
-            await client.close()
             elapsed = time.time() - start_time
             self._update_performance_stats(elapsed)
             
         except Exception as e:
             self.signal_counts["errors"] += 1
-            elapsed = time.time() - start_time
             logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             await self.logger_bot.send_error(f"Exception in {setup_name}: {str(e)[:200]}")
-            # Ensure client is closed even on exception
-            try:
-                await client.close()
-            except Exception:
-                pass
+        finally:
+            if client:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
     def _update_performance_stats(self, elapsed: float):
         self.performance_stats["total_processing_time"] += elapsed
@@ -654,11 +660,13 @@ class AlgoEngine:
                             api_key=cred['api_key'],
                             api_secret=cred['api_secret']
                         )
-                        symbol = setup['asset']
-                        timeframe = setup.get('timeframe', '3m')
-                        
-                        await self.position_manager.check_entry_order_filled(client, setup, None) 
-                        await client.close()
+                        try:
+                            symbol = setup['asset']
+                            timeframe = setup.get('timeframe', '3m')
+                            
+                            await self.position_manager.check_entry_order_filled(client, setup, None) 
+                        finally:
+                            await client.close()
                 await asyncio.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"[FILL-MONITOR] Error: {e}")

@@ -18,7 +18,7 @@ async def get_ticker_mark_price(client: DeltaExchangeClient, symbol: str) -> flo
     try:
         response = await client.get(f"/v2/tickers/{symbol}")
         if response and "result" in response:
-            return float(response["result"].get("mark_price", 0))
+            return float(response["result"].get("mark_price") or 0)
         return 0.0
     except Exception as e:
         logger.warning(f"Could not fetch mark price for {symbol}: {e}")
@@ -76,8 +76,8 @@ async def format_positions_display(positions: List[Dict[str, Any]], client: Delt
                 pos.get("symbol") or
                 "Unknown"
             )
-            size = float(pos.get("size", 0))
-            entry_price = float(pos.get("entry_price", 0))
+            size = float(pos.get("size") or 0)
+            entry_price = float(pos.get("entry_price") or 0)
             if size == 0 or symbol == "Unknown":
                 continue
 
@@ -141,15 +141,17 @@ async def display_positions_for_all_apis(credentials):
         api_name = cred.get('api_name') or cred.get('api_label') or cred.get('apikey', '')[:6] + "..."
         api_key = cred.get('api_key') or cred.get('apikey') or cred.get('apiKey')
         api_secret = cred.get('api_secret') or cred.get('apisecret') or cred.get('apiSecret')
-        logger.info(f"Credentials debug: {cred}")
+        logger.debug(f"Credentials debug: api_name={cred.get('api_name', 'N/A')}")
         if not api_key or not api_secret:
             message += f"❌ Error fetching for {api_name}: missing API key or secret\n\n"
             continue
         try:
             client = DeltaExchangeClient(api_key, api_secret)
-            positions = await get_all_positions_for_assets(client)
-            formatted = await format_positions_display(positions, client)
-            await client.close()
+            try:
+                positions = await get_all_positions_for_assets(client)
+                formatted = await format_positions_display(positions, client)
+            finally:
+                await client.close()
             message += f"=== Account: **{api_name}** ===\n"
             if not formatted:
                 message += "No open positions.\n\n"

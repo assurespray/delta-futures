@@ -59,8 +59,8 @@ class OrderMonitor:
             order_status = await get_order_status_by_id(client, pending_order_id, product_id)
             logger.info(f"   Order {pending_order_id} exact status: {order_status}")
 
-            if order_status == "filled":
-                logger.info(f"✅ Pending {pending_side} entry order FILLED")
+            if order_status in ("filled", "closed", "triggered"):
+                logger.info(f"✅ Pending {pending_side} entry order FILLED (status={order_status})")
                 # Don't clear state here - let check_entry_order_filled handle the fill logic
                 return "filled"
 
@@ -348,14 +348,34 @@ class OrderMonitor:
         if cancelled:
             logger.info(f"✅ [MONITOR] Pending order cancelled successfully")
             
-            # Clear pending order from database
+            # Also cancel any stop-loss order that may have been placed
+            stop_loss_order_id = algo_setup.get('stop_loss_order_id')
+            if stop_loss_order_id:
+                logger.info(f"🗑️ [MONITOR] Cancelling associated SL order {stop_loss_order_id}")
+                try:
+                    await cancel_order(client, product_id, stop_loss_order_id)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not cancel SL order {stop_loss_order_id}: {e}")
+            
+            # Clear ALL pending state from database (including SL and lock)
             await update_algo_setup(setup_id, {
                 "pending_entry_order_id": None,
                 "pending_entry_side": None,
                 "entry_trigger_price": None,
                 "pending_entry_direction_signal": None,
-                "pending_sl_price": None
+                "pending_sl_price": None,
+                "stop_loss_order_id": None,
+                "position_lock_acquired": False
             })
+            
+            # Release position lock
+            symbol = algo_setup.get('asset')
+            try:
+                db = await get_db()
+                await release_position_lock(db, symbol, setup_id)
+                logger.info(f"✅ [MONITOR] Position lock released for {symbol}")
+            except Exception as e:
+                logger.error(f"❌ [MONITOR] Error releasing position lock: {e}")
             
             # Send Telegram notification
             if logger_bot:
@@ -365,7 +385,17 @@ class OrderMonitor:
                     setup_name, old_signal_text, new_signal_text
                 )
         else:
-            logger.error(f"❌ [MONITOR] Failed to cancel pending order")
+            logger.error(f"❌ [MONITOR] Failed to cancel pending order — checking if order filled")
+            # Cancel failed — order may have already filled on exchange
+            from api.orders import get_order_status_by_id
+            try:
+                actual_status = await get_order_status_by_id(client, pending_order_id, product_id)
+                if actual_status in ("filled", "closed", "triggered"):
+                    logger.warning(f"⚠️ [MONITOR] Order {pending_order_id} already filled (status={actual_status}) — leaving for fill monitor")
+                else:
+                    logger.error(f"❌ [MONITOR] Order {pending_order_id} status={actual_status} — cancel failed and order not filled")
+            except Exception as e:
+                logger.error(f"❌ [MONITOR] Could not check order status after cancel failure: {e}")
     
     async def _place_stop_loss(
         self,

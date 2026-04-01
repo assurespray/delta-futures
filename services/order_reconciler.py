@@ -117,7 +117,7 @@ async def _handle_sl_fill(order, setup, client, logger_bot=None):
             # Log channel notification — build message safely
             entry_price_str = f"${float(entry_price):.5f}" if entry_price else "N/A"
             exit_price_str = f"${exit_price:.5f}" if exit_price else "N/A"
-            pnl_str = f"${pnl:.4f} (₹{pnl_inr:.2f})" if pnl is not None else "N/A"
+            pnl_str = f"${pnl:.4f}" + (f" (₹{pnl_inr:.2f})" if pnl_inr is not None else "") if pnl is not None else "N/A"
 
             log_msg = (
                 f"🛡️ **STOP-LOSS TRIGGERED**\n\n"
@@ -137,7 +137,7 @@ async def _handle_sl_fill(order, setup, client, logger_bot=None):
         try:
             # User-facing notification via main bot
             timeframe = setup.get("timeframe", "")
-            pnl_emoji = "💰" if (pnl and pnl >= 0) else "📉"
+            pnl_emoji = "💰" if (pnl is not None and pnl >= 0) else "📉"
 
             user_msg = (
                 f"🛡️ **STOP-LOSS EXIT**\n\n"
@@ -235,9 +235,10 @@ async def reconcile_pending_orders(logger_bot=None):
 
                 # CRITICAL: If this was a stop-loss order that got filled,
                 # do full exit handling (PnL, activity, notification, cleanup)
-                if status == "filled" and order.get("reduce_only"):
+                # Delta Exchange returns "closed"/"triggered" for stop-market orders, not "filled"
+                if status in ("filled", "closed", "triggered") and order.get("reduce_only"):
                     logger.info(
-                        f"🛡️ Reduce-only order {order_id} FILLED — "
+                        f"🛡️ Reduce-only order {order_id} {status.upper()} — "
                         f"triggering SL exit handling for setup {algo_setup_id}"
                     )
                     await _handle_sl_fill(order, setup, client, logger_bot)
@@ -280,7 +281,7 @@ async def reconcile_pending_orders(logger_bot=None):
             )
             
             filled = await position_manager.check_entry_order_filled(
-                client, setup, None
+                client, setup, None  # sirusu_value=None; fill monitor will calculate fresh
             )
             
             if filled:

@@ -277,13 +277,13 @@ async def get_order_status_by_id(client, order_id: int, product_id: int) -> str:
         open_params = {"product_id": product_id, "state": "open"}
         open_resp = await client.get("/v2/orders", open_params)
         if open_resp and open_resp.get("success"):
-            for order in open_resp["result"]:
+            for order in open_resp.get("result") or []:
                 if str(order.get("id")) == str(order_id):
                     return order.get("state", "open").lower()
         untrig_params = {"product_id": product_id, "state": "untriggered"}
         untrig_resp = await client.get("/v2/orders", untrig_params)
         if untrig_resp and untrig_resp.get("success"):
-            for order in untrig_resp["result"]:
+            for order in untrig_resp.get("result") or []:
                 if str(order.get("id")) == str(order_id):
                     return order.get("state", "untriggered").lower()
     except Exception as e:
@@ -292,7 +292,7 @@ async def get_order_status_by_id(client, order_id: int, product_id: int) -> str:
         hist_params = {"product_id": product_id, "page_size": 100}
         hist_resp = await client.get("/v2/orders/history", hist_params)
         if hist_resp and hist_resp.get("success"):
-            for order in hist_resp["result"]:
+            for order in hist_resp.get("result") or []:
                 if str(order.get("id")) == str(order_id):
                     return order.get("state", "not_found").lower()
     except Exception as e:
