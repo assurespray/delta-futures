@@ -467,8 +467,12 @@ class AlgoEngine:
     async def _cache_indicators(self, setup_id: str, perusu_data: Dict[str, Any],
                                 sirusu_data: Dict[str, Any], asset: str, timeframe: str,
                                 setup_name: str = "", current_position: str = None):
+        # Save each indicator independently so a transient DB error in one
+        # doesn't silently swallow the other's flip detection result.
+        perusu_result = {"flip": False}
+        sirusu_result = {"flip": False}
+
         try:
-            # Save indicators with flip detection (returns dict now)
             perusu_result = await save_indicator_cache(
                 algo_setup_id=setup_id,
                 indicator_name="perusu",
@@ -477,7 +481,12 @@ class AlgoEngine:
                 signal=perusu_data['signal'],
                 value=perusu_data['supertrend_value']
             )
-        
+        except Exception as e:
+            logger.error(f"❌ Failed to cache PERUSU indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        try:
             sirusu_result = await save_indicator_cache(
                 algo_setup_id=setup_id,
                 indicator_name="sirusu",
@@ -486,102 +495,102 @@ class AlgoEngine:
                 signal=sirusu_data['signal'],
                 value=sirusu_data['supertrend_value']
             )
-        
-            perusu_flip = perusu_result.get("flip", False)
-            sirusu_flip = sirusu_result.get("flip", False)
-        
-            # Log flip detection results
-            logger.info(
-                f"📊 Indicator Cache Updated for {asset}:\n"
-                f"   Perusu: signal={perusu_data['signal']} (flip: {perusu_flip})\n"
-                f"   Sirusu: signal={sirusu_data['signal']} (flip: {sirusu_flip})"
-            )
-
-            # Send detailed flip notifications to log bot
-            current_price = perusu_data.get("latest_close")
-
-            if perusu_flip:
-                # Determine what action will be taken
-                perusu_sig = perusu_data['signal']
-                sirusu_sig = sirusu_data['signal']
-                aligned = (perusu_sig == sirusu_sig)
-
-                if not current_position and aligned:
-                    action = "ENTRY SIGNAL - Perusu flipped and Sirusu aligned"
-                elif not current_position and not aligned:
-                    action = "No Entry - Perusu flipped but Sirusu NOT aligned (waiting)"
-                elif current_position:
-                    action = f"Perusu flipped while in {current_position.upper()} position (monitoring)"
-                else:
-                    action = "Perusu flipped - evaluating"
-
-                try:
-                    await self.logger_bot.send_flip_log(
-                        setup_name=setup_name,
-                        asset=asset,
-                        timeframe=timeframe,
-                        indicator_name="perusu",
-                        old_signal_text=perusu_result.get("old_signal_text", "Unknown"),
-                        new_signal_text=perusu_result.get("new_signal_text", "Unknown"),
-                        perusu_signal=perusu_data['signal'],
-                        sirusu_signal=sirusu_data['signal'],
-                        current_position=current_position,
-                        action=action,
-                        perusu_value=perusu_data.get('supertrend_value'),
-                        sirusu_value=sirusu_data.get('supertrend_value'),
-                        current_price=current_price,
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to send perusu flip log: {e}")
-
-            if sirusu_flip:
-                sirusu_sig = sirusu_data['signal']
-
-                if current_position:
-                    # Check if sirusu flipped against the position (exit signal)
-                    exit_trigger = (
-                        (current_position == "long" and sirusu_sig == -1) or
-                        (current_position == "short" and sirusu_sig == 1)
-                    )
-                    if exit_trigger:
-                        action = f"EXIT SIGNAL - Sirusu flipped against {current_position.upper()} position"
-                    else:
-                        action = f"Sirusu flipped in favor of {current_position.upper()} position (no action)"
-                elif not current_position:
-                    action = "No Signal - Sirusu flipped but no position open (post-exit wandering)"
-                else:
-                    action = "Sirusu flipped - evaluating"
-
-                try:
-                    await self.logger_bot.send_flip_log(
-                        setup_name=setup_name,
-                        asset=asset,
-                        timeframe=timeframe,
-                        indicator_name="sirusu",
-                        old_signal_text=sirusu_result.get("old_signal_text", "Unknown"),
-                        new_signal_text=sirusu_result.get("new_signal_text", "Unknown"),
-                        perusu_signal=perusu_data['signal'],
-                        sirusu_signal=sirusu_data['signal'],
-                        current_position=current_position,
-                        action=action,
-                        perusu_value=perusu_data.get('supertrend_value'),
-                        sirusu_value=sirusu_data.get('supertrend_value'),
-                        current_price=current_price,
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to send sirusu flip log: {e}")
-
-            # Return flip info for potential use
-            return {
-                "perusu_flip": perusu_flip,
-                "sirusu_flip": sirusu_flip,
-                "perusu_result": perusu_result,
-                "sirusu_result": sirusu_result,
-            }
-        
         except Exception as e:
-            logger.error(f"❌ Failed to cache indicators: {e}")
-            return None
+            logger.error(f"❌ Failed to cache SIRUSU indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        perusu_flip = perusu_result.get("flip", False)
+        sirusu_flip = sirusu_result.get("flip", False)
+    
+        # Log flip detection results
+        logger.info(
+            f"📊 Indicator Cache Updated for {asset}:\n"
+            f"   Perusu: signal={perusu_data['signal']} (flip: {perusu_flip})\n"
+            f"   Sirusu: signal={sirusu_data['signal']} (flip: {sirusu_flip})"
+        )
+
+        # Send detailed flip notifications to log bot
+        current_price = perusu_data.get("latest_close")
+
+        if perusu_flip:
+            # Determine what action will be taken
+            perusu_sig = perusu_data['signal']
+            sirusu_sig = sirusu_data['signal']
+            aligned = (perusu_sig == sirusu_sig)
+
+            if not current_position and aligned:
+                action = "ENTRY SIGNAL - Perusu flipped and Sirusu aligned"
+            elif not current_position and not aligned:
+                action = "No Entry - Perusu flipped but Sirusu NOT aligned (waiting)"
+            elif current_position:
+                action = f"Perusu flipped while in {current_position.upper()} position (monitoring)"
+            else:
+                action = "Perusu flipped - evaluating"
+
+            try:
+                await self.logger_bot.send_flip_log(
+                    setup_name=setup_name,
+                    asset=asset,
+                    timeframe=timeframe,
+                    indicator_name="perusu",
+                    old_signal_text=perusu_result.get("old_signal_text", "Unknown"),
+                    new_signal_text=perusu_result.get("new_signal_text", "Unknown"),
+                    perusu_signal=perusu_data['signal'],
+                    sirusu_signal=sirusu_data['signal'],
+                    current_position=current_position,
+                    action=action,
+                    perusu_value=perusu_data.get('supertrend_value'),
+                    sirusu_value=sirusu_data.get('supertrend_value'),
+                    current_price=current_price,
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to send perusu flip log: {e}")
+
+        if sirusu_flip:
+            sirusu_sig = sirusu_data['signal']
+
+            if current_position:
+                # Check if sirusu flipped against the position (exit signal)
+                exit_trigger = (
+                    (current_position == "long" and sirusu_sig == -1) or
+                    (current_position == "short" and sirusu_sig == 1)
+                )
+                if exit_trigger:
+                    action = f"EXIT SIGNAL - Sirusu flipped against {current_position.upper()} position"
+                else:
+                    action = f"Sirusu flipped in favor of {current_position.upper()} position (no action)"
+            elif not current_position:
+                action = "No Signal - Sirusu flipped but no position open (post-exit wandering)"
+            else:
+                action = "Sirusu flipped - evaluating"
+
+            try:
+                await self.logger_bot.send_flip_log(
+                    setup_name=setup_name,
+                    asset=asset,
+                    timeframe=timeframe,
+                    indicator_name="sirusu",
+                    old_signal_text=sirusu_result.get("old_signal_text", "Unknown"),
+                    new_signal_text=sirusu_result.get("new_signal_text", "Unknown"),
+                    perusu_signal=perusu_data['signal'],
+                    sirusu_signal=sirusu_data['signal'],
+                    current_position=current_position,
+                    action=action,
+                    perusu_value=perusu_data.get('supertrend_value'),
+                    sirusu_value=sirusu_data.get('supertrend_value'),
+                    current_price=current_price,
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to send sirusu flip log: {e}")
+
+        # Return flip info for potential use
+        return {
+            "perusu_flip": perusu_flip,
+            "sirusu_flip": sirusu_flip,
+            "perusu_result": perusu_result,
+            "sirusu_result": sirusu_result,
+        }
 
     async def run_continuous_monitoring(self):
         logger.info("AlgoEngine.run_continuous_monitoring() ENTERED")

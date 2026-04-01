@@ -228,13 +228,10 @@ async def reconcile_pending_orders(logger_bot=None):
                 not_found_count += 1
                 logger.info(f"✅ Order {order_id} not found; marked not_found")
             else:
-                await db.orders.update_one(
-                    {"order_id": order_id},
-                    {"$set": {"status": status, "updated_at": datetime.utcnow()}}
-                )
-
                 # CRITICAL: If this was a stop-loss order that got filled,
-                # do full exit handling (PnL, activity, notification, cleanup)
+                # do full exit handling BEFORE updating status in DB.
+                # This ensures that if _handle_sl_fill fails, the order stays
+                # "pending" and gets retried on the next reconciliation cycle.
                 # Delta Exchange returns "closed"/"triggered" for stop-market orders, not "filled"
                 if status in ("filled", "closed", "triggered") and order.get("reduce_only"):
                     logger.info(
@@ -242,6 +239,12 @@ async def reconcile_pending_orders(logger_bot=None):
                         f"triggering SL exit handling for setup {algo_setup_id}"
                     )
                     await _handle_sl_fill(order, setup, client, logger_bot)
+
+                # Only update status AFTER successful SL handling (or if not an SL order)
+                await db.orders.update_one(
+                    {"order_id": order_id},
+                    {"$set": {"status": status, "updated_at": datetime.utcnow()}}
+                )
     
                 updated_count += 1
                 logger.info(f"✅ Order {order_id} status updated to '{status}'")

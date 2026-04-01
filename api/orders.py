@@ -286,6 +286,15 @@ async def get_order_status_by_id(client, order_id: int, product_id: int) -> str:
             for order in untrig_resp.get("result") or []:
                 if str(order.get("id")) == str(order_id):
                     return order.get("state", "untriggered").lower()
+        # Also check "triggered" state — stop-market orders briefly enter this state
+        # before transitioning to "closed". Without this, a race condition can cause
+        # a false "not_found" result during the transition window.
+        trig_params = {"product_id": product_id, "state": "triggered"}
+        trig_resp = await client.get("/v2/orders", trig_params)
+        if trig_resp and trig_resp.get("success"):
+            for order in trig_resp.get("result") or []:
+                if str(order.get("id")) == str(order_id):
+                    return order.get("state", "triggered").lower()
     except Exception as e:
         logger.warning(f"Open order status check failed: {e}")
     try:
