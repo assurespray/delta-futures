@@ -248,7 +248,7 @@ class PositionManager:
             order_status = await get_order_status_by_id(client, pending_order_id, product_id)
             logger.info(f"[FILL-MONITOR] Order {pending_order_id} status: {order_status}")
 
-            if order_status == "filled":
+            if order_status in ("filled", "closed", "triggered"):
                 # ---- ORDER WAS GENUINELY FILLED ----
                 logger.info(f"✅ Stop-market entry FILLED for {setup_name}")
                 await update_order_record(pending_order_id, {
@@ -552,7 +552,7 @@ class PositionManager:
             
             # Step 2: Place market exit order (reduce_only prevents accidental position flip)
             exit_side = "sell" if current_position == "long" else "buy"
-            exit_size = min(lot_size, abs(actual_size))  # Use actual position size to avoid overshoot
+            exit_size = int(min(lot_size, abs(actual_size)))  # Use actual position size to avoid overshoot; int() required by Delta API
             exit_order = await place_market_order(client, product_id, exit_size, exit_side,
                                                   reduce_only=True)
             
