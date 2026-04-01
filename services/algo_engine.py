@@ -326,24 +326,30 @@ class AlgoEngine:
                     
             # ✅ EXIT SIGNAL CHECK (has position)
             elif current_position:
+                # FIRST: Check if SL has already filled on exchange — independently of exit signal.
+                # Without this, an SL fill would go undetected until Sirusu flips,
+                # leaving stale "open" position state and blocking new entries.
+                stop_loss_order_id = algo_setup.get("stop_loss_order_id")
+                sl_already_filled = False
+                if stop_loss_order_id and product_id:
+                    sl_already_filled = await is_order_gone(client, stop_loss_order_id, product_id)
+                    if sl_already_filled:
+                        logger.warning(f"⚠️ Stop-loss already filled on exchange — syncing DB state")
+
                 exit_signal = self.strategy.generate_exit_signal(
                     setup_id,
                     current_position,
                     indicator_result
                 )
-                if exit_signal:
-                    self.signal_counts["exit_signals"] += 1
-                    logger.info(f"🚪 Exit signal detected for {setup_name}")
-                    stop_loss_order_id = algo_setup.get("stop_loss_order_id")
-                    sl_filled = False
-                    if stop_loss_order_id and product_id:
-                        sl_filled = await is_order_gone(client, stop_loss_order_id, product_id)
-                    if sl_filled:
-                        # SL already filled on exchange — execute_exit will detect
-                        # zero position and call _sync_closed_position to clean up DB.
-                        # This is correct behavior: we still call execute_exit so it
-                        # can reconcile DB state, but it won't place a new market order.
-                        logger.warning(f"⚠️ Stop-loss already filled - execute_exit will sync DB state")
+
+                # Execute exit if either: (a) Sirusu flipped (exit_signal), or (b) SL already filled
+                if exit_signal or sl_already_filled:
+                    if exit_signal:
+                        self.signal_counts["exit_signals"] += 1
+                        logger.info(f"🚪 Exit signal detected for {setup_name}")
+                    else:
+                        logger.info(f"🛡️ SL filled — executing exit sync for {setup_name}")
+
                     exit_start = time.time()
                     # Refresh setup so stop_loss_order_id is latest
                     updated_setup = await get_algo_setup_by_id(setup_id)

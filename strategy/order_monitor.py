@@ -82,7 +82,7 @@ class OrderMonitor:
 
             # Order is still live (open/untriggered) - check for Sirusu reversal
             cached_sirusu = await get_indicator_cache(setup_id, "sirusu")
-            last_sirusu_signal = cached_sirusu.get('last_signal') if cached_sirusu else None
+            last_sirusu_signal = cached_sirusu.get('previous_signal') if cached_sirusu else None
 
             if last_sirusu_signal is None:
                 logger.warning(f"⚠️ No cached Sirusu signal - cannot check reversal")

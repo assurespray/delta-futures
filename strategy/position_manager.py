@@ -610,7 +610,7 @@ class PositionManager:
                 history = await get_order_history(client, product_id)
                 sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
                 
-                if sl_order and sl_order.get("state") == "filled":
+                if sl_order and sl_order.get("state") in ("filled", "closed", "triggered"):
                     raw_exit = sl_order.get("average_fill_price")
                     exit_price = float(raw_exit) if raw_exit is not None else 0.0
                     exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"

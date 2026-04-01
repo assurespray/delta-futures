@@ -176,7 +176,9 @@ async def reconcile_pending_orders(logger_bot=None):
     Also checks pending entry orders from algo_setups.
     """
     db = mongodb.get_db()
-    pending_orders = await db.orders.find({"status": "pending"}).to_list(200)
+    pending_orders = await db.orders.find({
+        "status": {"$in": ["pending", "open", "untriggered", "submitted"]}
+    }).to_list(200)
     
     logger.info(f"Reconciling {len(pending_orders)} pending orders")
     updated_count = 0
