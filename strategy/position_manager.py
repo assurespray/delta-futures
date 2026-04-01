@@ -250,6 +250,19 @@ class PositionManager:
 
             if order_status in ("filled", "closed", "triggered"):
                 # ---- ORDER WAS GENUINELY FILLED ----
+                # RACE CONDITION FIX: Atomically claim this fill by clearing
+                # pending_entry_order_id. If another monitor already claimed it,
+                # modified_count will be 0 and we skip duplicate processing.
+                from bson import ObjectId
+                db = await get_db()
+                claim_result = await db.algo_setups.update_one(
+                    {"_id": ObjectId(setup_id), "pending_entry_order_id": pending_order_id},
+                    {"$set": {"pending_entry_order_id": None}}
+                )
+                if claim_result.modified_count == 0:
+                    logger.info(f"ℹ️ [FILL-MONITOR] Fill already claimed by another monitor for {setup_name}, skipping")
+                    return False
+
                 logger.info(f"✅ Stop-market entry FILLED for {setup_name}")
                 await update_order_record(pending_order_id, {
                     "status": "filled",
@@ -608,7 +621,7 @@ class PositionManager:
             if stop_loss_order_id:
                 from api.orders import get_order_history
                 history = await get_order_history(client, product_id)
-                sl_order = next((o for o in history if o.get("id") == stop_loss_order_id), None)
+                sl_order = next((o for o in history if str(o.get("id")) == str(stop_loss_order_id)), None)
                 
                 if sl_order and sl_order.get("state") in ("filled", "closed", "triggered"):
                     raw_exit = sl_order.get("average_fill_price")
@@ -869,43 +882,53 @@ class PositionManager:
                     "last_signal_time": datetime.utcnow(),
                 })
 
-                # Create position record
-                logger.info(f"🔍 About to create position record for {symbol} (size={position_size})")
-                
-                await create_position_record({
-                    "algo_setup_id": setup_id,
-                    "user_id": setup.get("user_id"),
-                    "product_id": product_id,  # ✅ ADD THIS
-                    "asset": symbol,
-                    "direction": direction,
-                    "side": "buy" if direction == "long" else "sell",
-                    "size": abs(position_size),
-                    "entry_price": position.get("entry_price"),
-                    "opened_at": datetime.utcnow(),
-                    "status": "open",
-                    "source": "reconciliation"
-                })
-                logger.info(f"✅ Position record created successfully")
-                
-                # Optionally recreate algo_activity here if needed
-                activity_data = {
-                    "user_id": setup.get("user_id"),
-                    "algo_setup_id": setup_id,
-                    "algo_setup_name": setup.get("setup_name"),
-                    "entry_time": datetime.utcnow(),
-                    "entry_price": position.get("entry_price"),
-                    "direction": direction,
-                    "lot_size": abs(position_size),
-                    "asset": symbol,
-                    "perusu_entry_signal": "uptrend" if direction == "long" else "downtrend",
-                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "is_closed": False
-                }
-                await create_algo_activity(activity_data)
-                logger.info(f"✅ Algo activity created for reconciled position: {symbol}")
-            
-                # Acquire position lock
+                # Create position record ONLY if one doesn't already exist
+                # (prevents duplicates on repeated bot restarts)
                 db = await get_db()
+                existing_position = await db.positions.find_one({
+                    "algo_setup_id": setup_id, "status": "open"
+                })
+                if not existing_position:
+                    logger.info(f"🔍 About to create position record for {symbol} (size={position_size})")
+                    await create_position_record({
+                        "algo_setup_id": setup_id,
+                        "user_id": setup.get("user_id"),
+                        "product_id": product_id,
+                        "asset": symbol,
+                        "direction": direction,
+                        "side": "buy" if direction == "long" else "sell",
+                        "size": abs(position_size),
+                        "entry_price": position.get("entry_price"),
+                        "opened_at": datetime.utcnow(),
+                        "status": "open",
+                        "source": "reconciliation"
+                    })
+                    logger.info(f"✅ Position record created successfully")
+                else:
+                    logger.info(f"ℹ️ Position record already exists for {symbol} — skipping creation")
+                
+                # Create activity record ONLY if one doesn't already exist
+                existing_activity = await get_open_activity_by_setup(setup_id)
+                if not existing_activity:
+                    activity_data = {
+                        "user_id": setup.get("user_id"),
+                        "algo_setup_id": setup_id,
+                        "algo_setup_name": setup.get("setup_name"),
+                        "entry_time": datetime.utcnow(),
+                        "entry_price": position.get("entry_price"),
+                        "direction": direction,
+                        "lot_size": abs(position_size),
+                        "asset": symbol,
+                        "perusu_entry_signal": "uptrend" if direction == "long" else "downtrend",
+                        "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                        "is_closed": False
+                    }
+                    await create_algo_activity(activity_data)
+                    logger.info(f"✅ Algo activity created for reconciled position: {symbol}")
+                else:
+                    logger.info(f"ℹ️ Algo activity already exists for {symbol} — skipping creation")
+            
+                # Acquire position lock (db already fetched above)
                 await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
 
             # 1.5. Clean stale pending_entry_order_id if order no longer exists
