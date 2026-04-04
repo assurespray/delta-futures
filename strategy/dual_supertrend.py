@@ -159,7 +159,7 @@ class DualSuperTrendStrategy:
             latest_candles = await get_candles(client, symbol, timeframe, limit=2)
             
             if not latest_candles:
-                logger.error("❌ Could not fetch latest candles for status check")
+                logger.info("⏳ Market is quiet. Skipping calculation until new volume arrives.")
                 return None
 
             candle_status = self._is_candle_closed(latest_candles, timeframe)

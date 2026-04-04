@@ -205,8 +205,9 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
                 logger.error(f"❌ Unknown timeframe: {timeframe}")
                 return None
             
-            # Add 10% buffer to ensure we get enough data
-            actual_limit = int(limit * 1.1)
+            # Add 10% buffer + 3 extra candles to ensure we always
+            # capture candle boundaries (avoids off-by-seconds slicing)
+            actual_limit = int(limit * 1.1) + 3
             start_time = end_time - (seconds_per_candle * actual_limit)
         
         params = {
@@ -222,7 +223,7 @@ async def get_candles(client: DeltaExchangeClient, symbol: str, timeframe: str,
             candles = response.get("result", [])
             
             if not candles:
-                logger.error(f"❌ No candles returned for {symbol} {timeframe}")
+                logger.info(f"⏸️ Zero volume period: No candles returned for {symbol} {timeframe}")
                 return None
         
             # Convert to more usable format
