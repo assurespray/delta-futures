@@ -51,10 +51,18 @@ from handlers.paper_trading import (
     cancel_paper_setup, paper_view_list_callback, paper_detail_callback,
     paper_toggle_callback, paper_open_positions_callback,
     paper_delete_list_callback, paper_delete_confirm_callback,
-    paper_reset_balance_callback, paper_reset_confirm_callback,
+    paper_set_balance_callback, paper_set_balance_amount_received,
+    pscr_add_start, pscr_name_received, pscr_desc_received,
+    pscr_api_selected, pscr_asset_type_selected, pscr_timeframe_selected,
+    pscr_direction_selected, pscr_lot_size_received, pscr_leverage_selected,
+    pscr_protection_selected, pscr_confirmed,
     PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION,
     PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
-    PAPER_PROTECTION, PAPER_CONFIRM
+    PAPER_PROTECTION, PAPER_CONFIRM,
+    PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_ASSET_TYPE,
+    PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE,
+    PSCR_PROTECTION, PSCR_CONFIRM,
+    PAPER_SET_BALANCE_AMOUNT,
 )
 from handlers.performance import (
     performance_menu_callback, performance_command,
@@ -215,7 +223,7 @@ def create_application() -> Application:
     
     # ===== PAPER TRADING HANDLERS =====
     
-    # Paper Trading conversation handler
+    # Paper Trading individual setup conversation handler
     paper_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(paper_add_start, pattern="^paper_add_start$")],
         states={
@@ -239,6 +247,45 @@ def create_application() -> Application:
     )
     application.add_handler(paper_conv_handler)
     
+    # Paper Trading screener setup conversation handler
+    pscr_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(pscr_add_start, pattern="^pscr_add_start$")],
+        states={
+            PSCR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_name_received)],
+            PSCR_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_desc_received)],
+            PSCR_API: [CallbackQueryHandler(pscr_api_selected, pattern="^pscr_api_")],
+            PSCR_ASSET_TYPE: [CallbackQueryHandler(pscr_asset_type_selected, pattern="^pscr_atype_")],
+            PSCR_TIMEFRAME: [CallbackQueryHandler(pscr_timeframe_selected, pattern="^pscr_tf_")],
+            PSCR_DIRECTION: [CallbackQueryHandler(pscr_direction_selected, pattern="^pscr_dir_")],
+            PSCR_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_lot_size_received)],
+            PSCR_LEVERAGE: [CallbackQueryHandler(pscr_leverage_selected, pattern="^pscr_lev_")],
+            PSCR_PROTECTION: [CallbackQueryHandler(pscr_protection_selected, pattern="^pscr_prot_")],
+            PSCR_CONFIRM: [CallbackQueryHandler(pscr_confirmed, pattern="^pscr_confirm_")],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_paper_setup),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(pscr_conv_handler)
+    
+    # Paper Trading set virtual balance conversation handler
+    paper_balance_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(paper_set_balance_callback, pattern="^paper_set_balance$")],
+        states={
+            PAPER_SET_BALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_set_balance_amount_received)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_paper_setup),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(paper_balance_conv_handler)
+    
     # Paper Trading menu and action handlers
     application.add_handler(CallbackQueryHandler(paper_trading_menu_callback, pattern="^menu_paper_trading$"))
     application.add_handler(CallbackQueryHandler(paper_view_list_callback, pattern="^paper_view_list$"))
@@ -247,8 +294,6 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(paper_open_positions_callback, pattern="^paper_open_positions$"))
     application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
     application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))
-    application.add_handler(CallbackQueryHandler(paper_reset_balance_callback, pattern="^paper_reset_balance$"))
-    application.add_handler(CallbackQueryHandler(paper_reset_confirm_callback, pattern="^paper_reset_confirm$"))
     
     # ===== PERFORMANCE HANDLERS =====
     

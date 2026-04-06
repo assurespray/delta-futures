@@ -986,3 +986,36 @@ async def get_algo_setups_by_paper_mode(
     except Exception as e:
         logger.error(f"Failed to get algo setups by paper mode: {e}")
         return []
+
+
+async def get_screener_setups_by_paper_mode(
+    user_id: str,
+    is_paper: bool,
+    active_only: bool = False
+) -> List[Dict[str, Any]]:
+    """Get screener setups filtered by paper/real mode."""
+    try:
+        query = {"user_id": user_id}
+        
+        if is_paper:
+            query["is_paper_trade"] = True
+        else:
+            query["$or"] = [
+                {"is_paper_trade": False},
+                {"is_paper_trade": {"$exists": False}}
+            ]
+        
+        if active_only:
+            query["is_active"] = True
+        
+        cursor = mongodb.get_db().screener_setups.find(query)
+        setups = await cursor.to_list(length=100)
+        
+        for setup in setups:
+            setup["_id"] = str(setup["_id"])
+        
+        return setups
+        
+    except Exception as e:
+        logger.error(f"Failed to get screener setups by paper mode: {e}")
+        return []

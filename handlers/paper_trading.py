@@ -5,9 +5,9 @@ Fully modular: delete this file and remove references in bot.py
 and start.py to completely remove paper trading UI.
 
 Features:
-- Create/View/Delete paper trading setups
+- Create/View/Delete paper trading setups (Individual + Screener)
 - View open paper positions
-- Reset virtual balance
+- Set virtual balance to any amount
 - Toggle paper mode on existing setups
 """
 import logging
@@ -19,6 +19,9 @@ from database.crud import (
     delete_algo_setup, update_algo_setup,
     get_paper_balance, reset_paper_balance,
     get_open_paper_positions,
+    create_screener_setup, get_screener_setups_by_paper_mode,
+    get_screener_setup_by_id, update_screener_setup,
+    delete_screener_setup,
 )
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_product_by_symbol
@@ -28,9 +31,16 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Conversation states for paper setup creation
+# Conversation states for paper INDIVIDUAL setup creation
 PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION = range(100, 104)
 PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE, PAPER_PROTECTION, PAPER_CONFIRM = range(104, 110)
+
+# Conversation states for paper SCREENER setup creation
+PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_ASSET_TYPE = range(110, 114)
+PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE, PSCR_PROTECTION, PSCR_CONFIRM = range(114, 120)
+
+# Conversation state for editable virtual balance
+PAPER_SET_BALANCE_AMOUNT = 120
 
 
 # ==================== MAIN PAPER TRADING MENU ====================
@@ -48,9 +58,14 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
     balance_inr = balance * settings.usd_to_inr_rate
     locked = paper_bal.get("locked_margin", 0) if paper_bal else 0
     
-    # Get paper setups
-    paper_setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
-    active_count = sum(1 for s in paper_setups if s.get("is_active", False))
+    # Get paper setups (both individual and screener)
+    algo_setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
+    scr_setups = await get_screener_setups_by_paper_mode(user_id, is_paper=True)
+    total_setups = len(algo_setups) + len(scr_setups)
+    active_count = (
+        sum(1 for s in algo_setups if s.get("is_active", False)) +
+        sum(1 for s in scr_setups if s.get("is_active", False))
+    )
     
     # Get open positions
     open_positions = await get_open_paper_positions(user_id)
@@ -60,17 +75,20 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
         f"**Virtual Balance:** ${balance:.2f} ({chr(8377)}{balance_inr:.2f})\n"
         f"**Locked Margin:** ${locked:.2f}\n"
         f"**Available:** ${balance - locked:.2f}\n\n"
-        f"**Setups:** {len(paper_setups)} ({active_count} active)\n"
+        f"**Setups:** {total_setups} ({active_count} active)\n"
         f"**Open Positions:** {len(open_positions)}\n\n"
         "Select an option:"
     )
     
     keyboard = [
-        [InlineKeyboardButton("+ Create Paper Setup", callback_data="paper_add_start")],
+        [
+            InlineKeyboardButton("+ Paper Setup", callback_data="paper_add_start"),
+            InlineKeyboardButton("+ Paper Screener", callback_data="pscr_add_start"),
+        ],
         [InlineKeyboardButton("View Paper Setups", callback_data="paper_view_list")],
         [InlineKeyboardButton("Open Positions", callback_data="paper_open_positions")],
         [InlineKeyboardButton("Delete Paper Setup", callback_data="paper_delete_list")],
-        [InlineKeyboardButton("Reset Virtual Balance", callback_data="paper_reset_balance")],
+        [InlineKeyboardButton("Set Virtual Balance", callback_data="paper_set_balance")],
         [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")]
     ]
     
@@ -78,7 +96,7 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# ==================== CREATE PAPER SETUP (CONVERSATION) ====================
+# ==================== CREATE INDIVIDUAL PAPER SETUP (CONVERSATION) ====================
 
 async def paper_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start paper setup creation."""
@@ -86,7 +104,7 @@ async def paper_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     await query.edit_message_text(
-        "**Create Paper Trading Setup**\n\n"
+        "**Create Paper Trading Setup (Individual)**\n\n"
         "Step 1/9: Enter a name for this paper setup:\n\n"
         "Send /cancel to abort.",
         parse_mode="Markdown"
@@ -396,17 +414,355 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ==================== VIEW PAPER SETUPS ====================
+# ==================== CREATE PAPER SCREENER SETUP (CONVERSATION) ====================
+
+async def pscr_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start paper screener setup creation."""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "**Create Paper Screener Setup (Multi-Asset)**\n\n"
+        "Step 1/10: Enter a name for this paper screener:\n\n"
+        "Send /cancel to abort.",
+        parse_mode="Markdown"
+    )
+    return PSCR_NAME
+
+
+async def pscr_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive paper screener name."""
+    name = update.message.text.strip()
+    if len(name) < 3:
+        await update.message.reply_text("Name must be at least 3 characters. Try again:")
+        return PSCR_NAME
+    
+    context.user_data['pscr_name'] = name
+    await update.message.reply_text(
+        f"Name: {name}\n\n"
+        "Step 2/10: Enter a description:\n\n"
+        "Send /cancel to abort."
+    )
+    return PSCR_DESC
+
+
+async def pscr_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive paper screener description."""
+    desc = update.message.text.strip()
+    context.user_data['pscr_description'] = desc
+    
+    user_id = str(update.effective_user.id)
+    credentials = await get_api_credentials_by_user(user_id)
+    
+    if not credentials:
+        await update.message.reply_text(
+            "You need at least one API credential for price data.\n"
+            "Go to API Menu to add one first."
+        )
+        return ConversationHandler.END
+    
+    keyboard = []
+    for cred in credentials:
+        keyboard.append([InlineKeyboardButton(
+            cred['api_name'],
+            callback_data=f"pscr_api_{cred['_id']}"
+        )])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Step 3/10: Select API credential (for price data):",
+        reply_markup=reply_markup
+    )
+    return PSCR_API
+
+
+async def pscr_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle API selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    api_id = query.data.replace("pscr_api_", "")
+    cred = await get_api_credential_by_id(api_id, decrypt=False)
+    
+    if not cred:
+        await query.edit_message_text("API credential not found. Try again.")
+        return ConversationHandler.END
+    
+    context.user_data['pscr_api_id'] = api_id
+    context.user_data['pscr_api_name'] = cred['api_name']
+    
+    keyboard = [
+        [InlineKeyboardButton("Every Available Asset", callback_data="pscr_atype_every")],
+        [InlineKeyboardButton("Top 10 Gainers Only", callback_data="pscr_atype_gainers")],
+        [InlineKeyboardButton("Top 10 Losers Only", callback_data="pscr_atype_losers")],
+        [InlineKeyboardButton("Top 10 Gainers + Losers", callback_data="pscr_atype_mixed")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"API: {cred['api_name']}\n\n"
+        "Step 4/10: Select Asset Selection Type:",
+        reply_markup=reply_markup
+    )
+    return PSCR_ASSET_TYPE
+
+
+async def pscr_asset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle asset selection type for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    asset_type = query.data.replace("pscr_atype_", "")
+    context.user_data['pscr_asset_type'] = asset_type
+    
+    type_text_map = {
+        "every": "Every Available Asset",
+        "gainers": "Top 10 Gainers",
+        "losers": "Top 10 Losers",
+        "mixed": "Top 10 Gainers + Losers"
+    }
+    type_text = type_text_map.get(asset_type, asset_type)
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("1m", callback_data="pscr_tf_1m"),
+            InlineKeyboardButton("3m", callback_data="pscr_tf_3m"),
+            InlineKeyboardButton("5m", callback_data="pscr_tf_5m")
+        ],
+        [
+            InlineKeyboardButton("15m", callback_data="pscr_tf_15m"),
+            InlineKeyboardButton("30m", callback_data="pscr_tf_30m"),
+            InlineKeyboardButton("1h", callback_data="pscr_tf_1h")
+        ],
+        [
+            InlineKeyboardButton("4h", callback_data="pscr_tf_4h"),
+            InlineKeyboardButton("1d", callback_data="pscr_tf_1d")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"Asset Type: {type_text}\n\n"
+        "Step 5/10: Select Timeframe:",
+        reply_markup=reply_markup
+    )
+    return PSCR_TIMEFRAME
+
+
+async def pscr_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle timeframe selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    timeframe = query.data.replace("pscr_tf_", "")
+    context.user_data['pscr_timeframe'] = timeframe
+    
+    keyboard = [
+        [InlineKeyboardButton("Both (Long & Short)", callback_data="pscr_dir_both")],
+        [InlineKeyboardButton("Long Only", callback_data="pscr_dir_long_only")],
+        [InlineKeyboardButton("Short Only", callback_data="pscr_dir_short_only")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"Timeframe: {timeframe}\n\n"
+        "Step 6/10: Select Trading Direction:",
+        reply_markup=reply_markup
+    )
+    return PSCR_DIRECTION
+
+
+async def pscr_direction_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle direction selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    direction = query.data.replace("pscr_dir_", "")
+    context.user_data['pscr_direction'] = direction
+    
+    await query.edit_message_text(
+        f"Direction: {direction.replace('_', ' ').title()}\n\n"
+        "Step 7/10: Enter Lot Size (per trade):\n\n"
+        "Send /cancel to abort."
+    )
+    return PSCR_LOT_SIZE
+
+
+async def pscr_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive lot size for paper screener."""
+    try:
+        lot_size = int(update.message.text.strip())
+        if lot_size < 1:
+            await update.message.reply_text("Lot size must be at least 1. Try again:")
+            return PSCR_LOT_SIZE
+        
+        context.user_data['pscr_lot_size'] = lot_size
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("5x", callback_data="pscr_lev_5"),
+                InlineKeyboardButton("10x", callback_data="pscr_lev_10"),
+                InlineKeyboardButton("25x", callback_data="pscr_lev_25"),
+            ],
+            [
+                InlineKeyboardButton("50x", callback_data="pscr_lev_50"),
+                InlineKeyboardButton("100x", callback_data="pscr_lev_100"),
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"Lot Size: {lot_size}\n\n"
+            "Step 8/10: Select Leverage:",
+            reply_markup=reply_markup
+        )
+        return PSCR_LEVERAGE
+        
+    except ValueError:
+        await update.message.reply_text("Invalid number. Enter a valid lot size:")
+        return PSCR_LOT_SIZE
+
+
+async def pscr_leverage_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle leverage selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    leverage = int(query.data.replace("pscr_lev_", ""))
+    context.user_data['pscr_leverage'] = leverage
+    
+    keyboard = [
+        [InlineKeyboardButton("Yes (Enable SL)", callback_data="pscr_prot_yes")],
+        [InlineKeyboardButton("No (Disable SL)", callback_data="pscr_prot_no")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"Leverage: {leverage}x\n\n"
+        "Step 9/10: Additional Protection (Stop-Loss)?",
+        reply_markup=reply_markup
+    )
+    return PSCR_PROTECTION
+
+
+async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle protection selection and show confirmation for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    protection = query.data == "pscr_prot_yes"
+    context.user_data['pscr_protection'] = protection
+    
+    ud = context.user_data
+    
+    type_text_map = {
+        "every": "Every Available Asset",
+        "gainers": "Top 10 Gainers",
+        "losers": "Top 10 Losers",
+        "mixed": "Top 10 Gainers + Losers"
+    }
+    asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
+    
+    message = (
+        "**Paper Screener Summary**\n\n"
+        f"**Name:** {ud['pscr_name']}\n"
+        f"**Description:** {ud['pscr_description']}\n"
+        f"**API:** {ud['pscr_api_name']}\n"
+        f"**Indicator:** Dual SuperTrend\n"
+        f"**Asset Selection:** {asset_type_text}\n"
+        f"**Direction:** {ud['pscr_direction'].replace('_', ' ').title()}\n"
+        f"**Timeframe:** {ud['pscr_timeframe']}\n"
+        f"**Lot Size:** {ud['pscr_lot_size']}\n"
+        f"**Leverage:** {ud['pscr_leverage']}x\n"
+        f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
+        f"**Mode:** PAPER SCREENER (Virtual)\n\n"
+        "Confirm to save and activate?"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("Confirm and Activate", callback_data="pscr_confirm_yes")],
+        [InlineKeyboardButton("Cancel", callback_data="pscr_confirm_no")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    return PSCR_CONFIRM
+
+
+async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the paper screener setup to database."""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "pscr_confirm_no":
+        await query.edit_message_text("Paper screener creation cancelled.")
+        return ConversationHandler.END
+    
+    user_id = str(query.from_user.id)
+    ud = context.user_data
+    
+    try:
+        setup_data = {
+            "user_id": user_id,
+            "setup_name": ud['pscr_name'],
+            "description": ud['pscr_description'],
+            "api_id": ud['pscr_api_id'],
+            "api_name": ud['pscr_api_name'],
+            "indicator": "dual_supertrend",
+            "asset_selection_type": ud['pscr_asset_type'],
+            "timeframe": ud['pscr_timeframe'],
+            "direction": ud['pscr_direction'],
+            "lot_size": ud['pscr_lot_size'],
+            "additional_protection": ud['pscr_protection'],
+            "is_active": True,
+            "is_paper_trade": True,
+            "paper_leverage": ud['pscr_leverage'],
+        }
+        
+        setup_id = await create_screener_setup(setup_data)
+        
+        # Ensure paper balance exists
+        await get_paper_balance(user_id)
+        
+        type_text_map = {
+            "every": "Every Available Asset",
+            "gainers": "Top 10 Gainers",
+            "losers": "Top 10 Losers",
+            "mixed": "Top 10 Gainers + Losers"
+        }
+        asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
+        
+        await query.edit_message_text(
+            f"**Paper Screener Created!**\n\n"
+            f"**Name:** {ud['pscr_name']}\n"
+            f"**Assets:** {asset_type_text}\n"
+            f"**Timeframe:** {ud['pscr_timeframe']}\n"
+            f"**Leverage:** {ud['pscr_leverage']}x\n"
+            f"**Mode:** PAPER SCREENER\n\n"
+            f"The screener is now active and scanning for signals.\n"
+            f"Virtual trades will be executed automatically.",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create paper screener: {e}")
+        await query.edit_message_text(f"Failed to create paper screener: {str(e)[:200]}")
+    
+    return ConversationHandler.END
+
+
+# ==================== VIEW PAPER SETUPS (UNIFIED: Individual + Screener) ====================
 
 async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View list of paper trading setups."""
+    """View combined list of individual and screener paper setups."""
     query = update.callback_query
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
+    algo_setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
+    scr_setups = await get_screener_setups_by_paper_mode(user_id, is_paper=True)
     
-    if not setups:
+    if not algo_setups and not scr_setups:
         keyboard = [[InlineKeyboardButton("Back", callback_data="menu_paper_trading")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("No paper trading setups found.", reply_markup=reply_markup)
@@ -415,20 +771,42 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
     message = "**Paper Trading Setups**\n\n"
     keyboard = []
     
-    for setup in setups:
+    for setup in algo_setups:
         status = "Active" if setup.get("is_active") else "Inactive"
         position = setup.get("current_position", "None")
         pos_text = f" | {position.upper()}" if position else ""
         
         message += (
-            f"**{setup['setup_name']}**\n"
+            f"[Single] **{setup['setup_name']}**\n"
             f"  {setup['asset']} @ {setup['timeframe']} | "
             f"{setup.get('paper_leverage', 10)}x | {status}{pos_text}\n\n"
         )
         
         keyboard.append([InlineKeyboardButton(
-            f"{setup['setup_name']} - {setup['asset']}",
-            callback_data=f"paper_detail_{setup['_id']}"
+            f"[Single] {setup['setup_name']} - {setup['asset']}",
+            callback_data=f"paper_detail_algo_{setup['_id']}"
+        )])
+    
+    type_text_map = {
+        "every": "All Assets",
+        "gainers": "Gainers",
+        "losers": "Losers",
+        "mixed": "G+L"
+    }
+    
+    for setup in scr_setups:
+        status = "Active" if setup.get("is_active") else "Inactive"
+        atype = type_text_map.get(setup.get("asset_selection_type", ""), "?")
+        
+        message += (
+            f"[Screener] **{setup['setup_name']}**\n"
+            f"  {atype} @ {setup.get('timeframe', '?')} | "
+            f"{setup.get('paper_leverage', 10)}x | {status}\n\n"
+        )
+        
+        keyboard.append([InlineKeyboardButton(
+            f"[Screener] {setup['setup_name']} - {atype}",
+            callback_data=f"paper_detail_scr_{setup['_id']}"
         )])
     
     keyboard.append([InlineKeyboardButton("Back", callback_data="menu_paper_trading")])
@@ -437,46 +815,81 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
 
 
 async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View detail of a single paper setup."""
+    """View detail of a single paper setup (individual or screener)."""
     query = update.callback_query
     await query.answer()
     
-    setup_id = query.data.replace("paper_detail_", "")
-    setup = await get_algo_setup_by_id(setup_id)
+    raw = query.data.replace("paper_detail_", "")
+    
+    if raw.startswith("algo_"):
+        setup_id = raw.replace("algo_", "")
+        setup = await get_algo_setup_by_id(setup_id)
+        setup_type = "algo"
+    elif raw.startswith("scr_"):
+        setup_id = raw.replace("scr_", "")
+        setup = await get_screener_setup_by_id(setup_id)
+        setup_type = "scr"
+    else:
+        # Legacy fallback: treat as algo
+        setup_id = raw
+        setup = await get_algo_setup_by_id(setup_id)
+        setup_type = "algo"
     
     if not setup:
         await query.edit_message_text("Setup not found.")
         return
     
     status = "Active" if setup.get("is_active") else "Inactive"
-    position = setup.get("current_position") or "None"
-    entry_price = setup.get("last_entry_price")
-    sl_price = setup.get("pending_sl_price")
+    label = "[PAPER Single]" if setup_type == "algo" else "[PAPER Screener]"
     
-    message = (
-        f"**[PAPER] {setup['setup_name']}**\n\n"
-        f"**Asset:** {setup['asset']}\n"
-        f"**Timeframe:** {setup['timeframe']}\n"
-        f"**Direction:** {setup.get('direction', 'both').replace('_', ' ').title()}\n"
-        f"**Lot Size:** {setup['lot_size']}\n"
-        f"**Leverage:** {setup.get('paper_leverage', 10)}x\n"
-        f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
-        f"**Status:** {status}\n\n"
-        f"**Current Position:** {position.upper()}\n"
-    )
-    
-    if entry_price:
-        message += f"**Entry Price:** ${entry_price:.5f}\n"
-    if sl_price:
-        message += f"**Stop-Loss:** ${sl_price:.5f}\n"
+    if setup_type == "algo":
+        position = setup.get("current_position") or "None"
+        entry_price = setup.get("last_entry_price")
+        sl_price = setup.get("pending_sl_price")
+        
+        message = (
+            f"**{label} {setup['setup_name']}**\n\n"
+            f"**Asset:** {setup['asset']}\n"
+            f"**Timeframe:** {setup['timeframe']}\n"
+            f"**Direction:** {setup.get('direction', 'both').replace('_', ' ').title()}\n"
+            f"**Lot Size:** {setup['lot_size']}\n"
+            f"**Leverage:** {setup.get('paper_leverage', 10)}x\n"
+            f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
+            f"**Status:** {status}\n\n"
+            f"**Current Position:** {position.upper()}\n"
+        )
+        
+        if entry_price:
+            message += f"**Entry Price:** ${entry_price:.5f}\n"
+        if sl_price:
+            message += f"**Stop-Loss:** ${sl_price:.5f}\n"
+    else:
+        type_text_map = {
+            "every": "Every Available Asset",
+            "gainers": "Top 10 Gainers",
+            "losers": "Top 10 Losers",
+            "mixed": "Top 10 Gainers + Losers"
+        }
+        atype = type_text_map.get(setup.get("asset_selection_type", ""), "Unknown")
+        
+        message = (
+            f"**{label} {setup['setup_name']}**\n\n"
+            f"**Asset Selection:** {atype}\n"
+            f"**Timeframe:** {setup.get('timeframe', '?')}\n"
+            f"**Direction:** {setup.get('direction', 'both').replace('_', ' ').title()}\n"
+            f"**Lot Size:** {setup.get('lot_size', 1)}\n"
+            f"**Leverage:** {setup.get('paper_leverage', 10)}x\n"
+            f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
+            f"**Status:** {status}\n"
+        )
     
     # Toggle button
     if setup.get("is_active"):
         toggle_text = "Pause Setup"
-        toggle_data = f"paper_toggle_{setup_id}_off"
+        toggle_data = f"paper_toggle_{setup_type}_{setup_id}_off"
     else:
         toggle_text = "Activate Setup"
-        toggle_data = f"paper_toggle_{setup_id}_on"
+        toggle_data = f"paper_toggle_{setup_type}_{setup_id}_on"
     
     keyboard = [
         [InlineKeyboardButton(toggle_text, callback_data=toggle_data)],
@@ -489,16 +902,27 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def paper_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle paper setup active/inactive."""
+    """Toggle paper setup active/inactive (individual or screener)."""
     query = update.callback_query
     await query.answer()
     
-    parts = query.data.replace("paper_toggle_", "").rsplit("_", 1)
-    setup_id = parts[0]
-    action = parts[1]
+    # Format: paper_toggle_{type}_{setup_id}_{on/off}
+    raw = query.data.replace("paper_toggle_", "")
+    parts = raw.split("_", 2)  # type, setup_id..._action
+    
+    setup_type = parts[0]  # "algo" or "scr"
+    rest = "_".join(parts[1:])  # setup_id_on or setup_id_off
+    
+    # Action is the last segment
+    action = rest.rsplit("_", 1)[1]  # "on" or "off"
+    setup_id = rest.rsplit("_", 1)[0]
     
     new_active = action == "on"
-    await update_algo_setup(setup_id, {"is_active": new_active})
+    
+    if setup_type == "scr":
+        await update_screener_setup(setup_id, {"is_active": new_active})
+    else:
+        await update_algo_setup(setup_id, {"is_active": new_active})
     
     status = "activated" if new_active else "paused"
     await query.edit_message_text(
@@ -553,28 +977,44 @@ async def paper_open_positions_callback(update: Update, context: ContextTypes.DE
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# ==================== DELETE PAPER SETUP ====================
+# ==================== DELETE PAPER SETUP (UNIFIED) ====================
 
 async def paper_delete_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List paper setups for deletion."""
+    """List all paper setups (individual + screener) for deletion."""
     query = update.callback_query
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
+    algo_setups = await get_algo_setups_by_paper_mode(user_id, is_paper=True)
+    scr_setups = await get_screener_setups_by_paper_mode(user_id, is_paper=True)
     
-    if not setups:
+    if not algo_setups and not scr_setups:
         keyboard = [[InlineKeyboardButton("Back", callback_data="menu_paper_trading")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("No paper setups to delete.", reply_markup=reply_markup)
         return
     
     keyboard = []
-    for setup in setups:
+    for setup in algo_setups:
         keyboard.append([InlineKeyboardButton(
-            f"Delete: {setup['setup_name']} - {setup['asset']}",
-            callback_data=f"paper_del_confirm_{setup['_id']}"
+            f"[Single] {setup['setup_name']} - {setup['asset']}",
+            callback_data=f"paper_del_confirm_algo_{setup['_id']}"
         )])
+    
+    type_text_map = {
+        "every": "All Assets",
+        "gainers": "Gainers",
+        "losers": "Losers",
+        "mixed": "G+L"
+    }
+    
+    for setup in scr_setups:
+        atype = type_text_map.get(setup.get("asset_selection_type", ""), "?")
+        keyboard.append([InlineKeyboardButton(
+            f"[Screener] {setup['setup_name']} - {atype}",
+            callback_data=f"paper_del_confirm_scr_{setup['_id']}"
+        )])
+    
     keyboard.append([InlineKeyboardButton("Back", callback_data="menu_paper_trading")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -585,14 +1025,23 @@ async def paper_delete_list_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def paper_delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Confirm and delete a paper setup."""
+    """Confirm and delete a paper setup (individual or screener)."""
     query = update.callback_query
     await query.answer()
     
-    setup_id = query.data.replace("paper_del_confirm_", "")
+    raw = query.data.replace("paper_del_confirm_", "")
     user_id = str(query.from_user.id)
     
-    success = await delete_algo_setup(setup_id, user_id)
+    if raw.startswith("algo_"):
+        setup_id = raw.replace("algo_", "")
+        success = await delete_algo_setup(setup_id, user_id)
+    elif raw.startswith("scr_"):
+        setup_id = raw.replace("scr_", "")
+        success = await delete_screener_setup(setup_id, user_id)
+    else:
+        # Legacy fallback
+        setup_id = raw
+        success = await delete_algo_setup(setup_id, user_id)
     
     if success:
         await query.edit_message_text(
@@ -610,49 +1059,65 @@ async def paper_delete_confirm_callback(update: Update, context: ContextTypes.DE
         )
 
 
-# ==================== RESET VIRTUAL BALANCE ====================
+# ==================== SET VIRTUAL BALANCE (EDITABLE) ====================
 
-async def paper_reset_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset virtual balance confirmation."""
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton(
-            f"Yes, Reset to ${PAPER_TRADE_DEFAULT_BALANCE:.0f}",
-            callback_data="paper_reset_confirm"
-        )],
-        [InlineKeyboardButton("Cancel", callback_data="menu_paper_trading")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        "**Reset Virtual Balance?**\n\n"
-        f"This will reset your paper balance to ${PAPER_TRADE_DEFAULT_BALANCE:.0f} "
-        "and clear all performance stats.\n\n"
-        "Open paper positions will NOT be affected.",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
-
-
-async def paper_reset_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Execute balance reset."""
+async def paper_set_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt user to enter a new virtual balance amount."""
     query = update.callback_query
     await query.answer()
     
     user_id = str(query.from_user.id)
-    success = await reset_paper_balance(user_id, PAPER_TRADE_DEFAULT_BALANCE)
+    paper_bal = await get_paper_balance(user_id)
+    current = paper_bal["balance"] if paper_bal else PAPER_TRADE_DEFAULT_BALANCE
     
-    if success:
-        await query.edit_message_text(
-            f"Virtual balance reset to ${PAPER_TRADE_DEFAULT_BALANCE:.0f}.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back", callback_data="menu_paper_trading")]
-            ])
-        )
-    else:
-        await query.edit_message_text("Failed to reset balance.")
+    await query.edit_message_text(
+        f"**Set Virtual Balance**\n\n"
+        f"Current balance: ${current:.2f}\n\n"
+        f"Enter the new balance amount in USD (e.g., 5000 or 25000):\n\n"
+        f"This will reset your performance stats.\n"
+        f"Open positions will NOT be affected.\n\n"
+        f"Send /cancel to abort.",
+        parse_mode="Markdown"
+    )
+    return PAPER_SET_BALANCE_AMOUNT
+
+
+async def paper_set_balance_amount_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive new balance amount and apply it."""
+    try:
+        amount = float(update.message.text.strip().replace(",", "").replace("$", ""))
+        if amount < 1:
+            await update.message.reply_text("Balance must be at least $1. Try again:")
+            return PAPER_SET_BALANCE_AMOUNT
+        if amount > 10_000_000:
+            await update.message.reply_text("Balance cannot exceed $10,000,000. Try again:")
+            return PAPER_SET_BALANCE_AMOUNT
+        
+        user_id = str(update.effective_user.id)
+        success = await reset_paper_balance(user_id, amount)
+        
+        if success:
+            balance_inr = amount * settings.usd_to_inr_rate
+            await update.message.reply_text(
+                f"Virtual balance set to ${amount:,.2f} ({chr(8377)}{balance_inr:,.2f}).\n\n"
+                f"Performance stats have been reset.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Back to Paper Trading", callback_data="menu_paper_trading")]
+                ])
+            )
+        else:
+            await update.message.reply_text(
+                "Failed to update balance. Please try again.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Back", callback_data="menu_paper_trading")]
+                ])
+            )
+        
+        return ConversationHandler.END
+        
+    except ValueError:
+        await update.message.reply_text("Invalid amount. Enter a number (e.g., 5000):")
+        return PAPER_SET_BALANCE_AMOUNT
 
 
 # ==================== CANCEL ====================
