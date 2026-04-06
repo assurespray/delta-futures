@@ -111,7 +111,7 @@ async def get_top_gainers(
                 continue
             
             # Use ticker's 24h change if available
-            change_24h = ticker.get("change_24h")
+            change_24h = ticker.get("mark_change_24h")
             if change_24h is not None:
                 asset_changes.append({
                     "symbol": symbol,
@@ -147,7 +147,7 @@ async def get_top_losers(
             if not symbol:
                 continue
             
-            change_24h = ticker.get("change_24h")
+            change_24h = ticker.get("mark_change_24h")
             if change_24h is not None:
                 asset_changes.append({
                     "symbol": symbol,

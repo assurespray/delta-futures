@@ -64,23 +64,23 @@ class ScreenerEngine:
         screener_setup: Dict
     ) -> List[str]:
         """Fetch assets based on screener mode."""
-        mode = screener_setup.get("screener_mode", "top_gainers")
+        mode = screener_setup.get("asset_selection_type", "gainers")
         top_n = screener_setup.get("top_n", 10)
         timeframe = screener_setup.get("timeframe", "15m")
         
         try:
-            if mode == "top_gainers":
+            if mode == "gainers":
                 return await get_top_gainers(client, timeframe, top_n)
             
-            elif mode == "top_losers":
+            elif mode == "losers":
                 return await get_top_losers(client, timeframe, top_n)
             
-            elif mode == "both":
+            elif mode == "mixed":
                 gainers = await get_top_gainers(client, timeframe, top_n)
                 losers = await get_top_losers(client, timeframe, top_n)
                 return gainers + losers
             
-            elif mode == "all_assets":
+            elif mode == "every":
                 return await get_all_perpetual_symbols(client)
             
             else:
@@ -140,7 +140,7 @@ class ScreenerEngine:
         - Second appearance: Enter if flipped
         """
         setup_id = str(screener_setup["_id"])
-        mode = screener_setup.get("screener_mode")
+        mode = screener_setup.get("asset_selection_type")
         
         # Get cached Perusu signal
         cached_perusu = await get_screener_indicator_cache(
