@@ -58,6 +58,10 @@ class AlgoSetup(BaseModel):
     additional_protection: bool
     is_active: bool = True
     
+    # ========== PAPER TRADING ==========
+    is_paper_trade: bool = False  # True = virtual trade, False = real money
+    paper_leverage: Optional[int] = None  # Leverage for paper trades (e.g., 10, 25, 50)
+    
     # ========== POSITION STATE ==========
     current_position: Optional[str] = None  # "long", "short", None
     last_entry_price: Optional[float] = None
@@ -119,6 +123,13 @@ class AlgoActivity(BaseModel):
     # ✅ NEW: Track entry trigger price
     entry_trigger_price: Optional[float] = None
     
+    # ========== PAPER TRADING ==========
+    is_paper_trade: bool = False  # True = virtual trade, False = real money
+    paper_leverage: Optional[int] = None  # Leverage used for this paper trade
+    paper_margin_used: Optional[float] = None  # Margin locked for this trade
+    paper_fees: Optional[float] = None  # Simulated trading fees
+    paper_liquidation_price: Optional[float] = None  # Liquidation price for paper trade
+    
     class Config:
         populate_by_name = True
         arbitrary_types_allowed = True
@@ -159,6 +170,10 @@ class ScreenerSetup(BaseModel):
     lot_size: int
     additional_protection: bool
     is_active: bool = True
+    
+    # ========== PAPER TRADING ==========
+    is_paper_trade: bool = False  # True = virtual trade, False = real money
+    paper_leverage: Optional[int] = None  # Leverage for paper trades
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -220,6 +235,29 @@ class OrderRecord(BaseModel):
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
         
+
+class PaperBalance(BaseModel):
+    """Model for tracking virtual paper trading balance per user."""
+    
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    balance: float = 10000.0  # Current virtual balance in USD
+    initial_balance: float = 10000.0  # Starting balance for equity curve
+    total_trades: int = 0
+    total_wins: int = 0
+    total_losses: int = 0
+    total_pnl: float = 0.0  # Cumulative PnL in USD
+    total_fees: float = 0.0  # Cumulative fees deducted
+    locked_margin: float = 0.0  # Margin currently locked in open positions
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    last_reset_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
+
 
 # ========== SUMMARY OF FIELDS ==========
 """

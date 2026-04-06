@@ -228,10 +228,14 @@ class ScreenerEngine:
             if entry_signal:
                 logger.info(f"🚀 Entry signal for {asset}: {entry_signal['side'].upper()}")
                 
+                # Inject dynamic asset into setup dict for position_manager compatibility
+                setup_with_asset = dict(screener_setup)
+                setup_with_asset["asset"] = asset
+                
                 # Place entry order
                 success = await self.position_manager.place_breakout_entry_order(
                     client=client,
-                    algo_setup=screener_setup,  # Pass screener setup as if it's algo
+                    algo_setup=setup_with_asset,
                     entry_side=entry_signal['side'],
                     breakout_price=entry_signal.get('trigger_price'),
                     sirusu_value=indicator_result["sirusu"]["supertrend_value"],

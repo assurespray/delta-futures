@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from bson import ObjectId
 from database.mongodb import mongodb
-from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCache, PositionLock
+from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCache, PositionLock, PaperBalance
 from cryptography.fernet import Fernet
 from config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -795,3 +795,194 @@ async def upsert_screener_indicator_cache(cache_data: Dict[str, Any]):
         {"$set": cache_data},
         upsert=True
     )
+
+
+# ==================== Paper Trading CRUD ====================
+
+async def get_paper_balance(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get paper trading balance for a user. Creates default if not exists."""
+    try:
+        db = mongodb.get_db()
+        balance = await db.paper_balances.find_one({"user_id": user_id})
+        
+        if not balance:
+            # Create default paper balance
+            default_balance = PaperBalance(user_id=user_id)
+            result = await db.paper_balances.insert_one(
+                default_balance.dict(by_alias=True, exclude={"id"})
+            )
+            balance = await db.paper_balances.find_one({"_id": result.inserted_id})
+            logger.info(f"Created default paper balance for user {user_id}")
+        
+        if balance:
+            balance["_id"] = str(balance["_id"])
+        
+        return balance
+        
+    except Exception as e:
+        logger.error(f"Failed to get paper balance: {e}")
+        return None
+
+
+async def update_paper_balance(user_id: str, update_data: Dict[str, Any]) -> bool:
+    """Update paper trading balance."""
+    try:
+        update_data["updated_at"] = datetime.utcnow()
+        
+        result = await mongodb.get_db().paper_balances.update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+        
+        return result.modified_count > 0
+        
+    except Exception as e:
+        logger.error(f"Failed to update paper balance: {e}")
+        return False
+
+
+async def reset_paper_balance(user_id: str, new_balance: float = 10000.0) -> bool:
+    """Reset paper trading balance to starting amount."""
+    try:
+        reset_data = {
+            "balance": new_balance,
+            "initial_balance": new_balance,
+            "total_trades": 0,
+            "total_wins": 0,
+            "total_losses": 0,
+            "total_pnl": 0.0,
+            "total_fees": 0.0,
+            "locked_margin": 0.0,
+            "updated_at": datetime.utcnow(),
+            "last_reset_at": datetime.utcnow()
+        }
+        
+        result = await mongodb.get_db().paper_balances.update_one(
+            {"user_id": user_id},
+            {"$set": reset_data},
+            upsert=True
+        )
+        
+        logger.info(f"Paper balance reset to ${new_balance} for user {user_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to reset paper balance: {e}")
+        return False
+
+
+async def get_paper_trade_activities(
+    user_id: str, 
+    days: Optional[int] = None,
+    closed_only: bool = False
+) -> List[Dict[str, Any]]:
+    """Get paper trade activities for a user."""
+    try:
+        query = {"user_id": user_id, "is_paper_trade": True}
+        
+        if days:
+            cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            query["trade_date"] = {"$gte": cutoff_date}
+        
+        if closed_only:
+            query["is_closed"] = True
+        
+        cursor = mongodb.get_db().algo_activity.find(query).sort("entry_time", -1)
+        activities = await cursor.to_list(length=5000)
+        
+        for activity in activities:
+            activity["_id"] = str(activity["_id"])
+        
+        return activities
+        
+    except Exception as e:
+        logger.error(f"Failed to get paper trade activities: {e}")
+        return []
+
+
+async def get_real_trade_activities(
+    user_id: str,
+    days: Optional[int] = None,
+    closed_only: bool = False
+) -> List[Dict[str, Any]]:
+    """Get real trade activities for a user (excludes paper trades)."""
+    try:
+        query = {
+            "user_id": user_id,
+            "$or": [
+                {"is_paper_trade": False},
+                {"is_paper_trade": {"$exists": False}}
+            ]
+        }
+        
+        if days:
+            cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            query["trade_date"] = {"$gte": cutoff_date}
+        
+        if closed_only:
+            query["is_closed"] = True
+        
+        cursor = mongodb.get_db().algo_activity.find(query).sort("entry_time", -1)
+        activities = await cursor.to_list(length=5000)
+        
+        for activity in activities:
+            activity["_id"] = str(activity["_id"])
+        
+        return activities
+        
+    except Exception as e:
+        logger.error(f"Failed to get real trade activities: {e}")
+        return []
+
+
+async def get_open_paper_positions(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get all open paper trade positions (for monitoring loop)."""
+    try:
+        query = {"is_paper_trade": True, "is_closed": False}
+        if user_id:
+            query["user_id"] = user_id
+        
+        cursor = mongodb.get_db().algo_activity.find(query)
+        positions = await cursor.to_list(length=1000)
+        
+        for pos in positions:
+            pos["_id"] = str(pos["_id"])
+        
+        return positions
+        
+    except Exception as e:
+        logger.error(f"Failed to get open paper positions: {e}")
+        return []
+
+
+async def get_algo_setups_by_paper_mode(
+    user_id: str, 
+    is_paper: bool, 
+    active_only: bool = False
+) -> List[Dict[str, Any]]:
+    """Get algo setups filtered by paper/real mode."""
+    try:
+        query = {"user_id": user_id}
+        
+        if is_paper:
+            query["is_paper_trade"] = True
+        else:
+            query["$or"] = [
+                {"is_paper_trade": False},
+                {"is_paper_trade": {"$exists": False}}
+            ]
+        
+        if active_only:
+            query["is_active"] = True
+        
+        cursor = mongodb.get_db().algo_setups.find(query)
+        setups = await cursor.to_list(length=100)
+        
+        for setup in setups:
+            setup["_id"] = str(setup["_id"])
+        
+        return setups
+        
+    except Exception as e:
+        logger.error(f"Failed to get algo setups by paper mode: {e}")
+        return []

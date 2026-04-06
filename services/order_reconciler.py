@@ -197,6 +197,12 @@ async def reconcile_pending_orders(logger_bot=None):
                 logger.warning(f"Setup {algo_setup_id} not found, skipping order {order_id}")
                 continue
             
+            # ========== SKIP PAPER TRADES ==========
+            if setup.get("is_paper_trade", False):
+                logger.debug(f"[PAPER] Skipping reconciliation for paper order {order_id}")
+                continue
+            # ========== END SKIP ==========
+            
             # Get credentials using api_id from setup
             api_id = setup.get("api_id")
             if not api_id:

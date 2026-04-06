@@ -26,6 +26,7 @@ from indicators.signal_generator import SignalGenerator
 from config.settings import settings
 from database.crud import create_order_record, update_order_record
 from database.crud import create_position_record
+from strategy.paper_trader import is_paper_trade, paper_trader
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,18 @@ class PositionManager:
                                         sirusu_value: float,
                                         immediate: bool = False) -> bool:
         try:
+            # ========== PAPER TRADE ROUTING ==========
+            if is_paper_trade(algo_setup):
+                return await paper_trader.place_virtual_entry(
+                    client=client,
+                    algo_setup=algo_setup,
+                    entry_side=entry_side,
+                    breakout_price=breakout_price,
+                    sirusu_value=sirusu_value,
+                    immediate=immediate
+                )
+            # ========== END PAPER TRADE ROUTING ==========
+            
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
             symbol = algo_setup["asset"]
@@ -533,6 +546,15 @@ class PositionManager:
                            algo_setup: Dict[str, Any],
                            sirusu_signal_text: str) -> tuple[bool, float, str]:
         try:
+            # ========== PAPER TRADE ROUTING ==========
+            if is_paper_trade(algo_setup):
+                return await paper_trader.execute_virtual_exit(
+                    client=client,
+                    algo_setup=algo_setup,
+                    exit_reason=f"Sirusu flip to {sirusu_signal_text}"
+                )
+            # ========== END PAPER TRADE ROUTING ==========
+            
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
             symbol = algo_setup["asset"]

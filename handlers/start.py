@@ -43,6 +43,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
         ],
         [
+            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
+            InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
@@ -79,6 +83,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [
             InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups"),
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
+        ],
+        [
+            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
+            InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
         ],
         [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")

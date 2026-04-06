@@ -154,3 +154,11 @@ MAX_CANDLE_AGE_SECONDS = 300                    # Consider candle stale after 5m
 # ===== FEATURE FLAGS =====
 ENABLE_DEMO_MODE = False                        # Set True for paper trading
 ENABLE_VERBOSE_LOGGING = True                   # Set False for production
+
+# ===== PAPER TRADING CONFIGURATION =====
+PAPER_TRADE_DEFAULT_BALANCE = 10000.0           # Starting virtual balance (USD)
+PAPER_TRADE_DEFAULT_LEVERAGE = 10               # Default leverage for paper trades
+PAPER_TRADE_TAKER_FEE = 0.0005                  # 0.05% taker fee (realistic)
+PAPER_TRADE_MAKER_FEE = 0.0002                  # 0.02% maker fee
+PAPER_TRADE_PRICE_CHECK_INTERVAL = 5            # Seconds between SL/entry price checks
+PAPER_TRADE_MAX_OPEN_POSITIONS = 20             # Max simultaneous paper positions

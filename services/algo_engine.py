@@ -13,6 +13,7 @@ from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust me
 from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from strategy.order_monitor import OrderMonitor
+from strategy.paper_trader import paper_trader, is_paper_trade
 from api.positions import get_ticker_mark_price
 from services.logger_bot import LoggerBot
 from utils.timeframe import (
@@ -602,6 +603,16 @@ class AlgoEngine:
         logger.info("AlgoEngine.run_continuous_monitoring() ENTERED")
         logger.info("🚀 Starting continuous algo monitoring...")
         await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups")
+        
+        # ========== PAPER TRADE: Restore open positions on reboot ==========
+        try:
+            restored = await paper_trader.restore_open_positions(None)
+            if restored > 0:
+                logger.info(f"[PAPER] Restored {restored} open paper positions on startup")
+        except Exception as e:
+            logger.error(f"[PAPER] Error restoring positions on startup: {e}")
+        # ========== END PAPER TRADE RESTORE ==========
+        
         loop_count = 0
         while True:
             try:
@@ -685,6 +696,70 @@ class AlgoEngine:
                 await asyncio.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"[FILL-MONITOR] Error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                await asyncio.sleep(poll_interval)
+
+    async def monitor_paper_trades(self, poll_interval=5):
+        """
+        Background loop to monitor virtual stop-losses and pending entries for paper trades.
+        Checks live prices every few seconds and triggers virtual fills/exits.
+        """
+        logger.info("[PAPER] Starting paper trade price monitor...")
+        
+        while True:
+            try:
+                # We need a client to fetch prices - use first available API credential
+                active_setups = await get_all_active_algo_setups()
+                paper_setups = [s for s in active_setups if is_paper_trade(s)]
+                
+                if not paper_setups and paper_trader.get_active_positions_count() == 0 and paper_trader.get_pending_entries_count() == 0:
+                    await asyncio.sleep(poll_interval * 2)
+                    continue
+                
+                # Get a client for price fetching
+                client = None
+                for setup in paper_setups:
+                    api_id = setup.get('api_id')
+                    if api_id:
+                        cred = await get_api_credential_by_id(api_id, decrypt=True)
+                        if cred:
+                            client = DeltaExchangeClient(
+                                api_key=cred['api_key'],
+                                api_secret=cred['api_secret']
+                            )
+                            break
+                
+                if not client:
+                    # Fallback: try any active setup's credentials for price data
+                    for setup in active_setups:
+                        api_id = setup.get('api_id')
+                        if api_id:
+                            cred = await get_api_credential_by_id(api_id, decrypt=True)
+                            if cred:
+                                client = DeltaExchangeClient(
+                                    api_key=cred['api_key'],
+                                    api_secret=cred['api_secret']
+                                )
+                                break
+                
+                if not client:
+                    await asyncio.sleep(poll_interval * 2)
+                    continue
+                
+                try:
+                    # Check pending virtual entries (breakout triggers)
+                    await paper_trader.check_pending_entries(client)
+                    
+                    # Check virtual stop-losses and liquidations
+                    await paper_trader.check_stop_losses(client)
+                finally:
+                    await client.close()
+                
+                await asyncio.sleep(poll_interval)
+                
+            except Exception as e:
+                logger.error(f"[PAPER] Error in paper trade monitor: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
                 await asyncio.sleep(poll_interval)

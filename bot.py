@@ -43,6 +43,25 @@ from handlers.screener_setup import (
     SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
 )
 from handlers.algo_activity import algo_activity_callback
+from handlers.paper_trading import (
+    paper_trading_menu_callback, paper_add_start, paper_name_received,
+    paper_desc_received, paper_api_selected, paper_direction_selected,
+    paper_timeframe_selected, paper_asset_received, paper_lot_size_received,
+    paper_leverage_selected, paper_protection_selected, paper_confirmed,
+    cancel_paper_setup, paper_view_list_callback, paper_detail_callback,
+    paper_toggle_callback, paper_open_positions_callback,
+    paper_delete_list_callback, paper_delete_confirm_callback,
+    paper_reset_balance_callback, paper_reset_confirm_callback,
+    PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION,
+    PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
+    PAPER_PROTECTION, PAPER_CONFIRM
+)
+from handlers.performance import (
+    performance_menu_callback, performance_command,
+    perf_real_callback, perf_real_chart_callback, perf_real_csv_callback,
+    perf_paper_callback, perf_paper_chart_callback,
+    perf_paper_pnl_chart_callback, perf_paper_csv_callback
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +212,56 @@ def create_application() -> Application:
     
     # Algo Activity handler
     application.add_handler(CallbackQueryHandler(algo_activity_callback, pattern="^menu_algo_activity$"))
+    
+    # ===== PAPER TRADING HANDLERS =====
+    
+    # Paper Trading conversation handler
+    paper_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(paper_add_start, pattern="^paper_add_start$")],
+        states={
+            PAPER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_name_received)],
+            PAPER_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_desc_received)],
+            PAPER_API: [CallbackQueryHandler(paper_api_selected, pattern="^paper_api_")],
+            PAPER_DIRECTION: [CallbackQueryHandler(paper_direction_selected, pattern="^paper_dir_")],
+            PAPER_TIMEFRAME: [CallbackQueryHandler(paper_timeframe_selected, pattern="^paper_tf_")],
+            PAPER_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_asset_received)],
+            PAPER_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_lot_size_received)],
+            PAPER_LEVERAGE: [CallbackQueryHandler(paper_leverage_selected, pattern="^paper_lev_")],
+            PAPER_PROTECTION: [CallbackQueryHandler(paper_protection_selected, pattern="^paper_prot_")],
+            PAPER_CONFIRM: [CallbackQueryHandler(paper_confirmed, pattern="^paper_confirm_")],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_paper_setup),
+            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(paper_conv_handler)
+    
+    # Paper Trading menu and action handlers
+    application.add_handler(CallbackQueryHandler(paper_trading_menu_callback, pattern="^menu_paper_trading$"))
+    application.add_handler(CallbackQueryHandler(paper_view_list_callback, pattern="^paper_view_list$"))
+    application.add_handler(CallbackQueryHandler(paper_detail_callback, pattern="^paper_detail_"))
+    application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
+    application.add_handler(CallbackQueryHandler(paper_open_positions_callback, pattern="^paper_open_positions$"))
+    application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
+    application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))
+    application.add_handler(CallbackQueryHandler(paper_reset_balance_callback, pattern="^paper_reset_balance$"))
+    application.add_handler(CallbackQueryHandler(paper_reset_confirm_callback, pattern="^paper_reset_confirm$"))
+    
+    # ===== PERFORMANCE HANDLERS =====
+    
+    application.add_handler(CommandHandler("performance", performance_command))
+    application.add_handler(CallbackQueryHandler(performance_menu_callback, pattern="^menu_performance$"))
+    # Register specific patterns before general ones to avoid regex prefix conflicts
+    application.add_handler(CallbackQueryHandler(perf_real_chart_callback, pattern="^perf_real_chart$"))
+    application.add_handler(CallbackQueryHandler(perf_real_csv_callback, pattern="^perf_real_csv$"))
+    application.add_handler(CallbackQueryHandler(perf_real_callback, pattern="^perf_real$"))
+    application.add_handler(CallbackQueryHandler(perf_paper_chart_callback, pattern="^perf_paper_chart$"))
+    application.add_handler(CallbackQueryHandler(perf_paper_pnl_chart_callback, pattern="^perf_paper_pnl_chart$"))
+    application.add_handler(CallbackQueryHandler(perf_paper_csv_callback, pattern="^perf_paper_csv$"))
+    application.add_handler(CallbackQueryHandler(perf_paper_callback, pattern="^perf_paper$"))
     
     logger.info("✅ Bot handlers registered")
     

@@ -34,6 +34,12 @@ async def startup_reconciliation(logger_bot: LoggerBot):
     # ==================================================
 
     for setup in setups:
+        # ========== SKIP PAPER TRADES ==========
+        if setup.get("is_paper_trade", False):
+            logger.info(f"[PAPER] Skipping reconciliation for paper setup: {setup.get('setup_name')}")
+            continue
+        # ========== END SKIP ==========
+        
         api_id = setup.get("api_id")
         cred = await get_api_credential_by_id(api_id, decrypt=True)
         if not cred:

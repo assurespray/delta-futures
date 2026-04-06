@@ -209,6 +209,10 @@ async def lifespan(app: FastAPI):
         async_tasks.append(asyncio.create_task(run_order_reconciliation()))
         logger.info("✅ Order reconciliation task started")
 
+        # Paper trade monitoring (virtual SL/entry checks)
+        async_tasks.append(asyncio.create_task(algo_engine.monitor_paper_trades(poll_interval=5)))
+        logger.info("✅ Paper trade monitoring task started")
+
         # Send startup notification
         await logger_bot.send_info(
             "🚀 Trading Bot Started Successfully!\n\n"
