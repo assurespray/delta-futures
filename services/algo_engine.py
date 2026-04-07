@@ -216,7 +216,23 @@ class AlgoEngine:
                         )
                         entry_signal = None  # cancel entry
 
-                # 4) Place order only if all conditions passed
+                # 3b) Direction constraint: respect long_only / short_only
+                if entry_signal:
+                    setup_direction = algo_setup.get("direction", "both")
+                    side = entry_signal["side"]
+                    if setup_direction == "long_only" and side != "long":
+                        logger.info(
+                            f"❌ Entry blocked for {setup_name}: "
+                            f"setup is long_only but signal is {side.upper()}"
+                        )
+                        entry_signal = None
+                    elif setup_direction == "short_only" and side != "short":
+                        logger.info(
+                            f"❌ Entry blocked for {setup_name}: "
+                            f"setup is short_only but signal is {side.upper()}"
+                        )
+                        entry_signal = None
+
                 # 4) Place order only if all conditions passed
                 if entry_signal:
                     self.signal_counts["entry_signals"] += 1

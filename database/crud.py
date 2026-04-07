@@ -750,12 +750,6 @@ async def delete_position_lock(symbol: str = None) -> int:
         logger.debug(f"delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
         return result.deleted_count
         
-async def get_all_active_screener_setups():
-    """Get all active screener setups."""
-    db = await get_db()
-    setups = await db.screener_setups.find({"is_active": True}).to_list(None)
-    return setups
-
 async def get_screener_positions_by_asset(asset: str):
     """Get all open screener positions for an asset."""
     db = await get_db()

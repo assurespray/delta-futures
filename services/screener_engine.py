@@ -24,6 +24,7 @@ from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from services.logger_bot import LoggerBot
 from config.settings import settings
+from utils.timeframe import get_next_boundary_time, get_timeframe_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -190,9 +191,10 @@ class ScreenerEngine:
             setup_name = screener_setup.get("setup_name")
             timeframe = screener_setup.get("timeframe")
             
-            # Calculate indicators
+            # Calculate indicators (force_recalc to avoid cache conflicts
+            # when multiple screener setups process the same asset)
             indicator_result = await self.strategy.calculate_indicators(
-                client, asset, timeframe
+                client, asset, timeframe, force_recalc=True
             )
             
             if not indicator_result:
@@ -226,7 +228,39 @@ class ScreenerEngine:
             )
             
             if entry_signal:
-                logger.info(f"🚀 Entry signal for {asset}: {entry_signal['side'].upper()}")
+                side = entry_signal['side']
+                perusu_signal = indicator_result["perusu"]["signal"]
+                sirusu_signal = indicator_result["sirusu"]["signal"]
+                
+                # Filter 1: Perusu & Sirusu must agree on direction
+                aligned = (
+                    (side == "long"  and perusu_signal == 1  and sirusu_signal == 1) or
+                    (side == "short" and perusu_signal == -1 and sirusu_signal == -1)
+                )
+                if not aligned:
+                    logger.info(
+                        f"❌ [SCREENER] Entry blocked for {asset}: "
+                        f"Perusu={perusu_signal}, Sirusu={sirusu_signal}, "
+                        f"side={side} (indicators not aligned)"
+                    )
+                    return
+                
+                # Filter 2: Direction constraint (long_only / short_only)
+                setup_direction = screener_setup.get("direction", "both")
+                if setup_direction == "long_only" and side != "long":
+                    logger.info(
+                        f"❌ [SCREENER] Entry blocked for {asset}: "
+                        f"setup is long_only but signal is {side.upper()}"
+                    )
+                    return
+                elif setup_direction == "short_only" and side != "short":
+                    logger.info(
+                        f"❌ [SCREENER] Entry blocked for {asset}: "
+                        f"setup is short_only but signal is {side.upper()}"
+                    )
+                    return
+                
+                logger.info(f"🚀 Entry signal for {asset}: {side.upper()}")
                 
                 # Inject dynamic asset into setup dict for position_manager compatibility
                 setup_with_asset = dict(screener_setup)
@@ -308,7 +342,7 @@ class ScreenerEngine:
             logger.error(traceback.format_exc())
     
     async def run_continuous_monitoring(self):
-        """Main screener monitoring loop."""
+        """Main screener monitoring loop with boundary-aligned scheduling."""
         logger.info("🚀 Starting screener monitoring...")
         await self.logger_bot.send_info("🚀 Screener Engine Started")
         
@@ -324,14 +358,28 @@ class ScreenerEngine:
                 for setup in screener_setups:
                     await self.process_screener_setup(setup)
                 
-                # Sleep until next refresh (use shortest interval among all setups)
-                intervals = [
-                    await self.get_refresh_interval(s) for s in screener_setups
-                ]
-                shortest_interval = min(intervals) if intervals else 900  # Default 15m
+                # Boundary-aligned sleep: find the shortest timeframe across
+                # all active screener setups and sleep until that candle closes
+                timeframes = [s.get("timeframe", "15m") for s in screener_setups]
+                timeframe_seconds_map = {
+                    tf: get_timeframe_seconds(tf) for tf in set(timeframes)
+                }
+                shortest_seconds = min(timeframe_seconds_map.values()) if timeframe_seconds_map else 900
+                shortest_tf = next(
+                    tf for tf in timeframes
+                    if timeframe_seconds_map.get(tf, 900) == shortest_seconds
+                )
                 
-                logger.info(f"💤 Screener sleeping {shortest_interval}s until next refresh")
-                await asyncio.sleep(shortest_interval)
+                now = datetime.utcnow()
+                next_boundary = get_next_boundary_time(shortest_tf, now)
+                time_until_boundary = (next_boundary - now).total_seconds()
+                sleep_time = max(1, time_until_boundary + 0.5)
+                
+                logger.info(
+                    f"💤 Screener next check at {next_boundary.strftime('%H:%M:%S')} UTC "
+                    f"(sleeping {sleep_time:.1f}s for {shortest_tf} boundary)"
+                )
+                await asyncio.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"❌ Exception in screener monitoring: {e}")
