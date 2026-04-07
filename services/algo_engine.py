@@ -69,6 +69,56 @@ class AlgoEngine:
         logger.debug(f"⏱️ Sleep time for timeframe '{timeframe}': {sleep_seconds}s ({sleep_seconds/60:.1f} minutes)")
         return sleep_seconds
 
+
+    async def run_continuous_monitoring(self):
+        """
+        Background loop to monitor active setups and open trades on candle boundaries.
+        """
+        logger.info("🚀 Starting boundary-aligned algo monitoring loop.")
+        
+        while True:
+            try:
+                active_setups = await get_all_active_algo_setups()
+                open_trades = await get_open_trade_states()
+                
+                if not active_setups and not open_trades:
+                    logger.debug("ℹ️ No active algo setups or open trades found.")
+                    import asyncio
+                    await asyncio.sleep(60)
+                    continue
+                
+                # Check configs for entries
+                import asyncio
+                for setup in active_setups:
+                    asyncio.create_task(self.process_algo_setup(setup))
+                    
+                # Check open trades for trailing SL / exits
+                for trade in open_trades:
+                    asyncio.create_task(self.process_open_trade(trade))
+                    
+                # Boundary-aligned sleep calculation
+                timeframes = [s.get("timeframe", "15m") for s in active_setups] + [t.get("timeframe", "15m") for t in open_trades]
+                if not timeframes:
+                    await asyncio.sleep(60)
+                    continue
+                    
+                from utils.timeframe import get_timeframe_seconds, get_next_boundary_time
+                timeframe_seconds_map = {tf: get_timeframe_seconds(tf) for tf in set(timeframes)}
+                shortest_seconds = min(timeframe_seconds_map.values())
+                shortest_tf = next(tf for tf in timeframes if timeframe_seconds_map[tf] == shortest_seconds)
+                
+                now = datetime.utcnow()
+                next_boundary = get_next_boundary_time(shortest_tf, now)
+                
+                sleep_seconds = (next_boundary - now).total_seconds() + 2.0
+                logger.info(f"⏳ Algo Engine sleeping for {sleep_seconds:.1f} seconds (until next {shortest_tf} boundary)")
+                await asyncio.sleep(sleep_seconds)
+                
+            except Exception as e:
+                logger.error(f"❌ Error in algo monitoring loop: {e}")
+                import asyncio
+                await asyncio.sleep(60)
+
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         start_time = time.time()
         setup_id = str(algo_setup['_id'])
