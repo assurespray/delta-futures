@@ -697,6 +697,35 @@ class PaperTrader:
         except Exception as e:
             logger.error(f"[PAPER] Error cancelling entry: {e}")
             return False
+
+    async def force_cleanup_setup(self, setup_id: str) -> None:
+        """Forcefully release any locked margin for a setup being deleted."""
+        try:
+            # Check pending entries
+            entry_data = self._pending_entries.pop(setup_id, None)
+            if entry_data:
+                user_id = entry_data["user_id"]
+                leverage = entry_data["leverage"]
+                margin = entry_data.get("margin_locked", (entry_data["trigger_price"] * entry_data["lot_size"]) / leverage)
+                paper_bal = await get_paper_balance(user_id)
+                if paper_bal:
+                    new_locked = max(0, paper_bal.get("locked_margin", 0) - margin)
+                    await update_paper_balance(user_id, {"locked_margin": new_locked})
+                logger.info(f"[PAPER] Released margin for deleted pending entry setup {setup_id}")
+            
+            # Check active positions (stop losses tracking)
+            sl_data = self._active_stop_losses.pop(setup_id, None)
+            if sl_data:
+                user_id = sl_data["user_id"]
+                margin = sl_data.get("margin_used", (sl_data["entry_price"] * sl_data["lot_size"]) / sl_data["leverage"])
+                paper_bal = await get_paper_balance(user_id)
+                if paper_bal:
+                    new_locked = max(0, paper_bal.get("locked_margin", 0) - margin)
+                    await update_paper_balance(user_id, {"locked_margin": new_locked})
+                logger.info(f"[PAPER] Released margin for deleted active position setup {setup_id}")
+                
+        except Exception as e:
+            logger.error(f"[PAPER] Error forcefully cleaning up setup {setup_id}: {e}")
     
     # ==================== HELPERS ====================
     

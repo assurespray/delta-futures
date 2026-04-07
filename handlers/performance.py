@@ -118,7 +118,8 @@ async def perf_real_chart_callback(update: Update, context: ContextTypes.DEFAULT
     activities = await get_real_trade_activities(user_id, closed_only=True)
     
     if not activities:
-        await query.edit_message_text("No closed real trades to chart.")
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_real")]])
+        await query.edit_message_text("No closed real trades to chart.", reply_markup=back_markup)
         return
     
     # Generate chart
@@ -142,7 +143,8 @@ async def perf_real_csv_callback(update: Update, context: ContextTypes.DEFAULT_T
     activities = await get_real_trade_activities(user_id)
     
     if not activities:
-        await query.edit_message_text("No real trades to export.")
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_real")]])
+        await query.edit_message_text("No real trades to export.", reply_markup=back_markup)
         return
     
     csv_buf = _generate_csv(activities, "real")
@@ -205,7 +207,8 @@ async def perf_paper_chart_callback(update: Update, context: ContextTypes.DEFAUL
     paper_bal = await get_paper_balance(user_id)
     
     if not activities:
-        await query.edit_message_text("No closed paper trades to chart.")
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_paper")]])
+        await query.edit_message_text("No closed paper trades to chart.", reply_markup=back_markup)
         return
     
     starting_balance = paper_bal.get("initial_balance", PAPER_TRADE_DEFAULT_BALANCE) if paper_bal else PAPER_TRADE_DEFAULT_BALANCE
@@ -229,7 +232,8 @@ async def perf_paper_pnl_chart_callback(update: Update, context: ContextTypes.DE
     activities = await get_paper_trade_activities(user_id, closed_only=True)
     
     if not activities:
-        await query.edit_message_text("No closed paper trades to chart.")
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_paper")]])
+        await query.edit_message_text("No closed paper trades to chart.", reply_markup=back_markup)
         return
     
     chart_buf = _generate_pnl_bar_chart("Paper Trading", activities)
@@ -252,7 +256,8 @@ async def perf_paper_csv_callback(update: Update, context: ContextTypes.DEFAULT_
     activities = await get_paper_trade_activities(user_id)
     
     if not activities:
-        await query.edit_message_text("No paper trades to export.")
+        back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_paper")]])
+        await query.edit_message_text("No paper trades to export.", reply_markup=back_markup)
         return
     
     csv_buf = _generate_csv(activities, "paper")
@@ -279,7 +284,8 @@ def _build_performance_message(
     
     total_trades = len(activities)
     winning = sum(1 for a in activities if (a.get("pnl") or 0) > 0)
-    losing = sum(1 for a in activities if (a.get("pnl") or 0) <= 0)
+    losing = sum(1 for a in activities if (a.get("pnl") or 0) < 0)
+    breakeven = sum(1 for a in activities if (a.get("pnl") or 0) == 0)
     win_rate = (winning / total_trades * 100) if total_trades > 0 else 0
     
     total_pnl = sum(a.get("pnl", 0) or 0 for a in activities)
@@ -354,7 +360,7 @@ def _calculate_streak(pnls: List[float], positive: bool = True) -> int:
     max_streak = 0
     current = 0
     for p in pnls:
-        if (positive and p > 0) or (not positive and p <= 0):
+        if (positive and p > 0) or (not positive and p < 0):
             current += 1
             max_streak = max(max_streak, current)
         else:

@@ -504,9 +504,16 @@ async def update_screener_setup(setup_id: str, update_data: Dict[str, Any]) -> b
 
 
 async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
-    """Delete screener setup."""
+    """Delete screener setup and cascade delete all related data."""
     try:
-        result = await mongodb.get_db().screener_setups.delete_one({
+        db = await get_db()
+        # Clean up all related DB records first
+        await db.orders.delete_many({"algo_setup_id": setup_id})
+        await db.positions.delete_many({"algo_setup_id": setup_id})
+        await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+        await db.position_locks.delete_many({"setup_id": setup_id})
+        
+        result = await db.screener_setups.delete_one({
             "_id": ObjectId(setup_id),
             "user_id": user_id
         })

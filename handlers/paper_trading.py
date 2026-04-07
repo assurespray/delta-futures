@@ -23,6 +23,7 @@ from database.crud import (
     get_screener_setup_by_id, update_screener_setup,
     delete_screener_setup,
 )
+from strategy.paper_trader import paper_trader
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_product_by_symbol
 from database.crud import get_api_credential_by_id
@@ -925,12 +926,15 @@ async def paper_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await update_algo_setup(setup_id, {"is_active": new_active})
     
     status = "activated" if new_active else "paused"
-    await query.edit_message_text(
-        f"Paper setup has been {status}.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Back to List", callback_data="paper_view_list")]
-        ])
-    )
+    try:
+        await query.edit_message_text(
+            f"Paper setup has been {status}.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to List", callback_data="paper_view_list")]
+            ])
+        )
+    except Exception as e:
+        logger.warning(f"Toggle edit message failed (probably already modified): {e}")
 
 
 # ==================== OPEN PAPER POSITIONS ====================
@@ -1037,13 +1041,16 @@ async def paper_delete_confirm_callback(update: Update, context: ContextTypes.DE
     
     if raw.startswith("algo_"):
         setup_id = raw.replace("algo_", "")
+        await paper_trader.force_cleanup_setup(setup_id)
         success = await delete_algo_setup(setup_id, user_id)
     elif raw.startswith("scr_"):
         setup_id = raw.replace("scr_", "")
+        await paper_trader.force_cleanup_setup(setup_id)
         success = await delete_screener_setup(setup_id, user_id)
     else:
         # Legacy fallback
         setup_id = raw
+        await paper_trader.force_cleanup_setup(setup_id)
         success = await delete_algo_setup(setup_id, user_id)
     
     if success:

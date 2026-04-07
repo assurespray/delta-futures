@@ -692,6 +692,10 @@ class AlgoEngine:
             try:
                 active_setups = await get_all_active_algo_setups()
                 for setup in active_setups:
+                    # Skip paper setups to avoid wasting API connections
+                    if is_paper_trade(setup):
+                        continue
+                    
                     # Only for setups with pending stop-market entries
                     if setup.get("pending_entry_order_id"):
                         api_id = setup['api_id']
