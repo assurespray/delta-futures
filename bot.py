@@ -95,7 +95,10 @@ def create_application() -> Application:
             API_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, api_key_received)],
             API_SECRET: [MessageHandler(filters.TEXT & ~filters.COMMAND, api_secret_received)]
         },
-        fallbacks=[CommandHandler("cancel", cancel_conversation)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_conversation),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
         per_message=False
     )
     application.add_handler(api_conv_handler)
@@ -116,7 +119,7 @@ def create_application() -> Application:
             CommandHandler("cancel", cancel_indicator),
             CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"),
             CallbackQueryHandler(indicator_select_callback, pattern="^indicator_select_"),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -140,7 +143,7 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_algo_setup),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -151,8 +154,6 @@ def create_application() -> Application:
     # CALLBACK QUERY HANDLERS (Order matters - most specific first)
     # ============================================================
     
-    # Main menu
-    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     application.add_handler(CallbackQueryHandler(help_callback, pattern="^menu_help$"))
     
     # API Menu handlers
@@ -161,11 +162,9 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(api_delete_confirm_callback, pattern="^api_delete_confirm_"))
     
     # Balance handler
-    application.add_handler(CallbackQueryHandler(balance_callback, pattern="^menu_balance$"))
     application.add_handler(CallbackQueryHandler(balance_callback, pattern="^(menu_balance|refresh_balance)$"))
     
     # Positions handler
-    application.add_handler(CallbackQueryHandler(positions_callback, pattern="^menu_positions$"))
     application.add_handler(CallbackQueryHandler(positions_callback, pattern="^(menu_positions|refresh_positions)$"))
     
     # Orders handlers
@@ -204,7 +203,7 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_screener_setup),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -240,7 +239,7 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -264,7 +263,7 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -279,7 +278,7 @@ def create_application() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^main_menu$")
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
         per_message=False,
         allow_reentry=True
@@ -307,6 +306,9 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(perf_paper_pnl_chart_callback, pattern="^perf_paper_pnl_chart$"))
     application.add_handler(CallbackQueryHandler(perf_paper_csv_callback, pattern="^perf_paper_csv$"))
     application.add_handler(CallbackQueryHandler(perf_paper_callback, pattern="^perf_paper$"))
+    
+    # Main menu - registered LAST so ConversationHandler fallbacks get priority
+    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     
     logger.info("✅ Bot handlers registered")
     
