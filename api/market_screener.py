@@ -10,20 +10,27 @@ logger = logging.getLogger(__name__)
 async def get_all_perpetual_tickers(client: DeltaExchangeClient) -> List[Dict]:
     """
     Fetch all perpetual futures tickers from Delta Exchange.
-    
     Returns list of tickers with 24h price change data.
     """
     try:
-        # Delta Exchange API endpoint for tickers
-        url = f"{client.base_url}/v2/tickers"
-        headers = client._get_headers()
-        
-        response = await client.session.get(url, headers=headers)
-        data = await response.json()
-        
-        if not data.get("success"):
-            logger.error(f"Failed to fetch tickers: {data}")
+        response = await client._request("GET", "/v2/tickers")
+        if not response or not response.get("success"):
+            logger.error(f"Failed to fetch tickers: {response}")
             return []
+            
+        tickers = response.get("result", [])
+        
+        perpetual_tickers = [
+            t for t in tickers 
+            if t.get("contract_type") == "perpetual_futures"
+        ]
+        
+        logger.info(f"✅ Fetched {len(perpetual_tickers)} perpetual futures tickers")
+        return perpetual_tickers
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching tickers: {e}")
+        return []
         
         tickers = data.get("result", [])
         
