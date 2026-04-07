@@ -4,7 +4,7 @@ from datetime import datetime
 from database.crud import (
     get_all_active_algo_setups,
     get_api_credential_by_id,
-    update_algo_setup,
+    
     create_position_lock,
     delete_position_lock,
     get_db, 

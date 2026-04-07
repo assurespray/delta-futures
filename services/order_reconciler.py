@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from database.crud import (
     get_api_credential_by_id, get_algo_setup_by_id, get_all_active_algo_setups,
-    update_algo_setup, update_algo_activity, get_open_activity_by_setup,
+    
     release_position_lock, get_db
 )
 from database.mongodb import mongodb

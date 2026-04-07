@@ -5,7 +5,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import pytz
-from database.crud import cleanup_old_activities
+from database.cleanup import run_full_cleanup
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class SchedulerService:
         try:
             # Run daily at 00:00 UTC
             self.scheduler.add_job(
-                func=cleanup_old_activities,
+                func=run_full_cleanup,
                 trigger=CronTrigger(hour=0, minute=0),
                 id="cleanup_old_activities",
                 name="Daily Activity Cleanup",
