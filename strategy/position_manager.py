@@ -879,6 +879,10 @@ class PositionManager:
         On startup, sync open positions and pending orders from the exchange with local database.
         """
         for setup in all_setups:
+            # Paper trades have no real exchange state to sync
+            if is_paper_trade(setup):
+                continue
+            
             symbol = setup.get("asset")
             setup_id = str(setup["_id"])
             product_id = setup.get("product_id")

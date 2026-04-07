@@ -76,6 +76,7 @@ class AlgoSetup(BaseModel):
     entry_trigger_price: Optional[float] = None  # Breakout trigger price
     pending_entry_direction_signal: Optional[int] = None  # 1 for long, -1 for short
     pending_entry_side: Optional[str] = None  # "long" or "short" - explicit side string
+    last_entry_order_id: Optional[int] = None  # Last filled entry order ID
     
     # ========== STOP-LOSS TRACKING ==========
     # ✅ FIXED: Track stop-loss order ID for proper cancellation and state sync

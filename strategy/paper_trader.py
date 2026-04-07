@@ -20,7 +20,8 @@ from datetime import datetime
 from api.market_data import get_latest_price, get_product_by_symbol
 from database.crud import (
     create_algo_activity, update_algo_activity,
-    update_algo_setup, get_open_activity_by_setup,
+    update_algo_setup, update_screener_setup,
+    get_open_activity_by_setup,
     get_paper_balance, update_paper_balance, get_db
 )
 from config.settings import settings
@@ -44,6 +45,37 @@ def is_paper_trade(algo_setup: Dict[str, Any]) -> bool:
     if ENABLE_DEMO_MODE:
         return True
     return algo_setup.get("is_paper_trade", False)
+
+
+def _is_screener_setup(algo_setup: Dict[str, Any]) -> bool:
+    """Check if a setup dict originated from the screener_setups collection."""
+    return "asset_selection_type" in algo_setup
+
+
+async def _update_setup_state(setup_id: str, update_data: dict, algo_setup: Optional[Dict[str, Any]] = None) -> bool:
+    """Route setup update to the correct collection (algo_setups or screener_setups).
+    
+    If algo_setup is provided, uses it to detect the collection.
+    Otherwise, tries algo_setups first, then screener_setups.
+    """
+    if algo_setup and _is_screener_setup(algo_setup):
+        return await update_screener_setup(setup_id, update_data)
+    
+    # Try algo_setups first
+    result = await update_algo_setup(setup_id, update_data)
+    if result:
+        return True
+    # Fallback: might be a screener setup
+    return await update_screener_setup(setup_id, update_data)
+
+
+async def _get_setup_by_id(setup_id: str) -> Optional[Dict[str, Any]]:
+    """Look up a setup by ID, checking both algo_setups and screener_setups collections."""
+    from database.crud import get_algo_setup_by_id, get_screener_setup_by_id
+    setup = await get_algo_setup_by_id(setup_id)
+    if setup:
+        return setup
+    return await get_screener_setup_by_id(setup_id)
 
 
 class PaperTrader:
@@ -118,7 +150,7 @@ class PaperTrader:
                 product = await get_product_by_symbol(client, symbol)
                 if product:
                     product_id = product["id"]
-                    await update_algo_setup(setup_id, {"product_id": product_id})
+                    await _update_setup_state(setup_id, {"product_id": product_id}, algo_setup)
             
             if immediate:
                 # Execute immediately at live market price (slippage-realistic)
@@ -154,14 +186,15 @@ class PaperTrader:
                 new_locked = paper_bal.get("locked_margin", 0) + margin_required
                 await update_paper_balance(user_id, {"locked_margin": new_locked})
                 
-                # Update setup state
-                await update_algo_setup(setup_id, {
+                # Update setup state (include asset for screener reboot recovery)
+                await _update_setup_state(setup_id, {
                     "pending_entry_order_id": paper_order_id,
                     "entry_trigger_price": breakout_price,
                     "pending_entry_side": entry_side,
                     "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
                     "pending_sl_price": sirusu_value,
-                })
+                    "asset": symbol,
+                }, algo_setup)
                 
                 logger.info(
                     f"[PAPER] Breakout order placed: {entry_side.upper()} {symbol} "
@@ -247,7 +280,7 @@ class PaperTrader:
             }
             
             # Update setup state
-            await update_algo_setup(setup_id, {
+            await _update_setup_state(setup_id, {
                 "current_position": entry_side,
                 "last_entry_price": fill_price,
                 "last_signal_time": datetime.utcnow(),
@@ -256,7 +289,8 @@ class PaperTrader:
                 "pending_entry_side": None,
                 "pending_entry_direction_signal": None,
                 "pending_sl_price": sirusu_value,
-            })
+                "asset": symbol,
+            }, algo_setup)
             
             logger.info(
                 f"[PAPER] FILLED: {entry_side.upper()} {lot_size} {symbol} "
@@ -347,7 +381,7 @@ class PaperTrader:
                 })
             
             # Clean up setup state
-            await update_algo_setup(setup_id, {
+            await _update_setup_state(setup_id, {
                 "current_position": None,
                 "last_entry_price": None,
                 "pending_entry_order_id": None,
@@ -356,7 +390,7 @@ class PaperTrader:
                 "entry_trigger_price": None,
                 "pending_sl_price": None,
                 "stop_loss_order_id": None,
-            })
+            }, algo_setup)
             
             # Remove from active monitoring
             self._active_stop_losses.pop(setup_id, None)
@@ -406,9 +440,7 @@ class PaperTrader:
                         f"trigger=${trigger_price:.5f}, live=${live_price:.5f}"
                     )
                     
-                    # Import here to avoid circular dependency
-                    from database.crud import get_algo_setup_by_id
-                    algo_setup = await get_algo_setup_by_id(setup_id)
+                    algo_setup = await _get_setup_by_id(setup_id)
                     if not algo_setup:
                         filled_setups.append(setup_id)
                         continue
@@ -486,8 +518,7 @@ class PaperTrader:
                 if exit_reason:
                     logger.info(f"[PAPER] {exit_reason} for {symbol}")
                     
-                    from database.crud import get_algo_setup_by_id
-                    algo_setup = await get_algo_setup_by_id(setup_id)
+                    algo_setup = await _get_setup_by_id(setup_id)
                     if not algo_setup:
                         triggered_setups.append(setup_id)
                         continue
@@ -514,7 +545,7 @@ class PaperTrader:
             old_sl = self._active_stop_losses[setup_id]["sl_price"]
             self._active_stop_losses[setup_id]["sl_price"] = new_sl_price
             # Persist to DB so reboot recovery uses the updated SL
-            await update_algo_setup(setup_id, {"pending_sl_price": new_sl_price})
+            await _update_setup_state(setup_id, {"pending_sl_price": new_sl_price})
             logger.info(
                 f"[PAPER] SL updated for {setup_id}: "
                 f"${old_sl:.5f} -> ${new_sl_price:.5f}"
@@ -523,7 +554,7 @@ class PaperTrader:
     async def restore_open_positions(self, client) -> int:
         """Restore open paper positions and pending entries after bot restart."""
         try:
-            from database.crud import get_open_paper_positions, get_algo_setup_by_id, get_all_active_algo_setups
+            from database.crud import get_open_paper_positions, get_all_active_algo_setups, get_all_active_screener_setups
             
             open_positions = await get_open_paper_positions()
             restored = 0
@@ -534,7 +565,7 @@ class PaperTrader:
                 if not setup_id or setup_id in self._active_stop_losses:
                     continue
                 
-                algo_setup = await get_algo_setup_by_id(setup_id)
+                algo_setup = await _get_setup_by_id(setup_id)
                 if not algo_setup:
                     continue
                 
@@ -580,7 +611,9 @@ class PaperTrader:
                 )
             
             # ---- Restore pending entries into _pending_entries ----
-            all_setups = await get_all_active_algo_setups()
+            all_algo = await get_all_active_algo_setups()
+            all_screener = await get_all_active_screener_setups()
+            all_setups = all_algo + all_screener
             pending_restored = 0
             for setup in all_setups:
                 if not is_paper_trade(setup):
@@ -650,7 +683,7 @@ class PaperTrader:
                     await update_paper_balance(user_id, {"locked_margin": new_locked})
                 
                 # Clean up setup
-                await update_algo_setup(setup_id, {
+                await _update_setup_state(setup_id, {
                     "pending_entry_order_id": None,
                     "entry_trigger_price": None,
                     "pending_entry_side": None,
