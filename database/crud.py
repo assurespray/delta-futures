@@ -331,127 +331,43 @@ async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: 
 
 # ==================== Indicator Cache CRUD ====================
 
-async def upsert_indicator_cache(cache_data: Dict[str, Any]) -> bool:
-    """Update or insert indicator cache."""
+async def save_indicator_cache(cache_data: dict) -> bool:
     try:
-        result = await mongodb.get_db().indicator_cache.update_one(
-            {
-                "algo_setup_id": cache_data["algo_setup_id"],
-                "indicator_name": cache_data["indicator_name"]
-            },
-            {"$set": cache_data},
-            upsert=True
-        )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to upsert indicator cache: {e}")
-        return False
-
-
-async def get_indicator_cache(algo_setup_id: str, indicator_name: str) -> Optional[Dict[str, Any]]:
-    """Get cached indicator data."""
-    try:
-        cache = await mongodb.get_db().indicator_cache.find_one({
-            "algo_setup_id": algo_setup_id,
-            "indicator_name": indicator_name
-        })
-        
-        if cache:
-            cache["_id"] = str(cache["_id"])
-        
-        return cache
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to get indicator cache: {e}")
-        return None
-
-async def save_indicator_cache(
-    algo_setup_id: str,
-    indicator_name: str,
-    asset: str,
-    timeframe: str,
-    signal: int,
-    value: float
-) -> dict:
-    """
-    Save indicator to cache with signal flip detection.
-    Returns dict with flip details:
-        {
-            "flip": True/False,
-            "old_signal": int or None,
-            "new_signal": int,
-            "old_signal_text": str,
-            "new_signal_text": str
-        }
-    """
-    try:
+        from database.models import IndicatorCache
+        cache = IndicatorCache(**cache_data)
         db = mongodb.get_db()
-        
-        # 1. Get previous cache entry (if exists)
-        previous_cache = await db.indicator_cache.find_one({
-            "algo_setup_id": algo_setup_id,
-            "indicator_name": indicator_name,
-            "asset": asset,
-            "timeframe": timeframe
-        })
-        
-        # Extract previous signal
-        previous_signal = previous_cache.get("last_signal") if previous_cache else None
-        
-        # 2. Create new cache document
-        cache_doc = {
-            "algo_setup_id": algo_setup_id,
-            "indicator_name": indicator_name,
-            "asset": asset,
-            "timeframe": timeframe,
-            "calculated_at": datetime.utcnow(),
-            "last_signal": signal,              # Current signal
-            "previous_signal": previous_signal,  # Track previous for flip detection
-            "last_value": value
-        }
-        
-        # 3. Upsert to database
         await db.indicator_cache.update_one(
             {
-                "algo_setup_id": algo_setup_id,
-                "indicator_name": indicator_name,
-                "asset": asset,
-                "timeframe": timeframe
+                "setup_id": cache.setup_id,
+                "asset": cache.asset,
+                "timeframe": cache.timeframe
             },
-            {"$set": cache_doc},
+            {"$set": cache.dict(by_alias=True, exclude={"id"})},
             upsert=True
         )
-        
-        # 4. Detect flip and build result
-        def _signal_text(sig):
-            if sig == 1:
-                return "Uptrend"
-            elif sig == -1:
-                return "Downtrend"
-            return "Unknown"
-        
-        flip_occurred = False
-        if previous_signal is not None and previous_signal != signal:
-            flip_occurred = True
-            logger.info(
-                f"🔄 SIGNAL FLIP: {indicator_name} for {asset} {timeframe} "
-                f"({previous_signal} → {signal})"
-            )
-        
-        return {
-            "flip": flip_occurred,
-            "old_signal": previous_signal,
-            "new_signal": signal,
-            "old_signal_text": _signal_text(previous_signal),
-            "new_signal_text": _signal_text(signal),
-        }
-        
+        return True
     except Exception as e:
         logger.error(f"❌ Failed to save indicator cache: {e}")
-        return {"flip": False, "old_signal": None, "new_signal": signal,
-                "old_signal_text": "Unknown", "new_signal_text": "Unknown"}
+        return False
+
+async def get_indicator_cache_by_type(setup_type: str, is_paper_trade: bool) -> list:
+    try:
+        db = mongodb.get_db()
+        from datetime import datetime, timedelta
+        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+        
+        cursor = db.indicator_cache.find({
+            "setup_type": setup_type,
+            "is_paper_trade": is_paper_trade,
+            "calculated_at": {"$gte": one_hour_ago}
+        }).sort("asset", 1)
+        
+        caches = await cursor.to_list(length=1000)
+        return caches
+    except Exception as e:
+        logger.error(f"❌ Failed to get indicator caches: {e}")
+        return []
+
 
 # ==================== Screener Setups CRUD ====================
 
