@@ -47,6 +47,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
         ],
         [
+            InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
@@ -87,6 +90,9 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [
             InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
             InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
+        ],
+        [
+            InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
         ],
         [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")

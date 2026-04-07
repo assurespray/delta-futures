@@ -141,7 +141,29 @@ class AlgoEngine:
                 indicator_result = await self.strategy.calculate_indicators(
                     client, asset, timeframe
                 )
-                if not indicator_result or indicator_result.get("cached"):
+                if not indicator_result:
+                    return
+                
+                # Save to Indicator Cache for Dashboard
+                from database.crud import save_indicator_cache
+                cache_data = {
+                    "setup_id": setup_id,
+                    "setup_type": "algo",
+                    "setup_name": setup_name,
+                    "is_paper_trade": algo_setup.get("is_paper_trade", False),
+                    "asset": asset,
+                    "timeframe": timeframe,
+                    "current_price": indicator_result.get("current_price", 0.0),
+                    "perusu_signal": indicator_result["perusu"]["signal"],
+                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
+                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
+                    "sirusu_signal": indicator_result["sirusu"]["signal"],
+                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
+                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
+                }
+                await save_indicator_cache(cache_data)
+                
+                if indicator_result.get("cached"):
                     return
             finally:
                 await client.close()
@@ -207,9 +229,28 @@ class AlgoEngine:
                 indicator_result = await self.strategy.calculate_indicators(
                     client, asset, timeframe
                 )
-                if not indicator_result or indicator_result.get("cached"):
-                    # For exiting/trailing SL we must process it even if cached, but calculation will just return cached values
-                    pass
+                if not indicator_result:
+                    await client.close()
+                    return
+                
+                # Save to Indicator Cache for Dashboard
+                from database.crud import save_indicator_cache
+                cache_data = {
+                    "setup_id": setup_id,
+                    "setup_type": trade_state.get("setup_type", "algo"),
+                    "setup_name": trade_state.get("setup_name", "Unknown"),
+                    "is_paper_trade": trade_state.get("is_paper_trade", False),
+                    "asset": asset,
+                    "timeframe": timeframe,
+                    "current_price": indicator_result.get("current_price", 0.0),
+                    "perusu_signal": indicator_result["perusu"]["signal"],
+                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
+                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
+                    "sirusu_signal": indicator_result["sirusu"]["signal"],
+                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
+                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
+                }
+                await save_indicator_cache(cache_data)
             except Exception as e:
                 logger.error(f"❌ Error calculating indicators for {asset}: {e}")
                 await client.close()

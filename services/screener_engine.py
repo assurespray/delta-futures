@@ -9,7 +9,7 @@ from database.crud import (
     get_api_credential_by_id,
     get_screener_positions_by_asset,
     get_screener_indicator_cache,
-    upsert_screener_indicator_cache,
+    
     acquire_position_lock,
     release_position_lock,
     get_position_lock
@@ -202,25 +202,23 @@ class ScreenerEngine:
                 return
             
             # Cache indicators
-            await upsert_screener_indicator_cache({
-                "screener_setup_id": setup_id,
+            from database.crud import save_indicator_cache
+            cache_data = {
+                "setup_id": setup_id,
+                "setup_type": "screener",
+                "setup_name": setup_name,
+                "is_paper_trade": screener_setup.get("is_paper_trade", False),
                 "asset": asset,
-                "indicator_name": "perusu",
                 "timeframe": timeframe,
-                "last_signal": indicator_result["perusu"]["signal"],
-                "last_value": indicator_result["perusu"]["supertrend_value"],
-                "calculated_at": datetime.utcnow()
-            })
-            
-            await upsert_screener_indicator_cache({
-                "screener_setup_id": setup_id,
-                "asset": asset,
-                "indicator_name": "sirusu",
-                "timeframe": timeframe,
-                "last_signal": indicator_result["sirusu"]["signal"],
-                "last_value": indicator_result["sirusu"]["supertrend_value"],
-                "calculated_at": datetime.utcnow()
-            })
+                "current_price": indicator_result.get("current_price", 0.0),
+                "perusu_signal": indicator_result["perusu"]["signal"],
+                "perusu_signal_text": indicator_result["perusu"]["signal_text"],
+                "perusu_value": indicator_result["perusu"]["supertrend_value"],
+                "sirusu_signal": indicator_result["sirusu"]["signal"],
+                "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
+                "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
+            }
+            await save_indicator_cache(cache_data)
             
             # Check for entry signal (Option 1: wait for flip)
             entry_signal = await self.check_new_asset_entry(

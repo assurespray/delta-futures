@@ -8,6 +8,7 @@ from config.settings import settings
 
 # Import handlers
 from handlers.start import start_command, main_menu_callback, help_callback
+from handlers.indicator_tracker import tracker_menu_callback, tracker_view_callback
 from handlers.api_menu import (
     api_menu_callback, api_add_start, api_name_received, api_key_received,
     api_secret_received, api_delete_callback, api_delete_confirm_callback,
@@ -306,6 +307,10 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(perf_paper_pnl_chart_callback, pattern="^perf_paper_pnl_chart$"))
     application.add_handler(CallbackQueryHandler(perf_paper_csv_callback, pattern="^perf_paper_csv$"))
     application.add_handler(CallbackQueryHandler(perf_paper_callback, pattern="^perf_paper$"))
+    
+    # Indicator Tracker
+    application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))
+    application.add_handler(CallbackQueryHandler(tracker_view_callback, pattern="^tracker_"))
     
     # Main menu - registered LAST so ConversationHandler fallbacks get priority
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))

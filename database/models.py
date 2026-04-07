@@ -139,15 +139,33 @@ class TradeState(BaseModel):
 
 
 class IndicatorCache(BaseModel):
-    """Model for caching indicator values."""
+    """Model for caching indicator values for debugging & dashboard."""
     
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
-    algo_setup_id: str
-    indicator_name: str  # "perusu" or "sirusu"
+    
+    # Setup linkage
+    setup_id: str
+    setup_type: str  # "algo" or "screener"
+    setup_name: str
+    is_paper_trade: bool
+    
+    # Asset & Timeframe
     asset: str
     timeframe: str
-    last_signal: int  # 1 for uptrend, -1 for downtrend
-    last_value: float  # SuperTrend line value
+    
+    # Price Context
+    current_price: float
+    
+    # Perusu Info
+    perusu_signal: int  # 1 or -1
+    perusu_signal_text: str  # "Uptrend" or "Downtrend"
+    perusu_value: float
+    
+    # Sirusu Info
+    sirusu_signal: int
+    sirusu_signal_text: str
+    sirusu_value: float
+    
     calculated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:

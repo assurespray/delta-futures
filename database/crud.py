@@ -224,12 +224,11 @@ async def get_all_active_algo_setups() -> List[Dict[str, Any]]:
         return []
 
 
+# ==================== Trade State CRUD (Replaces AlgoActivity) ====================
 
-# ==================== Trade State CRUD (Replaces TradeState) ====================
-
-async def create_trade_state(trade_data: Dict[str, Any]) -> str:
-    """Create new trade state record."""
+async def create_trade_state(trade_data: dict) -> str:
     try:
+        from database.models import TradeState
         trade = TradeState(**trade_data)
         result = await mongodb.get_db().trade_states.insert_one(trade.dict(by_alias=True, exclude={"id"}))
         logger.info(f"✅ Trade state created for setup: {trade.setup_name} ({trade.status})")
@@ -238,10 +237,10 @@ async def create_trade_state(trade_data: Dict[str, Any]) -> str:
         logger.error(f"❌ Failed to create trade state: {e}")
         raise
 
-async def update_trade_state(trade_id: str, update_data: Dict[str, Any]) -> bool:
-    """Update trade state."""
+async def update_trade_state(trade_id: str, update_data: dict) -> bool:
     try:
         update_data["updated_at"] = datetime.utcnow()
+        from bson import ObjectId
         result = await mongodb.get_db().trade_states.update_one(
             {"_id": ObjectId(trade_id)},
             {"$set": update_data}
@@ -251,9 +250,9 @@ async def update_trade_state(trade_id: str, update_data: Dict[str, Any]) -> bool
         logger.error(f"❌ Failed to update trade state: {e}")
         return False
 
-async def get_trade_state_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
-    """Get trade state by ID."""
+async def get_trade_state_by_id(trade_id: str) -> dict:
     try:
+        from bson import ObjectId
         trade = await mongodb.get_db().trade_states.find_one({"_id": ObjectId(trade_id)})
         if trade:
             trade["_id"] = str(trade["_id"])
@@ -262,8 +261,7 @@ async def get_trade_state_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"❌ Failed to get trade state by ID: {e}")
         return None
 
-async def get_open_trade_states() -> List[Dict[str, Any]]:
-    """Get all currently open trade states (real and paper)."""
+async def get_open_trade_states() -> list:
     try:
         cursor = mongodb.get_db().trade_states.find({"status": "open"})
         trades = await cursor.to_list(length=1000)
@@ -274,8 +272,7 @@ async def get_open_trade_states() -> List[Dict[str, Any]]:
         logger.error(f"❌ Failed to get open trade states: {e}")
         return []
 
-async def get_pending_entry_trade_states() -> List[Dict[str, Any]]:
-    """Get all pending entry trade states (real and paper)."""
+async def get_pending_entry_trade_states() -> list:
     try:
         cursor = mongodb.get_db().trade_states.find({"status": "pending_entry"})
         trades = await cursor.to_list(length=1000)
@@ -286,8 +283,7 @@ async def get_pending_entry_trade_states() -> List[Dict[str, Any]]:
         logger.error(f"❌ Failed to get pending entry trade states: {e}")
         return []
 
-async def get_open_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
-    """Get open trade for a specific setup."""
+async def get_open_trade_by_setup(setup_id: str) -> dict:
     try:
         trade = await mongodb.get_db().trade_states.find_one({
             "setup_id": setup_id,
@@ -300,8 +296,7 @@ async def get_open_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"❌ Failed to get open trade by setup: {e}")
         return None
 
-async def get_pending_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
-    """Get pending trade for a specific setup."""
+async def get_pending_trade_by_setup(setup_id: str) -> dict:
     try:
         trade = await mongodb.get_db().trade_states.find_one({
             "setup_id": setup_id,
@@ -314,8 +309,7 @@ async def get_pending_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"❌ Failed to get pending trade by setup: {e}")
         return None
 
-async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: bool = False, days: int = None) -> List[Dict[str, Any]]:
-    """Get historical/active trades for a user."""
+async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: bool = False, days: int = None) -> list:
     try:
         from datetime import datetime, timedelta
         query = {"user_id": user_id, "is_paper_trade": is_paper}
@@ -908,7 +902,7 @@ async def get_paper_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["status"] = "closed"
+            query["is_closed"] = True
         
         cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
@@ -943,7 +937,7 @@ async def get_real_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["status"] = "closed"
+            query["is_closed"] = True
         
         cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
