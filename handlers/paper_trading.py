@@ -17,7 +17,7 @@ from database.crud import (
     get_api_credentials_by_user, create_algo_setup,
     get_algo_setups_by_paper_mode, get_algo_setup_by_id,
     delete_algo_setup, update_algo_setup,
-    get_paper_balance, reset_paper_balance,
+    get_paper_balance, reset_paper_balance, get_open_trade_by_setup,
     get_open_paper_positions,
     create_screener_setup, get_screener_setups_by_paper_mode,
     get_screener_setup_by_id, update_screener_setup,
@@ -774,7 +774,8 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
     
     for setup in algo_setups:
         status = "Active" if setup.get("is_active") else "Inactive"
-        position = setup.get("current_position")
+        open_trade = await get_open_trade_by_setup(str(setup["_id"]))
+        position = open_trade["current_position"] if open_trade else None
         pos_text = f" | {position.upper()}" if position else ""
         
         message += (
@@ -844,9 +845,10 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
     label = "[PAPER Single]" if setup_type == "algo" else "[PAPER Screener]"
     
     if setup_type == "algo":
-        position = setup.get("current_position") or "None"
-        entry_price = setup.get("last_entry_price")
-        sl_price = setup.get("pending_sl_price")
+        open_trade = await get_open_trade_by_setup(setup_id)
+        position = open_trade["current_position"] if open_trade else "None"
+        entry_price = open_trade["entry_price"] if open_trade else None
+        sl_price = open_trade["pending_sl_price"] if open_trade else None
         
         message = (
             f"**{label} {setup['setup_name']}**\n\n"

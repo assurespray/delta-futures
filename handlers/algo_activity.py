@@ -2,7 +2,7 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database.crud import get_algo_activity_by_user
+from database.crud import get_trades_by_user
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     user_id = str(query.from_user.id)
     
     # Get last 3 days of activity
-    activities = await get_algo_activity_by_user(user_id, days=3)
+    activities = await get_trades_by_user(user_id, days=3)
     
     if not activities:
         keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
@@ -42,14 +42,14 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     losing_trades = 0
     
     for activity in activities:
-        setup_name = activity['algo_setup_name']
+        setup_name = activity['setup_name']
         asset = activity['asset']
         direction = activity['direction'].upper()
         lot_size = activity['lot_size']
         entry_price = activity['entry_price']
         entry_time = activity['entry_time']
         
-        is_closed = activity.get('is_closed', False)
+        is_closed = (activity.get('status') == 'closed')
         
         if is_closed:
             exit_price = activity.get('exit_price', 0)

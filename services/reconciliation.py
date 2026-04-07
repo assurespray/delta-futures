@@ -24,296 +24,57 @@ from strategy.paper_trader import is_paper_trade
 logger = logging.getLogger(__name__)
 
 async def startup_reconciliation(logger_bot: LoggerBot):
-    strategy = DualSuperTrendStrategy()
+    from database.crud import get_open_trade_states, get_pending_entry_trade_states, update_trade_state, get_db, get_api_credential_by_id, get_algo_setup_by_id, get_screener_setup_by_id
+    from api.delta_client import DeltaExchangeClient
+    from api.positions import get_position_by_symbol
+    from api.orders import get_order_status_by_id
+    from strategy.position_manager import PositionManager
+    
     position_manager = PositionManager()
-    setups = await get_all_active_algo_setups()
-
-    # ==== CRITICAL: WIPE ALL LOCKS BEFORE STARTUP ====
+    
     db = await get_db()
-    delete_result = await db["position_locks"].delete_many({})
-    logger.info(f"Startup: Deleted all position locks (count={delete_result.deleted_count}) before reconciliation")
-    # ==================================================
-
-    for setup in setups:
-        # ========== SKIP PAPER TRADES ==========
-        if is_paper_trade(setup):
-            logger.info(f"[PAPER] Skipping reconciliation for paper setup: {setup.get('setup_name')}")
+    await db["position_locks"].delete_many({})
+    
+    open_trades = await get_open_trade_states()
+    pending_trades = await get_pending_entry_trade_states()
+    
+    for trade in open_trades + pending_trades:
+        if trade.get("is_paper_trade"):
             continue
-        # ========== END SKIP ==========
+            
+        trade_id = str(trade["_id"])
+        setup_id = trade["setup_id"]
+        setup = await get_algo_setup_by_id(setup_id) or await get_screener_setup_by_id(setup_id)
+        if not setup: continue
         
         api_id = setup.get("api_id")
         cred = await get_api_credential_by_id(api_id, decrypt=True)
-        if not cred:
-            logger.warning(f"Could not load credentials for api_id {api_id}")
-            continue
-        client = DeltaExchangeClient(cred['api_key'], cred['api_secret'])
+        if not cred: continue
+        
+        client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+        symbol = trade["asset"]
+        product_id = trade.get("product_id")
+        
         try:
-            symbol = setup.get("asset")
-            product_id = setup.get("product_id")
-            lot_size = setup.get("lot_size")
-            timeframe = setup.get("timeframe")
-            setup_id = str(setup["_id"])
-            setup_name = setup.get("setup_name")
-            addl_prot = setup.get("additional_protection", False)
-
-            # 🔹 STARTUP: clear stale pending_entry_order_id if order is gone on exchange
-            pending_entry_id = setup.get("pending_entry_order_id")
-            logger.info(f"[STARTUP] Setup {setup_name}: pending_entry_order_id={pending_entry_id}, product_id={product_id}")
-            if pending_entry_id and product_id:
-                try:
-                    gone = await is_order_gone(client, pending_entry_id, product_id)
-                    logger.info(
-                        f"[STARTUP] is_order_gone for {setup_name} "
-                        f"order_id={pending_entry_id}, product_id={product_id} -> {gone}"
-                    )
-                    if gone:
-                        logger.info(
-                            f"🧹 [STARTUP] Clearing stale pending_entry_order_id={pending_entry_id} "
-                            f"for setup {setup_name}"
-                        )
-                        await update_algo_setup(setup_id, {
-                            "pending_entry_order_id": None,
-                            "pending_entry_direction_signal": None,
-                            "pending_entry_side": None,
-                            "entry_trigger_price": None,
-                            "pending_sl_price": None,
-                            "stop_loss_order_id": None,
-                            "position_lock_acquired": False,
-                        })
-                        # Also update local copy so later logic sees it as cleared
-                        setup["pending_entry_order_id"] = None
-                        setup["pending_entry_direction_signal"] = None
-                        setup["pending_entry_side"] = None
-                        setup["entry_trigger_price"] = None
-                        setup["pending_sl_price"] = None
-                except Exception as e:
-                    logger.error(
-                        f"❌ [STARTUP] Failed pending-entry cleanup for {setup_name}: {e}"
-                    )
-
-            # continue with live position sync
-            position = await get_position_by_symbol(client, symbol)
-            position_size = position.get("size", 0) if position else 0
-
-            # Check if no position exists
-            if position_size == 0:
-                logger.info(f"No open position for {symbol}, cleaning up setup")
-                # Cancel any orphaned stop-loss orders before clearing DB
-                stored_sl_id = setup.get("stop_loss_order_id")
-                if stored_sl_id and product_id:
-                    logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} for closed position {symbol}")
-                    try:
-                        await cancel_order(client, product_id, stored_sl_id)
-                    except Exception as e:
-                        logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
-                # Also scan for any untracked stop-loss orders on exchange
-                if product_id:
-                    try:
-                        open_orders = await get_open_orders(client, product_id)
-                        for order in (open_orders or []):
-                            if (order.get("stop_order_type") == "stop_loss_order"
-                                    and order.get("reduce_only")
-                                    and order.get("state") in ("pending", "open", "untriggered")
-                                    and order.get("product_id") == product_id):
-                                orphan_id = order.get("id")
-                                logger.info(f"🧹 [RECONCILIATION] Cancelling untracked orphaned SL {orphan_id} for {symbol}")
-                                try:
-                                    await cancel_order(client, product_id, orphan_id)
-                                except Exception as e:
-                                    logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {orphan_id}: {e}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ [RECONCILIATION] Failed to scan for orphaned SLs for {symbol}: {e}")
-                await update_algo_setup(setup_id, {
-                    "current_position": None,
-                    "last_entry_price": None,
-                    "position_lock_acquired": False,
-                    "stop_loss_order_id": None,
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None,
-                    "pending_entry_direction_signal": None,
-                    "entry_trigger_price": None,
-                    "pending_sl_price": None,
-                })
-                await client.close()
-                continue
-
-            if position and position.get("product_id") == product_id:
-                setup["current_position"] = "long" if position["size"] > 0 else "short"
-                setup["last_entry_price"] = position.get("entry_price")
-                setup["product_id"] = position.get("product_id")
-                setup["position_obj"] = position  # optional, for easy access anywhere
-
-                logger.info(
-                    f"[SYNC] symbol={symbol} product_id={product_id} "
-                    f"size={position['size']} current_position={setup['current_position']} "
-                    f"position_obj={setup['position_obj']}"
-                )
-            else:
-                logger.warning(f"No matching position for {symbol} (wanted product_id={product_id} got {position.get('product_id') if position else None})")
-                setup["current_position"] = None
-                setup["last_entry_price"] = None
-                setup["product_id"] = product_id
-                setup["position_obj"] = None
-
-                logger.warning(
-                    f"[SYNC] symbol={symbol} - NO OPEN POSITION (wanted product_id={product_id}, got {position.get('product_id') if position else None})"
-                )
-                # Update only the specific fields (NOT the entire setup dict which contains _id)
-                await update_algo_setup(setup_id, {
-                    "current_position": None,
-                    "last_entry_price": None,
-                    "product_id": product_id,
-                })
-                await client.close()
-                continue
-
-            position_size = position.get("size", 0) if position else 0
-            if position_size == 0:
-                # Cancel any orphaned stop-loss orders before clearing DB
-                stored_sl_id = setup.get("stop_loss_order_id")
-                if stored_sl_id and product_id:
-                    logger.info(f"🧹 [RECONCILIATION] Cancelling orphaned stop-loss {stored_sl_id} (2nd check) for {symbol}")
-                    try:
-                        await cancel_order(client, product_id, stored_sl_id)
-                    except Exception as e:
-                        logger.warning(f"⚠️ [RECONCILIATION] Failed to cancel orphaned SL {stored_sl_id}: {e}")
-                await update_algo_setup(setup_id, {
-                    "current_position": None,
-                    "last_entry_price": None,
-                    "position_lock_acquired": False,
-                    "stop_loss_order_id": None,
-                })
-                await client.close()
-                continue
-
-            db = await get_db()
-            # Always create a FRESH lock after startup lock cleanup
-            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
-            locks = await db["position_locks"].find().to_list(length=100)
-            logger.debug(f"Current locks after reconciliation: {locks}")
-            if not lock_acquired:
-                logger.error(f"❌ RECONCILIATION: Could not acquire lock for {symbol} by {setup_id}")
-            else:
-                logger.info(f"✅ RECONCILIATION: Lock acquired for {symbol} by {setup_id}")
-            if lock_acquired:
-                logger.info(f"Startup: Created new position lock for {symbol} ({setup_name})")
-            else:
-                existing_lock = await get_position_lock(db, symbol)
-                logger.debug(f"[DEBUG] Lock check for {symbol}: {existing_lock}")
-                logger.error(
-                    f"Startup: Failed to create lock for {symbol}. "
-                    f"Existing lock: {existing_lock} | Requested by setup_id={setup_id}, setup_name={setup_name}"
-                )
-                continue  # Only move on to next setup if you can't lock
-
-            position_side = "long" if position_size > 0 else "short"
-
-            # Step 4: Get SL details if present
-            stop_loss_order_id = None
-            open_orders = await get_open_orders(client, product_id)
-            matched_orders = filter_orders_by_symbol_and_product_id(
-                open_orders, symbol, product_id
-            )
-            logger.info(f"Filtered open orders for {symbol} (product_id={product_id}): {matched_orders}")
-
-            for order in matched_orders:
-                state = (order.get("state") or "").lower()
-                stop_order_type = (order.get("stop_order_type") or "").lower()
-                reduce_only = order.get("reduce_only", False)
-                product_id_in_order = order.get("product_id")
-                # Defensive debug log
-                logger.debug(
-                    f"Order check: id={order.get('id')}, state={state}, stop_type={stop_order_type}, "
-                    f"reduce_only={reduce_only}, product_id={product_id_in_order}, "
-                    f"wanted={product_id}, symbol={order.get('product_symbol')}"
-                )
-                if (
-                    state in ("pending", "open", "untriggered")
-                    and stop_order_type == "stop_loss_order"
-                    and reduce_only
-                    and product_id_in_order == product_id  # STRICT: Only process for correct symbol/product
-                ):
-                    stop_loss_order_id = order.get("id")
-                    logger.info(
-                        f"Detected existing stop-loss order for {symbol}: {stop_loss_order_id} "
-                        f"(product_id={product_id_in_order}, symbol={order.get('product_symbol')})"
-                    )            
-                    break
-
-            #now = datetime.utcnow()
-            #time_until_boundary = (get_next_boundary_time(timeframe, now) - now).total_seconds()
-            # if time_until_boundary < 30:
-            #   await asyncio.sleep(time_until_boundary + 1)
-
-            # [Optional] Log or fetch candles here if you have direct access, e.g.:
-            # candles = await fetch_candles(client, symbol, timeframe)
-            # logger.info(f"{symbol}: Candle count for indicator calc = {len(candles)}, first candle: {candles[0] if candles else 'N/A'}")
-
-            logger.info(f"Calling indicator calculation for {symbol}, timeframe={timeframe}")
-
-            try:
-                indicator_result = await strategy.calculate_indicators(client, symbol, timeframe, skip_boundary_check=True)
-                if not indicator_result:
-                    logger.error(f"Indicator calculation failed for {symbol} (likely cause: not enough candles, bad input data, or server error!)")
-                    continue
-                logger.info(f"Indicator calculation SUCCESS for {symbol}: {indicator_result}")
-            except Exception as e:
-                logger.error(f"Exception in indicator calculation for {symbol}: {e}")
-                continue
-
-            perusu_signal, sirusu_signal = indicator_result["perusu"]["signal"], indicator_result["sirusu"]["signal"]
-            perusu_text, sirusu_text = indicator_result["perusu"]["signal_text"], indicator_result["sirusu"]["signal_text"]
-            sirusu_value = indicator_result["sirusu"]["supertrend_value"]
-
-            if position_side == "long":
-                valid = perusu_signal == 1 and sirusu_signal == 1
-            else:
-                valid = perusu_signal == -1 and sirusu_signal == -1
-
-            if not valid:
-                await logger_bot.send_info(f"Sirusu flip detected for {symbol} ({position_side}), exiting at market!")
-
-                logger.info(f"Passing to manager: symbol={symbol}, setup product_id={setup['product_id']}, position={setup.get('position_obj')}")
-                exit_result = await position_manager.execute_exit(
-                    client=client,
-                    algo_setup=setup,
-                    sirusu_signal_text=sirusu_text
-                )
-                exit_success = exit_result[0] if isinstance(exit_result, tuple) else exit_result
-                if exit_success:
-                    await delete_position_lock(symbol)
-                    logger.info(f"Deleted position lock for {symbol}")
-                continue
-
-            if addl_prot and not stop_loss_order_id:
-                sl_order = await place_stop_loss_order(
-                    client, product_id, abs(position_size),
-                    'sell' if position_side == 'long' else 'buy',
-                    sirusu_value, True
-                )
-                stop_loss_order_id = sl_order.get("id") if sl_order else None
-
-            await update_algo_setup(setup_id, {
-                "current_position": position_side,
-                "last_entry_price": position.get("entry_price"),
-                "position_lock_acquired": True,
-                "stop_loss_order_id": stop_loss_order_id,
-                "last_signal_time": datetime.utcnow(),
-            })
-
-            await logger_bot.send_info(
-                f"{symbol} ({position_side.upper()}) sync: "
-                f"Perusu {perusu_text}, Sirusu {sirusu_text} SL:{'Y' if stop_loss_order_id else 'N'}"
-            )
-
-        except Exception as e:
-            logger.error(f"[{symbol}] Reconciliation failed: {e}")
-            await logger_bot.send_error(f"[{symbol}] reconciliation error: {str(e)}")
+            if trade["status"] == "open":
+                pos = await get_position_by_symbol(client, symbol)
+                pos_size = pos.get("size", 0) if pos else 0
+                if pos_size == 0:
+                    await update_trade_state(trade_id, {"status": "closed", "sirusu_exit_signal": "Closed manually on exchange"})
+                    await logger_bot.send_warning(f"⚠️ Marked trade closed for {symbol} (no exchange position)")
+                else:
+                    await acquire_position_lock(db, symbol, setup_id, setup["setup_name"])
+            
+            elif trade["status"] == "pending_entry":
+                order_id = trade.get("pending_entry_order_id")
+                if order_id and product_id:
+                    status = await get_order_status_by_id(client, order_id, product_id)
+                    if status in ("cancelled", "rejected", "closed"):
+                        await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
+                    elif status == "filled":
+                        await position_manager.check_entry_order_filled(client, trade, None)
         finally:
             await client.close()
-
-    logger.info("✅ Startup reconciliation complete")
-
 def filter_orders_by_symbol_and_product_id(
     orders: list,
     target_symbol: str,

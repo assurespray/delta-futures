@@ -4,6 +4,11 @@ import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 from database.crud import (
+    get_all_active_screener_setups,
+    get_open_trade_states,
+    get_pending_entry_trade_states,
+    get_trade_state_by_id,
+    update_trade_state,
     get_all_active_algo_setups, get_api_credential_by_id,
     update_algo_setup, save_indicator_cache, get_indicator_cache,
     get_algo_setup_by_id
@@ -12,7 +17,6 @@ from api.delta_client import DeltaExchangeClient
 from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust methods
 from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
-from strategy.order_monitor import OrderMonitor
 from strategy.paper_trader import paper_trader, is_paper_trade
 from api.positions import get_ticker_mark_price
 from services.logger_bot import LoggerBot
@@ -30,7 +34,6 @@ class AlgoEngine:
     def __init__(self, logger_bot: LoggerBot):
         self.strategy = DualSuperTrendStrategy()
         self.position_manager = PositionManager()
-        self.order_monitor = OrderMonitor()
         self.logger_bot = logger_bot
         self.running_tasks = {}
         self.signal_counts = {
@@ -72,616 +75,132 @@ class AlgoEngine:
         setup_name = algo_setup['setup_name']
         asset = algo_setup['asset'].upper()
         timeframe = algo_setup['timeframe']
-        current_position = algo_setup.get('current_position')
-
-        self.signal_counts["total_checks"] += 1
-        logger.info(f"🚀 Processing Algo: {setup_name} ({asset} @ {timeframe})")
+        
         now = datetime.utcnow()
         if not is_at_candle_boundary(timeframe, now):
-            logger.info(f"⏭️ SKIP {setup_name} {asset} {timeframe}: not at boundary, now={now}")
-            next_boundary = get_next_boundary_time(timeframe, now)
-            time_until = int((next_boundary - now).total_seconds())
-            logger.debug(f"⏭️ [{setup_name}] Not at {timeframe} boundary - Next check in {time_until}s at {next_boundary.strftime('%H:%M:%S')} UTC")
             return
-
-        self.signal_counts["boundary_hits"] += 1
-        tf_display = get_timeframe_display_name(timeframe)
-        logger.info(f"✅ [{setup_name}] At {tf_display} boundary - Processing {asset}")
-
+            
         try:
             api_id = algo_setup['api_id']
             cred = await get_api_credential_by_id(api_id, decrypt=True)
-            if not cred:
-                logger.error(f"❌ Failed to load credentials for setup {setup_name}")
-                self.signal_counts["errors"] += 1
-                await self.logger_bot.send_error(f"Failed to load API credentials for setup: {setup_name}")
-                return
-
-            client = None
-            client = DeltaExchangeClient(
-                api_key=cred['api_key'],
-                api_secret=cred['api_secret']
-            )
-            self.performance_stats["api_calls"] += 1
-
-            logger.info(f"🔄 Processing {setup_name} ({asset} {timeframe})")
-            max_retries = 20
-            retry_count = 0
-            indicator_result = None
-            while retry_count < max_retries:
+            if not cred: return
+            
+            client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+            
+            try:
                 indicator_result = await self.strategy.calculate_indicators(
                     client, asset, timeframe
                 )
-                if indicator_result:
-                    if retry_count > 0:
-                        logger.info(f"✅ Indicators ready after {retry_count * 0.5:.1f}s")
-                    break
-                retry_count += 1
-                if retry_count < max_retries:
-                    await asyncio.sleep(0.5)
-            if not indicator_result:
-                logger.info(f"EXIT {setup_name}: indicator_result is None")
-                logger.warning(f"⚠️ Failed to calculate indicators for {setup_name} after {max_retries * 0.5}s")
-                self.signal_counts["errors"] += 1
+                if not indicator_result or indicator_result.get("cached"):
+                    return
+            finally:
+                await client.close()
+                
+            entry_signal = self.strategy.generate_entry_signal(
+                setup_id,
+                None, # last_perusu_signal no longer needed for pure breakout
+                indicator_result
+            )
+            
+            # If signal exists and there's no open trade for this setup+asset, place order
+            if entry_signal:
+                from database.crud import get_open_trade_by_setup, get_pending_trade_by_setup
+                # To prevent double entries
+                open_trade = await get_open_trade_by_setup(setup_id)
+                pending_trade = await get_pending_trade_by_setup(setup_id)
+                
+                if open_trade or pending_trade:
+                    logger.info(f"⏭️ SKIP entry for {setup_name} - already active trade exists.")
+                    return
+                    
+                sirusu_value = indicator_result.get('sirusu', {}).get('supertrend_value', 0)
+                # Ensure client is connected for order placement
+                client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+                try:
+                    await self.position_manager.place_breakout_entry_order(
+                        client, algo_setup, entry_signal,
+                        indicator_result['perusu']['supertrend_value'],
+                        sirusu_value, immediate=False
+                    )
+                finally:
+                    await client.close()
+                    
+        except Exception as e:
+            logger.error(f"❌ Error processing algo setup {setup_name}: {e}")
+
+    async def process_open_trade(self, trade_state: Dict[str, Any]):
+        trade_id = str(trade_state['_id'])
+        setup_id = trade_state['setup_id']
+        asset = trade_state['asset']
+        timeframe = trade_state['timeframe']
+        current_position = trade_state.get('current_position')
+        
+        now = datetime.utcnow()
+        if not is_at_candle_boundary(timeframe, now):
+            return
+            
+        try:
+            # We need the parent config for api keys and rules
+            from database.crud import get_algo_setup_by_id, get_screener_setup_by_id
+            setup = await get_algo_setup_by_id(setup_id)
+            if not setup:
+                setup = await get_screener_setup_by_id(setup_id)
+            if not setup: return
+            
+            api_id = setup['api_id']
+            cred = await get_api_credential_by_id(api_id, decrypt=True)
+            if not cred: return
+            
+            client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+            
+            try:
+                indicator_result = await self.strategy.calculate_indicators(
+                    client, asset, timeframe
+                )
+                if not indicator_result or indicator_result.get("cached"):
+                    # For exiting/trailing SL we must process it even if cached, but calculation will just return cached values
+                    pass
+            except Exception as e:
+                logger.error(f"❌ Error calculating indicators for {asset}: {e}")
                 await client.close()
                 return
-
-            perusu_data = indicator_result['perusu']
-            sirusu_data = indicator_result['sirusu']
-
-            # FIRST: Cache indicators with flip detection (do this BEFORE any signal checks)
-            flip_info = await self._cache_indicators(
-                setup_id, perusu_data, sirusu_data, asset, timeframe,
-                setup_name=setup_name, current_position=current_position
-            )
-
-            # === Robust Pending Order & Sirusu reversal logic ===
-            pending_order_status = None
-            pending_order_id = algo_setup.get('pending_entry_order_id')
-            product_id = algo_setup.get('product_id')
-            pending_direction_signal = algo_setup.get('pending_entry_direction_signal')  # 1=long, -1=short
-            
-            if not current_position and pending_order_id and product_id:
-                # Use OrderMonitor's comprehensive pending order check with Sirusu reversal detection
-                pending_order_status = await self.order_monitor.check_pending_entry_order(
-                    client=client,
-                    algo_setup=algo_setup,
-                    current_perusu_signal=perusu_data['signal'],
-                    current_sirusu_signal=sirusu_data['signal'],
-                    sirusu_value=sirusu_data['supertrend_value'],
-                    logger_bot=self.logger_bot
-                )
-
-                # CRITICAL: Sync in-memory dict after OrderMonitor modifies DB state
-                # Without this, the stale pending_entry_order_id in memory would block
-                # the entry signal check below from running
-                if pending_order_status in ("reversed", "cancelled"):
-                    algo_setup["pending_entry_order_id"] = None
-                    algo_setup["pending_entry_side"] = None
-                    algo_setup["pending_entry_direction_signal"] = None
-                    algo_setup["entry_trigger_price"] = None
-                    algo_setup["pending_sl_price"] = None
-                    algo_setup["stop_loss_order_id"] = None
-                    algo_setup["position_lock_acquired"] = False
-                    logger.info(f"🔄 In-memory setup synced after {pending_order_status}")
-
-            if not current_position:
-                if pending_order_status == "filled":
-                    logger.info(f"✅ Position opened via pending order - skipping entry check")
-                elif pending_order_status in ("reversed", "cancelled"):
-                    logger.info(f"🔄 Setup invalidated ({pending_order_status}) - ready for new signals")
-
-            # ✅ ENTRY SIGNAL CHECK (no position + no pending order)
-            if not current_position and not algo_setup.get('pending_entry_order_id'):
-                # 1) Get PREVIOUS Perusu signal from cache (before this candle's update)
-                cached_perusu = await get_indicator_cache(setup_id, "perusu")
-                logger.info(f"🔍 CACHE_RAW {setup_name} ({asset} {timeframe}): {cached_perusu}")
-                last_perusu_signal = cached_perusu.get("previous_signal") if cached_perusu else None  # ✅ Changed from "last_signal"
-                logger.info(
-                    f"🔍 CACHE_DERIVED last_perusu_signal={last_perusu_signal}, "
-                    f"current_perusu={perusu_data['signal']}, "
-                    f"sirusu={sirusu_data['signal']}"
-                )
-
-                # If DB says Perusu flipped, reconstruct last signal from current
-                if flip_info and flip_info.get("perusu_flip"):
-                    if perusu_data['signal'] == 1:
-                        last_perusu_signal = -1
-                    elif perusu_data['signal'] == -1:
-                        last_perusu_signal = 1
-
-                # 2) Let strategy decide if Perusu has flipped and generate breakout levels
-                entry_signal = self.strategy.generate_entry_signal(
-                    setup_id,
-                    last_perusu_signal,
-                    indicator_result
-                ) 
-                logger.info(f"🔍 ENTRY_SIGNAL {setup_name}: {entry_signal}")
-
-                # 3) Extra filter: Perusu & Sirusu must agree on direction
-                if entry_signal:
-                    perusu_signal = perusu_data["signal"]
-                    sirusu_signal = sirusu_data["signal"]
-
-                    aligned = (
-                        (entry_signal["side"] == "long"  and perusu_signal == 1  and sirusu_signal == 1) or
-                        (entry_signal["side"] == "short" and perusu_signal == -1 and sirusu_signal == -1)
-                    )
-
-                    if not aligned:
-                        logger.info(
-                            f"❌ Entry blocked for {setup_name}: "
-                            f"Perusu={perusu_signal}, Sirusu={sirusu_signal}, "
-                            f"side={entry_signal['side']}"
-                        )
-                        entry_signal = None  # cancel entry
-
-                # 3b) Direction constraint: respect long_only / short_only
-                if entry_signal:
-                    setup_direction = algo_setup.get("direction", "both")
-                    side = entry_signal["side"]
-                    if setup_direction == "long_only" and side != "long":
-                        logger.info(
-                            f"❌ Entry blocked for {setup_name}: "
-                            f"setup is long_only but signal is {side.upper()}"
-                        )
-                        entry_signal = None
-                    elif setup_direction == "short_only" and side != "short":
-                        logger.info(
-                            f"❌ Entry blocked for {setup_name}: "
-                            f"setup is short_only but signal is {side.upper()}"
-                        )
-                        entry_signal = None
-
-                # 4) Place order only if all conditions passed
-                if entry_signal:
-                    self.signal_counts["entry_signals"] += 1
-                    side = entry_signal["side"]
-                    logger.info(
-                        f"🚀 Entry signal detected for {setup_name}: "
-                        f"{side.upper()} (reason: {entry_signal.get('entry_reason')})"
-                    )
-
-                    # --- previous closed candle high/low ---
-                    prev_candle = indicator_result["latest_closed_candle"]  # ensure your strategy returns this
-                    prev_high = prev_candle["high"]
-                    prev_low = prev_candle["low"]
-
-                    # FIX: Use LIVE mark price from exchange, not candle close.
-                    # Candle close can never exceed its own high, so the old
-                    # comparison (close > high) was always False.
-                    live_price = await get_ticker_mark_price(client, asset)
-                    if not live_price or live_price <= 0:
-                        # Fallback to candle close if ticker API fails
-                        live_price = perusu_data["latest_close"]
-                        logger.warning(f"⚠️ Mark price unavailable, falling back to candle close: {live_price}")
-                    else:
-                        logger.info(f"📡 Live mark price for {asset}: ${live_price}")
-
-                    # 1 pip – adjust per symbol tick size if needed
-                    pip = entry_signal.get("pip", 0.0001)
-                    breakout_price = prev_high + pip if side == "long" else prev_low - pip
-
-                    # Decide: market entry vs stop-market entry
-                    immediate_market = False
-                    if side == "long":
-                        # live price already broke previous high → enter at market
-                        if live_price > prev_high:
-                            immediate_market = True
-                            logger.info(f"🚀 IMMEDIATE MARKET ENTRY: live ${live_price} > prev_high ${prev_high}")
-                    else:  # short
-                        # live price already broke previous low → enter at market
-                        if live_price < prev_low:
-                            immediate_market = True
-                            logger.info(f"🚀 IMMEDIATE MARKET ENTRY: live ${live_price} < prev_low ${prev_low}")
-
-                    entry_start = time.time()
-
-                    success = await self.position_manager.place_breakout_entry_order(
-                        client=client,
-                        algo_setup=algo_setup,
-                        entry_side=side,
-                        breakout_price=breakout_price,
-                        # use Sirusu from previous closed candle as SL level
-                        sirusu_value=sirusu_data["supertrend_value"],
-                        immediate=immediate_market,
-                    )
-
-                    entry_time = time.time() - entry_start
-
-                    if success:
-                        self.signal_counts["successful_entries"] += 1
-                        # Re-read setup to get order IDs saved by position_manager
-                        refreshed_setup = await get_algo_setup_by_id(setup_id)
-                        entry_order_id = refreshed_setup.get("last_entry_order_id") if refreshed_setup else None
-                        sl_order_id = refreshed_setup.get("stop_loss_order_id") if refreshed_setup else None
-                        # Also get the actual entry price from DB (may differ from live_price for stop-market)
-                        actual_entry_price = refreshed_setup.get("last_entry_price", live_price) if refreshed_setup else live_price
-
-                        # Send to log bot (existing)
-                        try:
-                            await self.logger_bot.send_trade_entry(
-                                setup_name=setup_name,
-                                asset=asset,
-                                direction=side,
-                                entry_price=actual_entry_price,
-                                lot_size=algo_setup["lot_size"],
-                                perusu_signal=perusu_data["signal_text"],
-                                sirusu_sl=sirusu_data["supertrend_value"],
-                            )
-                        except Exception as notify_err:
-                            logger.warning(f"⚠️ Failed to send trade entry log notification: {notify_err}")
-                        # Send detailed entry to user's main bot chat
-                        user_id = algo_setup.get("user_id")
-                        if user_id:
-                            try:
-                                await self.logger_bot.send_trade_entry_detail(
-                                    setup_name=setup_name,
-                                    asset=asset,
-                                    timeframe=timeframe,
-                                    direction=side,
-                                    entry_price=actual_entry_price,
-                                    lot_size=algo_setup["lot_size"],
-                                    perusu_signal_text=perusu_data["signal_text"],
-                                    sirusu_signal_text=sirusu_data["signal_text"],
-                                    perusu_value=perusu_data["supertrend_value"],
-                                    sirusu_value=sirusu_data["supertrend_value"],
-                                    stop_loss_price=sirusu_data["supertrend_value"],
-                                    entry_type="market" if immediate_market else "stop-market",
-                                    entry_order_id=entry_order_id,
-                                    sl_order_id=sl_order_id,
-                                )
-                            except Exception as notify_err:
-                                logger.warning(f"⚠️ Failed to send entry detail to user: {notify_err}")
-                    else:
-                        self.signal_counts["failed_entries"] += 1
-                        await self.logger_bot.send_error(
-                            f"Failed to execute entry for {setup_name}"
-                        )
-                else:
-                    self.signal_counts["no_signals"] += 1
-                    
-            # ✅ EXIT SIGNAL CHECK (has position)
-            elif current_position:
-                # FIRST: Check if SL has already filled on exchange — independently of exit signal.
-                # Without this, an SL fill would go undetected until Sirusu flips,
-                # leaving stale "open" position state and blocking new entries.
-                stop_loss_order_id = algo_setup.get("stop_loss_order_id")
-                sl_already_filled = False
-                if stop_loss_order_id and product_id:
-                    sl_already_filled = await is_order_gone(client, stop_loss_order_id, product_id)
-                    if sl_already_filled:
-                        logger.warning(f"⚠️ Stop-loss already filled on exchange — syncing DB state")
-
-                exit_signal = self.strategy.generate_exit_signal(
-                    setup_id,
-                    current_position,
-                    indicator_result
-                )
-
-                # Execute exit if either: (a) Sirusu flipped (exit_signal), or (b) SL already filled
-                if exit_signal or sl_already_filled:
-                    if exit_signal:
-                        self.signal_counts["exit_signals"] += 1
-                        logger.info(f"🚪 Exit signal detected for {setup_name}")
-                    else:
-                        logger.info(f"🛡️ SL filled — executing exit sync for {setup_name}")
-
-                    exit_start = time.time()
-                    # Refresh setup so stop_loss_order_id is latest
-                    updated_setup = await get_algo_setup_by_id(setup_id)
-                    if updated_setup:
-                        algo_setup.update(updated_setup)
-                    else:
-                        logger.warning(f"⚠️ Could not refresh setup {setup_id} from DB — using stale data")
-                    success, real_exit_price, exit_reason = await self.position_manager.execute_exit(
-                        client=client,
-                        algo_setup=algo_setup,
-                        sirusu_signal_text=sirusu_data['signal_text']
-                    )
-                    exit_time = time.time() - exit_start
-                    if success:
-                        self.signal_counts["successful_exits"] += 1
-                        # Grab order IDs before setup gets cleaned up
-                        entry_order_id = algo_setup.get("last_entry_order_id")
-                        sl_order_id = algo_setup.get("stop_loss_order_id")
-
-                        # Send to log bot (existing)
-                        try:
-                            await self.logger_bot.send_trade_exit(
-                                setup_name=setup_name,
-                                asset=asset,
-                                direction=current_position,
-                                sirusu_signal=sirusu_data['signal_text']
-                            )
-                        except Exception as notify_err:
-                            logger.warning(f"⚠️ Failed to send trade exit log notification: {notify_err}")
-                        # Send detailed exit to user's main bot chat
-                        user_id = algo_setup.get("user_id")
-                        entry_price = algo_setup.get("last_entry_price", 0)
-                        
-                        # Use actual exit price from the exchange (fallback to candle close if 0.0 or None)
-                        exit_price = real_exit_price if (real_exit_price is not None and real_exit_price != 0.0) else perusu_data.get("latest_close", 0)
-                        lot_size = algo_setup.get("lot_size", 0)
-                        
-                        if user_id:
-                            try:
-                                # Calculate PnL for the notification
-                                try:
-                                    ep = float(entry_price) if entry_price else 0
-                                    xp = float(exit_price) if exit_price else 0
-                                    if current_position == "long":
-                                        pnl_usd = (xp - ep) * lot_size
-                                    else:
-                                        pnl_usd = (ep - xp) * lot_size
-                                    from config.settings import settings as app_settings
-                                    pnl_inr = pnl_usd * app_settings.usd_to_inr_rate
-                                except Exception:
-                                    pnl_usd = None
-                                    pnl_inr = None
-
-                                await self.logger_bot.send_trade_exit_detail(
-                                    setup_name=setup_name,
-                                    asset=asset,
-                                    timeframe=timeframe,
-                                    direction=current_position,
-                                    entry_price=float(entry_price) if entry_price else 0,
-                                    exit_price=float(exit_price) if exit_price else 0,
-                                    lot_size=lot_size,
-                                    pnl_usd=pnl_usd,
-                                    pnl_inr=pnl_inr,
-                                    sirusu_signal_text=sirusu_data['signal_text'],
-                                    exit_reason=exit_reason,
-                                    entry_order_id=entry_order_id,
-                                    sl_order_id=sl_order_id,
-                                )
-                            except Exception as notify_err:
-                                logger.warning(f"⚠️ Failed to send exit detail to user: {notify_err}")
-                    else:
-                        self.signal_counts["failed_exits"] += 1
-                        await self.logger_bot.send_error(
-                            f"Failed to execute exit for {setup_name}"
-                        )
-            
-            elapsed = time.time() - start_time
-            self._update_performance_stats(elapsed)
-            
-        except Exception as e:
-            self.signal_counts["errors"] += 1
-            logger.error(f"❌ Exception processing algo setup {setup_name}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            await self.logger_bot.send_error(f"Exception in {setup_name}: {str(e)[:200]}")
-        finally:
-            if client:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
-
-    def _update_performance_stats(self, elapsed: float):
-        self.performance_stats["total_processing_time"] += elapsed
-        self.performance_stats["min_processing_time"] = min(self.performance_stats["min_processing_time"], elapsed)
-        self.performance_stats["max_processing_time"] = max(self.performance_stats["max_processing_time"], elapsed)
-        if self.signal_counts["boundary_hits"] > 0:
-            self.performance_stats["avg_processing_time"] = (
-                self.performance_stats["total_processing_time"] / 
-                self.signal_counts["boundary_hits"]
-            )
-
-    def _format_stats(self) -> str:
-        return (
-            f"Checks: {self.signal_counts['total_checks']} | "
-            f"Boundaries: {self.signal_counts['boundary_hits']} | "
-            f"Entry signals: {self.signal_counts['entry_signals']} | "
-            f"Exit signals: {self.signal_counts['exit_signals']} | "
-            f"Successful: {self.signal_counts['successful_entries']}E/{self.signal_counts['successful_exits']}X | "
-            f"Errors: {self.signal_counts['errors']}"
-        )
-
-    def _format_performance(self) -> str:
-        return (
-            f"Avg: {self.performance_stats['avg_processing_time']:.3f}s | "
-            f"Min: {self.performance_stats['min_processing_time']:.3f}s | "
-            f"Max: {self.performance_stats['max_processing_time']:.3f}s | "
-            f"Cache: {self.performance_stats['cache_hits']}H/{self.performance_stats['cache_misses']}M"
-        )
-
-    async def _cache_indicators(self, setup_id: str, perusu_data: Dict[str, Any],
-                                sirusu_data: Dict[str, Any], asset: str, timeframe: str,
-                                setup_name: str = "", current_position: str = None):
-        # Save each indicator independently so a transient DB error in one
-        # doesn't silently swallow the other's flip detection result.
-        perusu_result = {"flip": False}
-        sirusu_result = {"flip": False}
-
-        try:
-            perusu_result = await save_indicator_cache(
-                algo_setup_id=setup_id,
-                indicator_name="perusu",
-                asset=asset,
-                timeframe=timeframe,
-                signal=perusu_data['signal'],
-                value=perusu_data['supertrend_value']
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to cache PERUSU indicators: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-        try:
-            sirusu_result = await save_indicator_cache(
-                algo_setup_id=setup_id,
-                indicator_name="sirusu",
-                asset=asset,
-                timeframe=timeframe,
-                signal=sirusu_data['signal'],
-                value=sirusu_data['supertrend_value']
-            )
-        except Exception as e:
-            logger.error(f"❌ Failed to cache SIRUSU indicators: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-        perusu_flip = perusu_result.get("flip", False)
-        sirusu_flip = sirusu_result.get("flip", False)
-    
-        # Log flip detection results
-        logger.info(
-            f"📊 Indicator Cache Updated for {asset}:\n"
-            f"   Perusu: signal={perusu_data['signal']} (flip: {perusu_flip})\n"
-            f"   Sirusu: signal={sirusu_data['signal']} (flip: {sirusu_flip})"
-        )
-
-        # Send detailed flip notifications to log bot
-        current_price = perusu_data.get("latest_close")
-
-        if perusu_flip:
-            # Determine what action will be taken
-            perusu_sig = perusu_data['signal']
-            sirusu_sig = sirusu_data['signal']
-            aligned = (perusu_sig == sirusu_sig)
-
-            if not current_position and aligned:
-                action = "ENTRY SIGNAL - Perusu flipped and Sirusu aligned"
-            elif not current_position and not aligned:
-                action = "No Entry - Perusu flipped but Sirusu NOT aligned (waiting)"
-            elif current_position:
-                action = f"Perusu flipped while in {current_position.upper()} position (monitoring)"
-            else:
-                action = "Perusu flipped - evaluating"
-
-            try:
-                await self.logger_bot.send_flip_log(
-                    setup_name=setup_name,
-                    asset=asset,
-                    timeframe=timeframe,
-                    indicator_name="perusu",
-                    old_signal_text=perusu_result.get("old_signal_text", "Unknown"),
-                    new_signal_text=perusu_result.get("new_signal_text", "Unknown"),
-                    perusu_signal=perusu_data['signal'],
-                    sirusu_signal=sirusu_data['signal'],
-                    current_position=current_position,
-                    action=action,
-                    perusu_value=perusu_data.get('supertrend_value'),
-                    sirusu_value=sirusu_data.get('supertrend_value'),
-                    current_price=current_price,
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to send perusu flip log: {e}")
-
-        if sirusu_flip:
-            sirusu_sig = sirusu_data['signal']
-
-            if current_position:
-                # Check if sirusu flipped against the position (exit signal)
-                exit_trigger = (
-                    (current_position == "long" and sirusu_sig == -1) or
-                    (current_position == "short" and sirusu_sig == 1)
-                )
-                if exit_trigger:
-                    action = f"EXIT SIGNAL - Sirusu flipped against {current_position.upper()} position"
-                else:
-                    action = f"Sirusu flipped in favor of {current_position.upper()} position (no action)"
-            elif not current_position:
-                action = "No Signal - Sirusu flipped but no position open (post-exit wandering)"
-            else:
-                action = "Sirusu flipped - evaluating"
-
-            try:
-                await self.logger_bot.send_flip_log(
-                    setup_name=setup_name,
-                    asset=asset,
-                    timeframe=timeframe,
-                    indicator_name="sirusu",
-                    old_signal_text=sirusu_result.get("old_signal_text", "Unknown"),
-                    new_signal_text=sirusu_result.get("new_signal_text", "Unknown"),
-                    perusu_signal=perusu_data['signal'],
-                    sirusu_signal=sirusu_data['signal'],
-                    current_position=current_position,
-                    action=action,
-                    perusu_value=perusu_data.get('supertrend_value'),
-                    sirusu_value=sirusu_data.get('supertrend_value'),
-                    current_price=current_price,
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to send sirusu flip log: {e}")
-
-        # Return flip info for potential use
-        return {
-            "perusu_flip": perusu_flip,
-            "sirusu_flip": sirusu_flip,
-            "perusu_result": perusu_result,
-            "sirusu_result": sirusu_result,
-        }
-
-    async def run_continuous_monitoring(self):
-        logger.info("AlgoEngine.run_continuous_monitoring() ENTERED")
-        logger.info("🚀 Starting continuous algo monitoring...")
-        await self.logger_bot.send_info("🚀 Algo Engine Started - Monitoring active setups")
-        
-        # ========== PAPER TRADE: Restore open positions on reboot ==========
-        try:
-            restored = await paper_trader.restore_open_positions(None)
-            if restored > 0:
-                logger.info(f"[PAPER] Restored {restored} open paper positions on startup")
-        except Exception as e:
-            logger.error(f"[PAPER] Error restoring positions on startup: {e}")
-        # ========== END PAPER TRADE RESTORE ==========
-        
-        loop_count = 0
-        while True:
-            try:
-                loop_count += 1
-                if loop_count % 10 == 0:
-                    logger.info(f"❤️ AlgoEngine heartbeat loop={loop_count}")
-                    
-                active_setups = await get_all_active_algo_setups()
-                if not active_setups:
-                    logger.debug("ℹ️ No active algo setups found")
-                    await asyncio.sleep(60)
-                    continue
-                    
-                logger.debug(f"📊 [Loop {loop_count}] Checking {len(active_setups)} active algo setup(s)")
                 
-                tasks = []
-                for setup in active_setups:
-                    task = asyncio.create_task(self.process_algo_setup(setup))
-                    tasks.append(task)
-                    
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        setup_name = active_setups[i].get('setup_name', 'Unknown')
-                        logger.error(f"❌ Error processing {setup_name}: {result}")
+            sirusu_data = indicator_result.get('sirusu')
+            if not sirusu_data:
+                await client.close()
+                return
                 
-                timeframes = [setup.get('timeframe', '1m') for setup in active_setups]
-                timeframe_seconds = {
-                    "1m": 60, "2m": 120, "3m": 180, "4m": 240, "5m": 300, "10m": 600,
-                    "15m": 900, "20m": 1200, "30m": 1800, "45m": 2700, "1h": 3600,
-                    "2h": 7200, "3h": 10800, "4h": 14400, "6h": 21600, "8h": 28800,
-                    "12h": 43200, "1d": 86400
-                }
-                shortest_seconds = min(timeframe_seconds.get(tf, 60) for tf in timeframes)
-                # In case of multiple with same min, pick first match (stable)
-                shortest_tf = next(tf for tf in timeframes if timeframe_seconds.get(tf, 60) == shortest_seconds)
-
-                now = datetime.utcnow()
-                next_boundary = get_next_boundary_time(shortest_tf, now)
-                time_until_boundary = (next_boundary - now).total_seconds()
-                sleep_time = max(1, time_until_boundary + 0.5)
-                logger.debug(
-                    f"💤 Next check at {next_boundary.strftime('%H:%M:%S')} UTC "
-                    f"(sleeping {sleep_time:.1f}s for {shortest_tf} boundary)"
+            # Trailing SL
+            new_sirusu_value = sirusu_data.get('supertrend_value')
+            if new_sirusu_value and new_sirusu_value != trade_state.get("pending_sl_price"):
+                from database.crud import update_trade_state
+                await update_trade_state(trade_id, {"pending_sl_price": new_sirusu_value})
+                if trade_state.get("is_paper_trade"):
+                    await paper_trader.update_stop_loss(trade_id, new_sirusu_value)
+                else:
+                    sl_order_id = trade_state.get("stop_loss_order_id")
+                    if sl_order_id:
+                        product_id = trade_state.get("product_id")
+                        await self.position_manager._place_stop_loss_protection(
+                            client, product_id, trade_state["lot_size"], current_position,
+                            new_sirusu_value, setup_id, asset, trade_state["user_id"],
+                            existing_order_id=sl_order_id
+                        )
+                        
+            # Exit Check
+            exit_signal = self.strategy.generate_exit_signal(
+                setup_id, current_position, indicator_result
+            )
+            
+            if exit_signal:
+                await self.position_manager.execute_exit(
+                    client, trade_state, f"Sirusu flip to {indicator_result['sirusu']['signal_text']}"
                 )
-                await asyncio.sleep(sleep_time)
-
-            except Exception as e:
-                logger.error(f"❌ Exception in continuous monitoring: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                await self.logger_bot.send_error(f"Monitoring loop error: {str(e)[:200]}")
-                await asyncio.sleep(60)
+                
+            await client.close()
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing open trade {trade_id}: {e}")
 
     async def monitor_pending_entries(self, poll_interval=3):
         """
@@ -690,96 +209,72 @@ class AlgoEngine:
         logger.info("🚦 Starting fast fill-monitor for pending entries.")
         while True:
             try:
-                active_setups = await get_all_active_algo_setups()
-                for setup in active_setups:
-                    # Skip paper setups to avoid wasting API connections
-                    if is_paper_trade(setup):
+                from database.crud import get_pending_entry_trade_states, get_algo_setup_by_id, get_screener_setup_by_id, get_api_credential_by_id
+                
+                pending_trades = await get_pending_entry_trade_states()
+                for trade in pending_trades:
+                    if trade.get("is_paper_trade"):
                         continue
+                        
+                    setup_id = trade['setup_id']
+                    setup = await get_algo_setup_by_id(setup_id) or await get_screener_setup_by_id(setup_id)
+                    if not setup: continue
                     
-                    # Only for setups with pending stop-market entries
-                    if setup.get("pending_entry_order_id"):
-                        api_id = setup['api_id']
-                        cred = await get_api_credential_by_id(api_id, decrypt=True)
-                        if not cred:
-                            continue
-                        client = DeltaExchangeClient(
-                            api_key=cred['api_key'],
-                            api_secret=cred['api_secret']
-                        )
-                        try:
-                            symbol = setup['asset']
-                            timeframe = setup.get('timeframe', '3m')
-                            
-                            await self.position_manager.check_entry_order_filled(client, setup, None) 
-                        finally:
-                            await client.close()
+                    api_id = setup['api_id']
+                    cred = await get_api_credential_by_id(api_id, decrypt=True)
+                    if not cred: continue
+                    
+                    client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+                    try:
+                        await self.position_manager.check_entry_order_filled(client, trade, None)
+                    finally:
+                        await client.close()
+                        
                 await asyncio.sleep(poll_interval)
             except Exception as e:
                 logger.error(f"[FILL-MONITOR] Error: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 await asyncio.sleep(poll_interval)
 
     async def monitor_paper_trades(self, poll_interval=5):
         """
         Background loop to monitor virtual stop-losses and pending entries for paper trades.
-        Checks live prices every few seconds and triggers virtual fills/exits.
         """
         logger.info("[PAPER] Starting paper trade price monitor...")
         
         while True:
             try:
-                # We need a client to fetch prices - use first available API credential
-                active_setups = await get_all_active_algo_setups()
-                paper_setups = [s for s in active_setups if is_paper_trade(s)]
+                from database.crud import get_open_trade_states, get_pending_entry_trade_states, get_all_active_algo_setups, get_all_active_screener_setups, get_api_credential_by_id
                 
-                if not paper_setups and paper_trader.get_active_positions_count() == 0 and paper_trader.get_pending_entries_count() == 0:
+                open_trades = [t for t in await get_open_trade_states() if t.get("is_paper_trade")]
+                pending_trades = [t for t in await get_pending_entry_trade_states() if t.get("is_paper_trade")]
+                
+                if not open_trades and not pending_trades:
                     await asyncio.sleep(poll_interval * 2)
                     continue
-                
-                # Get a client for price fetching
+                    
                 client = None
-                for setup in paper_setups:
-                    api_id = setup.get('api_id')
+                all_configs = await get_all_active_algo_setups() + await get_all_active_screener_setups()
+                
+                for config in all_configs:
+                    api_id = config.get("api_id")
                     if api_id:
                         cred = await get_api_credential_by_id(api_id, decrypt=True)
                         if cred:
-                            client = DeltaExchangeClient(
-                                api_key=cred['api_key'],
-                                api_secret=cred['api_secret']
-                            )
+                            client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                             break
-                
+                            
                 if not client:
-                    # Fallback: try any active setup's credentials for price data
-                    for setup in active_setups:
-                        api_id = setup.get('api_id')
-                        if api_id:
-                            cred = await get_api_credential_by_id(api_id, decrypt=True)
-                            if cred:
-                                client = DeltaExchangeClient(
-                                    api_key=cred['api_key'],
-                                    api_secret=cred['api_secret']
-                                )
-                                break
-                
-                if not client:
-                    await asyncio.sleep(poll_interval * 2)
+                    await asyncio.sleep(poll_interval)
                     continue
-                
-                try:
-                    # Check pending virtual entries (breakout triggers)
-                    await paper_trader.check_pending_entries(client)
                     
-                    # Check virtual stop-losses and liquidations
+                try:
+                    await paper_trader.check_pending_entries(client)
                     await paper_trader.check_stop_losses(client)
                 finally:
                     await client.close()
-                
+                    
                 await asyncio.sleep(poll_interval)
                 
             except Exception as e:
                 logger.error(f"[PAPER] Error in paper trade monitor: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 await asyncio.sleep(poll_interval)

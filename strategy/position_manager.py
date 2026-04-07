@@ -17,8 +17,8 @@ from api.orders import (
 from api.positions import get_position_by_symbol
 from api.market_data import get_product_by_symbol
 from database.crud import (
-    create_algo_activity, update_algo_activity, 
-    update_algo_setup, get_open_activity_by_setup,
+    create_trade_state, update_trade_state, 
+    get_open_trade_by_setup, update_algo_setup, update_screener_setup,
     acquire_position_lock, release_position_lock, 
     get_position_lock, get_db
 )
@@ -34,8 +34,9 @@ class PositionManager:
     """Manage breakout entries, stop-loss protection, and exits with asset locking."""
     
     def __init__(self):
+        from indicators.signal_generator import SignalGenerator
         self.signal_generator = SignalGenerator()
-    
+
     async def place_breakout_entry_order(self, client: DeltaExchangeClient, 
                                         algo_setup: Dict[str, Any],
                                         entry_side: str, 
@@ -60,6 +61,7 @@ class PositionManager:
             symbol = algo_setup["asset"]
             lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
+            setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
 
             db = await get_db()
             lock = await get_position_lock(db, symbol)
@@ -69,96 +71,62 @@ class PositionManager:
 
             lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
             if not lock_acquired:
-                logger.error(f"❌ ENTRY REJECTED (acquire failed): {symbol} is already traded/locked")
-                return False
-
-            current_position = algo_setup.get("current_position")
-            if current_position:
-                logger.error(f"❌ ENTRY REJECTED: {setup_name} already has {current_position.upper()} position")
-                return False
-
-            pending_entry_id = algo_setup.get("pending_entry_order_id")
-            if pending_entry_id:
-                logger.error(f"❌ ENTRY REJECTED: Pending entry order already exists")
-                return False
-
-            actual_position = await get_position_by_symbol(client, symbol)
-            actual_size = actual_position.get("size", 0) if actual_position else 0
-            if actual_size != 0:
-                logger.error(f"❌ ENTRY REJECTED: {symbol} has {actual_size} contracts on exchange!")
-                await release_position_lock(db, symbol, setup_id)
+                logger.error(f"❌ Failed to acquire lock for {symbol} by {setup_name}")
                 return False
 
             if not product_id:
                 product = await get_product_by_symbol(client, symbol)
-                if not product:
-                    logger.error(f"❌ Product not found: {symbol}")
-                    await release_position_lock(db, symbol, setup_id)
-                    return False
-                product_id = product["id"]
-                await update_algo_setup(setup_id, {"product_id": product_id})
-
+                if product:
+                    product_id = product["id"]
+                    
             order_side = "buy" if entry_side == "long" else "sell"
-            await cancel_all_orders(client, product_id)
+            
+            trade_data = {
+                "user_id": algo_setup.get("user_id"),
+                "setup_id": setup_id,
+                "setup_type": setup_type,
+                "setup_name": setup_name,
+                "asset": symbol,
+                "product_id": product_id,
+                "direction": entry_side,
+                "lot_size": lot_size,
+                "timeframe": algo_setup.get("timeframe", "1m"),
+                "status": "pending_entry",
+                "entry_trigger_price": breakout_price,
+                "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
+                "pending_entry_side": entry_side,
+                "pending_sl_price": sirusu_value,
+                "is_paper_trade": False,
+                "last_signal_time": datetime.utcnow()
+            }
 
             if immediate:
-                entry_order = await place_market_order(
-                    client, product_id, lot_size, order_side
-                )
+                entry_order = await place_market_order(client, product_id, lot_size, order_side)
                 if not entry_order:
                     logger.error(f"❌ Failed to place market entry order")
                     await release_position_lock(db, symbol, setup_id)
                     return False
 
-                # The following block is new:
-                order_data = {
-                    "order_id": entry_order.get("id"),
-                    "algo_setup_id": setup_id,
-                    "user_id": algo_setup.get("user_id"),
-                    "asset": symbol,
-                    "side": order_side,
-                    "size": lot_size,
-                    "order_type": entry_order.get("order_type"),
-                    "status": entry_order.get("state", "submitted"),
-                    "limit_price": entry_order.get("limit_price"),
-                    "stop_price": entry_order.get("stop_price"),
-                    "reduce_only": entry_order.get("reduce_only"),
-                    "average_fill_price": entry_order.get("average_fill_price"),
-                    "extra_data": entry_order,
-                }
-                await create_order_record(order_data)
-
                 entry_order_id = entry_order.get("id")
-                # FIX: average_fill_price can be null for instant market orders.
-                # Fall back to breakout_price to avoid float(None) crash.
                 raw_fill_price = entry_order.get("average_fill_price")
                 entry_price = float(raw_fill_price) if raw_fill_price is not None else float(breakout_price)
-                activity_data = {
-                    "user_id": algo_setup["user_id"],
-                    "algo_setup_id": setup_id,
-                    "algo_setup_name": setup_name,
-                    "entry_time": datetime.utcnow(),
-                    "entry_price": entry_price,
-                    "direction": entry_side,
-                    "lot_size": lot_size,
-                    "asset": symbol,
-                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
-                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "is_closed": False
-                }
-                await create_algo_activity(activity_data)
-                await update_algo_setup(setup_id, {
-                    "current_position": entry_side,
-                    "last_entry_price": entry_price,
-                    "last_entry_order_id": entry_order_id,
-                    "last_signal_time": datetime.utcnow(),
-                    "position_lock_acquired": True
-                })
-                logger.info(f"🔍 About to create position record for {symbol}")
+                
+                trade_data["status"] = "open"
+                trade_data["entry_price"] = entry_price
+                trade_data["last_entry_order_id"] = entry_order_id
+                trade_data["current_position"] = entry_side
+                trade_data["entry_time"] = datetime.utcnow()
+                trade_data["perusu_entry_signal"] = "uptrend" if entry_side == "long" else "downtrend"
+                trade_data["trade_date"] = datetime.utcnow().strftime("%Y-%m-%d")
+                
+                from database.crud import create_trade_state, update_trade_state, create_position_record, create_order_record
+                
+                trade_id = await create_trade_state(trade_data)
+                
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": algo_setup.get("user_id"),
-                    "product_id": product_id,  # <-- ADD THIS
+                    "product_id": product_id,
                     "asset": symbol,
                     "direction": entry_side,
                     "side": "buy" if entry_side == "long" else "sell",
@@ -168,26 +136,15 @@ class PositionManager:
                     "status": "open",
                     "source": "algo"
                 })
-                logger.info(f"✅ Position record created successfully")
                 
-                # Place SL using the sirusu_value passed at signal time
                 if algo_setup.get("additional_protection", False):
                     sl_price = sirusu_value
-                    # Try fresh calculation, fallback to signal-time value
-                    from strategy.dual_supertrend import get_latest_sirusu
-                    timeframe = algo_setup.get("timeframe", "3m")
-                    try:
-                        fresh_sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
-                        logger.info(f"[SL] Fresh Sirusu calculated at fill: {fresh_sirusu_value}")
-                        sl_price = fresh_sirusu_value
-                    except Exception as e:
-                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu, using signal-time value: {e}")
-        
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sl_price,
                         setup_id, symbol, algo_setup.get("user_id")
                     )
-                    logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")
+                    await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
+                
                 return True
 
             entry_order = await place_stop_market_entry_order(
@@ -197,7 +154,8 @@ class PositionManager:
                 logger.error(f"❌ Failed to place breakout entry order")
                 await release_position_lock(db, symbol, setup_id)
                 return False
-
+                
+            from database.crud import create_order_record, create_trade_state
             order_data = {
                 "order_id": entry_order.get("id"),
                 "algo_setup_id": setup_id,
@@ -214,103 +172,62 @@ class PositionManager:
                 "extra_data": entry_order,
             }
             await create_order_record(order_data)
-
-            entry_order_id = entry_order.get("id")
-            await update_algo_setup(setup_id, {
-                "pending_entry_order_id": entry_order_id,
-                "entry_trigger_price": breakout_price,
-                "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
-                "pending_entry_side": entry_side,
-                "pending_sl_price": sirusu_value,
-                "last_signal_time": datetime.utcnow(),
-                "position_lock_acquired": True
-            })
+                
+            trade_data["pending_entry_order_id"] = entry_order.get("id")
+            await create_trade_state(trade_data)
             return True
+            
         except Exception as e:
             logger.error(f"❌ Exception placing breakout entry order: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            try:
-                db = await get_db()
-                await release_position_lock(db, symbol, setup_id)
-                logger.warning(f"⚠️ Lock released due to exception")
-            except Exception:
-                pass
             return False
 
     async def check_entry_order_filled(self, client: DeltaExchangeClient,
-                                      algo_setup: Dict[str, Any],
-                                      sirusu_value: float) -> bool:
-        """
-        Check if a pending stop-market entry order has been filled.
-        FIXED: Distinguishes between filled vs cancelled/rejected orders.
-        Only creates position + SL if the order was actually FILLED.
-        """
+                                      trade_state: Dict[str, Any],
+                                      sirusu_value: float = None) -> bool:
         try:
-            # ========== PAPER TRADE GUARD ==========
-            if is_paper_trade(algo_setup):
-                return False  # Paper entries monitored by paper_trader.check_pending_entries()
-            # ========== END GUARD ==========
+            if trade_state.get("is_paper_trade", False):
+                return False
             
-            setup_id = str(algo_setup["_id"])
-            setup_name = algo_setup["setup_name"]
-            symbol = algo_setup["asset"]
-            lot_size = algo_setup["lot_size"]
-            product_id = algo_setup.get("product_id")
-            pending_order_id = algo_setup.get("pending_entry_order_id")
+            trade_id = str(trade_state["_id"])
+            setup_id = trade_state["setup_id"]
+            setup_name = trade_state["setup_name"]
+            symbol = trade_state["asset"]
+            lot_size = trade_state["lot_size"]
+            product_id = trade_state.get("product_id")
+            pending_order_id = trade_state.get("pending_entry_order_id")
             
             if not pending_order_id or not product_id:
                 return False
 
-            # CRITICAL FIX: Get EXACT order status, not just "is it gone?"
             order_status = await get_order_status_by_id(client, pending_order_id, product_id)
             logger.info(f"[FILL-MONITOR] Order {pending_order_id} status: {order_status}")
 
             if order_status in ("filled", "closed", "triggered"):
-                # ---- ORDER WAS GENUINELY FILLED ----
-                # RACE CONDITION FIX: Atomically claim this fill by clearing
-                # pending_entry_order_id. If another monitor already claimed it,
-                # modified_count will be 0 and we skip duplicate processing.
-                from bson import ObjectId
-                db = await get_db()
-                claim_result = await db.algo_setups.update_one(
-                    {"_id": ObjectId(setup_id), "pending_entry_order_id": pending_order_id},
-                    {"$set": {"pending_entry_order_id": None}}
-                )
-                if claim_result.modified_count == 0:
-                    logger.info(f"ℹ️ [FILL-MONITOR] Fill already claimed by another monitor for {setup_name}, skipping")
-                    return False
+                from database.crud import update_trade_state, create_position_record
+                success = await update_trade_state(trade_id, {"pending_entry_order_id": None})
+                if not success: return False
+                    
+                entry_side = trade_state.get("pending_entry_side", "long")
+                position = await get_position_by_symbol(client, symbol)
+                entry_price = float(position["entry_price"]) if position else float(trade_state.get("entry_trigger_price", 0))
 
-                logger.info(f"✅ Stop-market entry FILLED for {setup_name}")
-                await update_order_record(pending_order_id, {
-                    "status": "filled",
-                    "filled_at": datetime.utcnow()
-                })
-            
-                entry_side = algo_setup.get("pending_entry_side") or \
-                    ("long" if algo_setup.get("pending_entry_direction_signal") == 1 else "short")
+                update_data = {
+                    "current_position": entry_side,
+                    "last_entry_price": entry_price,
+                    "last_entry_order_id": pending_order_id,
+                    "status": "open",
+                    "entry_time": datetime.utcnow(),
+                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend"
+                }
                 
-                # Fetch actual fill price from order history to avoid slippage issues
-                entry_price = algo_setup.get("entry_trigger_price")
-                try:
-                    from api.orders import get_order_history
-                    history = await get_order_history(client, product_id)
-                    if history:
-                        filled_order = next((o for o in history if str(o.get("id")) == str(pending_order_id)), None)
-                        if filled_order and filled_order.get("average_fill_price") is not None:
-                            entry_price = float(filled_order.get("average_fill_price"))
-                            logger.info(f"   Actual fill price from history: ${entry_price}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not fetch actual fill price for entry {pending_order_id}: {e}")
+                await update_trade_state(trade_id, update_data)
                 
-                if entry_price is None:
-                    entry_price = 0.0
-
-                # Create position record
-                logger.info(f"🔍 Creating position record for stop-market fill: {symbol}")
                 await create_position_record({
                     "algo_setup_id": setup_id,
-                    "user_id": algo_setup.get("user_id"),
+                    "user_id": trade_state.get("user_id"),
                     "product_id": product_id,
                     "asset": symbol,
                     "direction": entry_side,
@@ -321,694 +238,166 @@ class PositionManager:
                     "status": "open",
                     "source": "algo"
                 })
-                logger.info(f"✅ Position record created")
-            
-                # Create activity
-                activity_data = {
-                    "user_id": algo_setup["user_id"],
-                    "algo_setup_id": setup_id,
-                    "algo_setup_name": setup_name,
-                    "entry_time": datetime.utcnow(),
-                    "entry_price": entry_price,
-                    "direction": entry_side,
-                    "lot_size": lot_size,
-                    "asset": symbol,
-                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
-                    "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "is_closed": False
-                }
-                await create_algo_activity(activity_data)
-            
-                # Update setup - position is now open
-                await update_algo_setup(setup_id, {
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None,
-                    "pending_entry_direction_signal": None,
-                    "entry_trigger_price": None,
-                    "pending_sl_price": None,
-                    "current_position": entry_side,
-                    "last_entry_price": entry_price,
-                    "last_entry_order_id": pending_order_id,
-                    "last_signal_time": datetime.utcnow()
-                })
-            
-                # Place stop-loss if protection enabled
-                if algo_setup.get("additional_protection", False):
-                    # Use stored SL price as fallback
-                    sl_price = algo_setup.get("pending_sl_price") or sirusu_value
-                    from strategy.dual_supertrend import get_latest_sirusu
-                    timeframe = algo_setup.get("timeframe", "3m")
-                    try:
-                        fresh_sirusu_value = await get_latest_sirusu(client, symbol, timeframe)
-                        logger.info(f"[SL] Fresh Sirusu calculated at entry fill: {fresh_sirusu_value}")
-                        sl_price = fresh_sirusu_value
-                    except Exception as e:
-                        logger.error(f"[SL] ❌ Could not calculate fresh Sirusu, using stored value: {e}")
-                        if sl_price is None:
-                            logger.error("[SL] ❌ No valid Sirusu value available. SKIPPING stop-loss.")
-                            return True
-                
+
+                sl_price = sirusu_value if sirusu_value else trade_state.get("pending_sl_price")
+                if trade_state.get("additional_protection", False) and sl_price:
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sl_price,
-                        setup_id, symbol, algo_setup.get("user_id")
+                        setup_id, symbol, trade_state.get("user_id")
                     )
-                    logger.info(f"✅ Stop-loss placed with ID: {sl_order_id}")        
+                    await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
+                    
+                logger.info(f"✅ [FILL-MONITOR] Processed fill for {symbol} ({setup_name})")
                 return True
 
             elif order_status in ("cancelled", "rejected"):
-                # ---- ORDER WAS CANCELLED/REJECTED - DO NOT create position or SL ----
-                logger.warning(
-                    f"⚠️ [FILL-MONITOR] Pending entry order {pending_order_id} was {order_status} "
-                    f"for {setup_name} - NOT creating position or SL"
-                )
-                await update_order_record(pending_order_id, {
-                    "status": order_status,
-                    "updated_at": datetime.utcnow()
-                })
-                # Clean up all pending state and release lock
-                await update_algo_setup(setup_id, {
-                    "pending_entry_order_id": None,
-                    "pending_entry_side": None,
-                    "pending_entry_direction_signal": None,
-                    "entry_trigger_price": None,
-                    "pending_sl_price": None,
-                    "stop_loss_order_id": None,
-                    "position_lock_acquired": False
-                })
+                logger.warning(f"⚠️ [FILL-MONITOR] Order {pending_order_id} was {order_status}. Cleaning up.")
+                from database.crud import update_trade_state
+                await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                 db = await get_db()
                 await release_position_lock(db, symbol, setup_id)
-                logger.info(f"🧹 [FILL-MONITOR] Cleaned up invalidated setup state for {setup_name}")
                 return False
 
-            elif order_status == "not_found":
-                # Order disappeared entirely - check exchange position to be safe
-                logger.warning(f"⚠️ [FILL-MONITOR] Order {pending_order_id} not found in open or history")
-                actual_position = await get_position_by_symbol(client, symbol)
-                actual_size = actual_position.get("size", 0) if actual_position else 0
-                if actual_size == 0:
-                    # No position on exchange, order is gone -> treat as cancelled
-                    logger.warning(f"⚠️ [FILL-MONITOR] No position on exchange - treating as cancelled")
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": None,
-                        "pending_entry_side": None,
-                        "pending_entry_direction_signal": None,
-                        "entry_trigger_price": None,
-                        "pending_sl_price": None,
-                        "stop_loss_order_id": None,
-                        "position_lock_acquired": False
-                    })
-                    db = await get_db()
-                    await release_position_lock(db, symbol, setup_id)
-                    return False
-                else:
-                    # Position exists! Order must have filled. Proceed with fill logic.
-                    logger.info(f"✅ [FILL-MONITOR] Position exists on exchange (size={actual_size}) - treating as filled")
-                    entry_side = algo_setup.get("pending_entry_side") or \
-                        ("long" if actual_size > 0 else "short")
-                    raw_entry_price = algo_setup.get("entry_trigger_price") or \
-                        (actual_position.get("entry_price") if actual_position else None)
-                    entry_price = float(raw_entry_price) if raw_entry_price is not None else 0.0
-
-                    await create_position_record({
-                        "algo_setup_id": setup_id,
-                        "user_id": algo_setup.get("user_id"),
-                        "product_id": product_id,
-                        "asset": symbol,
-                        "direction": entry_side,
-                        "side": "buy" if entry_side == "long" else "sell",
-                        "size": lot_size,
-                        "entry_price": entry_price,
-                        "opened_at": datetime.utcnow(),
-                        "status": "open",
-                        "source": "algo"
-                    })
-
-                    activity_data = {
-                        "user_id": algo_setup["user_id"],
-                        "algo_setup_id": setup_id,
-                        "algo_setup_name": setup_name,
-                        "entry_time": datetime.utcnow(),
-                        "entry_price": entry_price,
-                        "direction": entry_side,
-                        "lot_size": lot_size,
-                        "asset": symbol,
-                        "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend",
-                        "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                        "is_closed": False
-                    }
-                    await create_algo_activity(activity_data)
-
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": None,
-                        "pending_entry_side": None,
-                        "pending_entry_direction_signal": None,
-                        "entry_trigger_price": None,
-                        "pending_sl_price": None,
-                        "current_position": entry_side,
-                        "last_entry_price": entry_price,
-                        "last_entry_order_id": pending_order_id,
-                        "last_signal_time": datetime.utcnow()
-                    })
-
-                    if algo_setup.get("additional_protection", False):
-                        sl_price = algo_setup.get("pending_sl_price") or sirusu_value
-                        from strategy.dual_supertrend import get_latest_sirusu
-                        timeframe = algo_setup.get("timeframe", "3m")
-                        try:
-                            fresh_val = await get_latest_sirusu(client, symbol, timeframe)
-                            sl_price = fresh_val
-                        except Exception:
-                            pass
-                        if sl_price:
-                            await self._place_stop_loss_protection(
-                                client, product_id, lot_size, entry_side, sl_price,
-                                setup_id, symbol, algo_setup.get("user_id")
-                            )
-                        else:
-                            logger.error(
-                                f"[SL] ❌ POSITION LEFT UNPROTECTED for {symbol}! "
-                                f"No valid Sirusu value: pending_sl_price={algo_setup.get('pending_sl_price')}, "
-                                f"sirusu_value={sirusu_value}"
-                            )
-                    return True
-            else:
-                # Still open/untriggered/pending - not filled yet
-                return False
-                
+            return False
+            
         except Exception as e:
-            logger.error(f"❌ Exception checking entry order: {e}")
+            logger.error(f"❌ Exception checking entry fill: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
 
-    async def _place_stop_loss_protection(
-        self, client: DeltaExchangeClient, 
-        product_id: int, lot_size: int, 
-        position_side: str, stop_price: float,
-        setup_id: Optional[str] = None,
-        symbol: Optional[str] = None,  # ADD
-        user_id: Optional[str] = None
-    ) -> Optional[int]:  # ADD THIS
+    async def _place_stop_loss_protection(self, client: DeltaExchangeClient, product_id: int, 
+                                          lot_size: int, entry_side: str, sl_price: float,
+                                          setup_id: str, symbol: str, user_id: str,
+                                          existing_order_id: Optional[str] = None) -> Optional[int]:
         try:
-            sl_side = "sell" if position_side == "long" else "buy"
-            sl_order = await place_stop_loss_order(
-                client, product_id, lot_size, sl_side, stop_price, use_stop_market=True
-            )
-            if sl_order:
-                sl_order_id = sl_order.get("id")
-                logger.info(f"✅ Stop-loss order placed successfully (ID: {sl_order_id})")
-                if setup_id:
-                    await update_algo_setup(setup_id, {
-                        "stop_loss_order_id": sl_order_id
-                    })
-                    logger.info(f"💾 Saved stop-loss order ID {sl_order_id} to database")
+            from api.orders import cancel_order
+            if existing_order_id:
+                try:
+                    await cancel_order(client, existing_order_id, product_id)
+                except Exception as e:
+                    logger.warning(f"Could not cancel old SL {existing_order_id}: {e}")
 
+            sl_side = "sell" if entry_side == "long" else "buy"
+            sl_order = await place_stop_loss_order(
+                client, product_id, lot_size, sl_side, sl_price
+            )
+            
+            if sl_order:
+                from database.crud import create_order_record
                 order_data = {
-                    "order_id": sl_order_id,
+                    "order_id": sl_order.get("id"),
                     "algo_setup_id": setup_id,
-                    "user_id": user_id,  # Pass user_id if available
-                    "asset": symbol,    # If symbol available, put here
+                    "user_id": user_id,
+                    "asset": symbol,
                     "side": sl_side,
                     "size": lot_size,
                     "order_type": sl_order.get("order_type"),
                     "status": sl_order.get("state", "submitted"),
-                    "limit_price": sl_order.get("limit_price"),
                     "stop_price": sl_order.get("stop_price"),
-                    "reduce_only": sl_order.get("reduce_only"),
-                    "average_fill_price": sl_order.get("average_fill_price"),
+                    "reduce_only": True,
                     "extra_data": sl_order,
                 }
                 await create_order_record(order_data)
-                return sl_order_id
-            else:
-                logger.warning(f"⚠️ Failed to place stop-loss order")
-                return None
+                return sl_order.get("id")
+            return None
         except Exception as e:
-            logger.error(f"❌ Exception placing stop-loss: {e}")
+            logger.error(f"❌ Exception placing SL protection: {e}")
             return None
 
     async def execute_exit(self, client: DeltaExchangeClient,
-                           algo_setup: Dict[str, Any],
+                           trade_state: dict,
                            sirusu_signal_text: str) -> tuple[bool, float, str]:
         try:
-            # ========== PAPER TRADE ROUTING ==========
-            if is_paper_trade(algo_setup):
+            if trade_state.get("is_paper_trade", False):
                 return await paper_trader.execute_virtual_exit(
-                    client=client,
-                    algo_setup=algo_setup,
-                    exit_reason=f"Sirusu flip to {sirusu_signal_text}"
+                    client=client, trade_state=trade_state, exit_reason=f"Sirusu flip to {sirusu_signal_text}"
                 )
-            # ========== END PAPER TRADE ROUTING ==========
             
-            setup_id = str(algo_setup["_id"])
-            setup_name = algo_setup["setup_name"]
-            symbol = algo_setup["asset"]
-            lot_size = algo_setup["lot_size"]
-            product_id = algo_setup.get("product_id")
-            current_position = algo_setup.get("current_position")
-            stop_loss_order_id = algo_setup.get("stop_loss_order_id")
+            trade_id = str(trade_state["_id"])
+            setup_id = trade_state["setup_id"]
+            setup_name = trade_state["setup_name"]
+            symbol = trade_state["asset"]
+            lot_size = trade_state["lot_size"]
+            product_id = trade_state.get("product_id")
+            current_position = trade_state.get("current_position")
+            stop_loss_order_id = trade_state.get("stop_loss_order_id")
 
             if not current_position or not product_id:
                 logger.warning(f"⚠️ No current position or product_id for {symbol}")
                 return False, 0.0, ""
 
             logger.info(f"🚪 Executing exit for {setup_name} - {current_position.upper()} position")
-            logger.info(f"   Reason: {sirusu_signal_text}")
-
-            # Check actual position on exchange
+            
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
+            exit_size = abs(actual_size) if actual_size != 0 else lot_size
             
-            # If position is already closed on exchange, just sync database
-            if actual_size == 0:
-                logger.warning(f"⚠️ Position for {symbol} already closed on exchange - syncing database")
-                return await self._sync_closed_position(setup_id, symbol, current_position, lot_size, sirusu_signal_text, stop_loss_order_id, client, product_id)
+            if stop_loss_order_id:
+                await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
 
-            # Position is still open - execute market exit
-            logger.info(f"📍 Position still open on exchange (size={actual_size}), executing market exit")
-            
-            # Step 1: Cancel any active stop-loss orders
-            await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
-            
-            # Step 2: Place market exit order (reduce_only prevents accidental position flip)
             exit_side = "sell" if current_position == "long" else "buy"
-            exit_size = int(min(lot_size, abs(actual_size)))  # Use actual position size to avoid overshoot; int() required by Delta API
-            exit_order = await place_market_order(client, product_id, exit_size, exit_side,
-                                                  reduce_only=True)
+            exit_order = await place_market_order(client, product_id, exit_size, exit_side, reduce_only=True)
             
             if not exit_order:
                 logger.error(f"❌ Failed to place exit order for {symbol}")
                 return False, 0.0, ""
 
-            # FIX: average_fill_price can be null for instant market orders.
-            raw_exit_fill = exit_order.get("average_fill_price")
-            exit_price = float(raw_exit_fill) if raw_exit_fill is not None else 0.0
+            raw_fill_price = exit_order.get("average_fill_price")
+            exit_price = float(raw_fill_price) if raw_fill_price is not None else 0.0
             
-            # Fetch actual fill price from order history to avoid slippage/null issues
-            if exit_price == 0.0 and exit_order.get("id"):
-                try:
-                    from api.orders import get_order_history
-                    history = await get_order_history(client, product_id)
-                    if history:
-                        filled_order = next((o for o in history if str(o.get("id")) == str(exit_order.get("id"))), None)
-                        if filled_order and filled_order.get("average_fill_price") is not None:
-                            exit_price = float(filled_order.get("average_fill_price"))
-                            logger.info(f"   Actual exit fill price from history: ${exit_price}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not fetch actual exit fill price from history: {e}")
+            entry_price = trade_state.get("entry_price", 0)
+            pnl = 0.0
+            if entry_price and exit_price:
+                if current_position == "long":
+                    pnl = (exit_price - entry_price) * exit_size
+                else:
+                    pnl = (entry_price - exit_price) * exit_size
+                    
+            pnl_inr = pnl * settings.usd_to_inr_rate
             
-            if exit_price == 0.0:
-                logger.warning(f"⚠️ Exit order average_fill_price is still 0.0 — PnL will be inaccurate")
-            logger.info(f"✅ Exit order executed: {exit_side.upper()} {lot_size} @ ${exit_price:.5f}")
+            from database.crud import update_trade_state
+            await update_trade_state(trade_id, {
+                "status": "closed",
+                "exit_price": exit_price,
+                "exit_time": datetime.utcnow(),
+                "pnl": pnl,
+                "pnl_inr": pnl_inr,
+                "sirusu_exit_signal": sirusu_signal_text
+            })
+
+            db = await get_db()
+            await release_position_lock(db, symbol, setup_id)
             
-            # Save exit order record
-            await self._save_exit_order_record(exit_order, setup_id, algo_setup, symbol, exit_side, lot_size)
-            
-            # Update activity and cleanup
-            await self._finalize_exit(setup_id, symbol, current_position, lot_size, exit_price, sirusu_signal_text)
-            
-            logger.info(f"✅ Exit completed successfully for {setup_name}")
-            return True, exit_price, f"Sirusu flip to {sirusu_signal_text}"
-            
+            return True, exit_price, sirusu_signal_text
+
         except Exception as e:
-            logger.error(f"❌ Exception in execute_exit for {algo_setup.get('setup_name')}: {e}")
+            logger.error(f"❌ Exception executing exit: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False, 0.0, ""
 
-    async def _sync_closed_position(self, setup_id: str, symbol: str, current_position: str,
-                                   lot_size: int, sirusu_signal_text: str, stop_loss_order_id: Optional[str],
-                                   client: DeltaExchangeClient, product_id: int) -> tuple[bool, float, str]:
-        """Sync database when position is already closed on exchange."""
-        try:
-            exit_price = 0.0
-            exit_reason = "Manual close"
-            
-            # Check if it was closed by stop-loss
-            if stop_loss_order_id:
-                from api.orders import get_order_history
-                history = await get_order_history(client, product_id)
-                sl_order = next((o for o in history if str(o.get("id")) == str(stop_loss_order_id)), None)
-                
-                if sl_order and sl_order.get("state") in ("filled", "closed", "triggered"):
-                    raw_exit = sl_order.get("average_fill_price")
-                    exit_price = float(raw_exit) if raw_exit is not None else 0.0
-                    exit_reason = f"Stop-loss triggered ({sirusu_signal_text})"
-                    await update_order_record(stop_loss_order_id, {
-                        "status": "filled",
-                        "filled_at": datetime.utcnow()
-                    })
-                else:
-                    logger.warning(f"⚠️ SL order {stop_loss_order_id} not filled - position closed manually")
-                    # Cancel orphaned stop-loss order on exchange
-                    logger.info(f"🧹 Cancelling orphaned stop-loss order {stop_loss_order_id}...")
-                    await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
-            
-            # Update activity
-            activity = await get_open_activity_by_setup(setup_id)
-            if activity:
-                update_data = {
-                    "exit_time": datetime.utcnow(),
-                    "exit_price": exit_price,
-                    "sirusu_exit_signal": exit_reason,
-                    "is_closed": True
-                }
-                
-                if exit_price != 0.0:
-                    entry_price = activity.get("entry_price", 0)
-                    pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
-                    pnl_inr = pnl * settings.usd_to_inr_rate
-                    update_data["pnl"] = round(pnl, 4)
-                    update_data["pnl_inr"] = round(pnl_inr, 2)
-                
-                await update_algo_activity(str(activity["_id"]), update_data)
-            
-            # Clean up database
-            await update_algo_setup(setup_id, {
-                "current_position": None,
-                "last_entry_price": None,
-                "last_entry_order_id": None,
-                "pending_entry_order_id": None,
-                "pending_entry_side": None,
-                "pending_entry_direction_signal": None,
-                "entry_trigger_price": None,
-                "pending_sl_price": None,
-                "stop_loss_order_id": None,
-                "position_lock_acquired": False
-            })
-            
-            db = await get_db()
-            await db.positions.update_many(
-                {"algo_setup_id": setup_id, "status": "open"},
-                {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
-            )
-            await release_position_lock(db, symbol, setup_id)
-            logger.info(f"✅ State successfully synced for {symbol}")
-            return True, exit_price, exit_reason
-        except Exception as e:
-            logger.error(f"❌ Error syncing closed position: {e}")
-            return False, 0.0, ""
-
     async def _cancel_stop_loss_orders(self, client: DeltaExchangeClient, product_id: int,
-                                     symbol: str, stop_loss_order_id: Optional[str]) -> None:
-        """Cancel any active stop-loss orders - ENHANCED to specifically target the position's stop-loss."""
+                                     symbol: str, stop_loss_order_id: Optional[str] = None) -> None:
         try:
             from services.reconciliation import filter_orders_by_symbol_and_product_id
             from api.orders import cancel_order
             
-            # ✅ FIRST: Try to cancel the specific stop-loss order associated with this position
-            if stop_loss_order_id:
-                logger.info(f"🎯 Attempting to cancel specific stop-loss order: {stop_loss_order_id}")
-                try:
-                    # Check if the order exists and is cancellable
-                    order_status = await get_order_status_by_id(client, stop_loss_order_id, product_id)
-                    logger.info(f"   Order {stop_loss_order_id} status: {order_status}")
-                    
-                    if order_status in ("pending", "open", "untriggered"):
-                        cancelled = await cancel_order(client, product_id, stop_loss_order_id)
-                        if cancelled:
-                            logger.info(f"✅ Successfully cancelled stop-loss order {stop_loss_order_id}")
-                            await update_order_record(stop_loss_order_id, {
-                                "status": "cancelled",
-                                "updated_at": datetime.utcnow()
-                            })
-                        else:
-                            logger.warning(f"⚠️ Cancel request failed for stop-loss order {stop_loss_order_id}")
-                    elif order_status == "filled":
-                        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} already filled")
-                    else:
-                        logger.info(f"ℹ️ Stop-loss order {stop_loss_order_id} in terminal state: {order_status}")
-                        
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not cancel specific stop-loss order {stop_loss_order_id}: {e}")
-            
-            # ✅ SECOND: Scan for any other active stop-loss orders for this symbol
-            open_orders = await get_open_orders(client, product_id)
-            matched_orders = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
-            
-            cancelled_count = 0
-            for order in matched_orders:
-                if (order.get("stop_order_type") == "stop_loss_order" and
-                    order.get("reduce_only") and
-                    order.get("state") in ("pending", "open", "untriggered")):
-                    
-                    sl_order_id = order.get("id")
-                    # Skip if this is the one we already tried to cancel
-                    if sl_order_id == stop_loss_order_id:
-                        continue
-                        
-                    logger.info(f"🎯 Found additional active stop-loss order: {sl_order_id}")
-                    
-                    try:
-                        cancelled = await cancel_order(client, product_id, sl_order_id)
-                        if cancelled:
-                            cancelled_count += 1
-                            logger.info(f"✅ Cancelled additional stop-loss order {sl_order_id}")
-                            await update_order_record(sl_order_id, {
-                                "status": "cancelled",
-                                "updated_at": datetime.utcnow()
-                            })
-                    except Exception as cancel_ex:
-                        logger.warning(f"⚠️ Could not cancel additional SL {sl_order_id}: {cancel_ex}")
-            
-            if stop_loss_order_id:
-                logger.info(f"✅ Stop-loss cancellation process completed for order {stop_loss_order_id}")
-            else:
-                logger.info(f"ℹ️ No specific stop-loss order ID provided for {symbol}")
+            open_orders = await get_open_orders(client)
+            if open_orders:
+                orders_for_symbol = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
+                stop_orders = [o for o in orders_for_symbol if o.get("order_type") == "stop_order"]
                 
+                if stop_loss_order_id:
+                    for order in stop_orders:
+                        if str(order.get("id")) == str(stop_loss_order_id):
+                            await cancel_order(client, order["id"], product_id)
+                            logger.info(f"✅ Cancelled specific SL order {stop_loss_order_id} for {symbol}")
+                            return
+                
+                for order in stop_orders:
+                    await cancel_order(client, order["id"], product_id)
+                    logger.info(f"✅ Cancelled generic SL order {order['id']} for {symbol}")
         except Exception as e:
-            logger.error(f"❌ Error cancelling stop-loss orders: {e}")
+            logger.error(f"❌ Error cancelling SL orders for {symbol}: {e}")
 
-    async def _save_exit_order_record(self, exit_order: Dict[str, Any], setup_id: str,
-                                     algo_setup: Dict[str, Any], symbol: str, exit_side: str,
-                                     lot_size: int) -> None:
-        """Save exit order record to database."""
-        try:
-            order_data = {
-                "order_id": exit_order.get("id"),
-                "algo_setup_id": setup_id,
-                "user_id": algo_setup.get("user_id"),
-                "asset": symbol,
-                "side": exit_side,
-                "size": lot_size,
-                "order_type": exit_order.get("order_type"),
-                "status": exit_order.get("state", "submitted"),
-                "limit_price": exit_order.get("limit_price"),
-                "stop_price": exit_order.get("stop_price"),
-                "reduce_only": exit_order.get("reduce_only"),
-                "average_fill_price": exit_order.get("average_fill_price"),
-                "extra_data": exit_order,
-            }
-            await create_order_record(order_data)
-        except Exception as e:
-            logger.error(f"❌ Error saving exit order record: {e}")
-
-    async def _finalize_exit(self, setup_id: str, symbol: str, current_position: str,
-                           lot_size: int, exit_price: float, sirusu_signal_text: str) -> None:
-        """Finalize exit by updating activity and cleaning up."""
-        try:
-            # Update activity with PNL
-            activity = await get_open_activity_by_setup(setup_id)
-            if activity:
-                entry_price = activity.get("entry_price", 0)
-                pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
-                pnl_inr = pnl * settings.usd_to_inr_rate
-                
-                await update_algo_activity(str(activity["_id"]), {
-                    "exit_time": datetime.utcnow(),
-                    "exit_price": exit_price,
-                    "pnl": round(pnl, 4),
-                    "pnl_inr": round(pnl_inr, 2),
-                    "sirusu_exit_signal": sirusu_signal_text,
-                    "is_closed": True
-                })
-            
-            # Clean up setup
-            await update_algo_setup(setup_id, {
-                "current_position": None,
-                "last_entry_price": None,
-                "last_entry_order_id": None,
-                "pending_entry_order_id": None,
-                "pending_entry_side": None,
-                "pending_entry_direction_signal": None,
-                "entry_trigger_price": None,
-                "pending_sl_price": None,
-                "stop_loss_order_id": None,
-                "position_lock_acquired": False
-            })
-            
-            # Close position records
-            db = await get_db()
-            await db.positions.update_many(
-                {"algo_setup_id": setup_id, "status": "open"},
-                {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
-            )
-            await release_position_lock(db, symbol, setup_id)
-            
-        except Exception as e:
-            logger.error(f"❌ Error finalizing exit: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            # Ensure lock is released even if earlier steps failed
-            try:
-                db = await get_db()
-                await release_position_lock(db, symbol, setup_id)
-                logger.warning(f"⚠️ Position lock released in _finalize_exit error handler")
-            except Exception as lock_err:
-                logger.error(f"❌ CRITICAL: Could not release lock for {symbol}: {lock_err}")
-
-    def _calculate_pnl(self, entry_price, exit_price, 
-                      lot_size: int, position_side: str) -> float:
-        try:
-            ep = float(entry_price) if entry_price is not None else 0.0
-            xp = float(exit_price) if exit_price is not None else 0.0
-            if ep == 0.0 or xp == 0.0:
-                logger.warning(f"⚠️ PnL calculation with zero price: entry={ep}, exit={xp}")
-                return 0.0
-            if position_side == "long":
-                pnl = (xp - ep) * lot_size
-            else:
-                pnl = (ep - xp) * lot_size
-            return pnl
-        except (TypeError, ValueError) as e:
-            logger.error(f"❌ PnL calculation error: entry={entry_price}, exit={exit_price}: {e}")
-            return 0.0
-
-    async def sync_exchange_positions_and_orders(self, client: DeltaExchangeClient, all_setups: list):
-        """
-        On startup, sync open positions and pending orders from the exchange with local database.
-        """
-        for setup in all_setups:
-            # Paper trades have no real exchange state to sync
-            if is_paper_trade(setup):
-                continue
-            
-            symbol = setup.get("asset")
-            setup_id = str(setup["_id"])
-            product_id = setup.get("product_id")
-
-            # ✅ ADD THIS: Ensure product_id exists before fetching position
-            if not product_id:
-                product = await get_product_by_symbol(client, symbol)
-                if product:
-                    product_id = product["id"]
-                    await update_algo_setup(setup_id, {"product_id": product_id})
-                    logger.info(f"✅ Product ID {product_id} saved for {symbol}")
-                else:
-                    logger.error(f"❌ Product not found for {symbol}, skipping reconciliation")
-                    continue  # Skip this setup if product doesn't exist
-                
-            # 1. Check for open position
-            position = await get_position_by_symbol(client, symbol)
-            position_size = position.get("size", 0) if position else 0
-
-            if position_size != 0:
-                # Get direction from position size
-                direction = "long" if position_size > 0 else "short"
-                
-                await update_algo_setup(setup_id, {
-                    "current_position": "long" if position_size > 0 else "short",
-                    "last_entry_price": position.get("entry_price"),
-                    "position_lock_acquired": True,
-                    "last_signal_time": datetime.utcnow(),
-                })
-
-                # Create position record ONLY if one doesn't already exist
-                # (prevents duplicates on repeated bot restarts)
-                db = await get_db()
-                existing_position = await db.positions.find_one({
-                    "algo_setup_id": setup_id, "status": "open"
-                })
-                if not existing_position:
-                    logger.info(f"🔍 About to create position record for {symbol} (size={position_size})")
-                    await create_position_record({
-                        "algo_setup_id": setup_id,
-                        "user_id": setup.get("user_id"),
-                        "product_id": product_id,
-                        "asset": symbol,
-                        "direction": direction,
-                        "side": "buy" if direction == "long" else "sell",
-                        "size": abs(position_size),
-                        "entry_price": position.get("entry_price"),
-                        "opened_at": datetime.utcnow(),
-                        "status": "open",
-                        "source": "reconciliation"
-                    })
-                    logger.info(f"✅ Position record created successfully")
-                else:
-                    logger.info(f"ℹ️ Position record already exists for {symbol} — skipping creation")
-                
-                # Create activity record ONLY if one doesn't already exist
-                existing_activity = await get_open_activity_by_setup(setup_id)
-                if not existing_activity:
-                    activity_data = {
-                        "user_id": setup.get("user_id"),
-                        "algo_setup_id": setup_id,
-                        "algo_setup_name": setup.get("setup_name"),
-                        "entry_time": datetime.utcnow(),
-                        "entry_price": position.get("entry_price"),
-                        "direction": direction,
-                        "lot_size": abs(position_size),
-                        "asset": symbol,
-                        "perusu_entry_signal": "uptrend" if direction == "long" else "downtrend",
-                        "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                        "is_closed": False
-                    }
-                    await create_algo_activity(activity_data)
-                    logger.info(f"✅ Algo activity created for reconciled position: {symbol}")
-                else:
-                    logger.info(f"ℹ️ Algo activity already exists for {symbol} — skipping creation")
-            
-                # Acquire position lock (db already fetched above)
-                await acquire_position_lock(db, symbol, setup_id, setup.get("setup_name"))
-
-            # 1.5. Clean stale pending_entry_order_id if order no longer exists
-            pending_entry_id = setup.get("pending_entry_order_id")
-            if pending_entry_id:
-                open_orders_check = await get_open_orders(client, product_id)
-                order_exists = any(o.get("id") == pending_entry_id for o in (open_orders_check or []))
-    
-                if not order_exists:
-                    logger.warning(
-                        f"⚠️ Setup {setup.get('setup_name')} has pending_entry_order_id={pending_entry_id} "
-                        "but order not found on exchange. Clearing stale state."
-                    )
-                    # Also cancel any associated SL order that was placed with the entry
-                    stale_sl_id = setup.get("stop_loss_order_id")
-                    if stale_sl_id:
-                        logger.info(f"🗑️ Cancelling orphaned SL order {stale_sl_id} for stale entry setup {setup.get('setup_name')}")
-                        await cancel_order(client, product_id, stale_sl_id)
-
-                    await update_algo_setup(setup_id, {
-                        "pending_entry_order_id": None,
-                        "pending_entry_direction_signal": None,
-                        "pending_entry_side": None,
-                        "pending_sl_price": None,
-                        "entry_trigger_price": None,
-                        "stop_loss_order_id": None,
-                        "position_lock_acquired": False,
-                    })
-
-            # 2. Check for open orders (entry, stop-loss, etc.)
-            open_orders = await get_open_orders(client, product_id)
-            for order in (open_orders or []):
-                state = order.get("state")
-                if state in ("open", "untriggered"):
-                    # Re-save as pending order if needed
-                    order_type = order.get("order_type")
-                    if order_type == "stop_market_order":
-                        # FIX: Convert exchange side (buy/sell) to position side (long/short)
-                        exchange_side = order.get("side")
-                        position_side = "long" if exchange_side == "buy" else "short"
-                        await update_algo_setup(setup_id, {
-                            "pending_entry_order_id": order.get("id"),
-                            "entry_trigger_price": order.get("stop_price"),
-                            "pending_entry_direction_signal": 1 if exchange_side == "buy" else -1,
-                            "pending_entry_side": position_side,
-                            "last_signal_time": datetime.utcnow(),
-                        })
-                    elif order.get("reduce_only") and order.get("stop_order_type") == "stop_loss_order":
-                        await update_algo_setup(setup_id, {
-                            "stop_loss_order_id": order.get("id"),
-                        })
-                        

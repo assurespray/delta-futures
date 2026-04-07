@@ -530,7 +530,7 @@ def _generate_csv(
             
             row = [
                 act.get("trade_date", ""),
-                act.get("algo_setup_name", ""),
+                act.get("setup_name", ""),
                 act.get("asset", ""),
                 act.get("direction", ""),
                 act.get("lot_size", ""),
@@ -540,7 +540,7 @@ def _generate_csv(
                 act.get("exit_price", ""),
                 round(act.get("pnl", 0) or 0, 4),
                 round(act.get("pnl_inr", 0) or 0, 2),
-                "Closed" if act.get("is_closed") else "Open",
+                "Closed" if act.get("status") == "closed" else "Open",
                 act.get("perusu_entry_signal", ""),
                 act.get("sirusu_exit_signal", ""),
             ]

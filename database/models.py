@@ -62,34 +62,6 @@ class AlgoSetup(BaseModel):
     is_paper_trade: bool = False  # True = virtual trade, False = real money
     paper_leverage: Optional[int] = None  # Leverage for paper trades (e.g., 10, 25, 50)
     
-    # ========== POSITION STATE ==========
-    current_position: Optional[str] = None  # "long", "short", None
-    last_entry_price: Optional[float] = None
-    last_signal_time: Optional[datetime] = None
-    
-    # ========== ENTRY ORDER TRACKING ==========
-    # ✅ Track last Perusu signal state
-    last_perusu_signal: Optional[int] = None  # 1=uptrend, -1=downtrend
-    
-    # ✅ Pending breakout entry order
-    pending_entry_order_id: Optional[int] = None  # Stop-market entry order ID
-    entry_trigger_price: Optional[float] = None  # Breakout trigger price
-    pending_entry_direction_signal: Optional[int] = None  # 1 for long, -1 for short
-    pending_entry_side: Optional[str] = None  # "long" or "short" - explicit side string
-    last_entry_order_id: Optional[int] = None  # Last filled entry order ID
-    
-    # ========== STOP-LOSS TRACKING ==========
-    # ✅ FIXED: Track stop-loss order ID for proper cancellation and state sync
-    stop_loss_order_id: Optional[int] = None  # Stop-loss order ID (for cancellation)
-    pending_sl_price: Optional[float] = None  # Sirusu SL value stored at entry signal time
-    
-    # ========== ASSET LOCK TRACKING (✅ NEW) ==========
-    # ✅ Track if position lock is held on the asset
-    position_lock_acquired: bool = False  # Whether this setup holds the asset lock
-    
-    # ========== PERIODIC SYNC ==========
-    # ✅ Last position sync (for periodic state validation)
-    last_position_sync: Optional[datetime] = None  # Last exchange position verification
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -100,36 +72,65 @@ class AlgoSetup(BaseModel):
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
 
 
-class AlgoActivity(BaseModel):
-    """Model for trade activity logs."""
+
+class TradeState(BaseModel):
+    """Unified model for all active and historical trades."""
     
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
-    algo_setup_id: str
-    algo_setup_name: str
-    entry_time: datetime
-    entry_price: float
-    exit_time: Optional[datetime] = None
-    exit_price: Optional[float] = None
+    
+    # Configuration linkage
+    setup_id: str  # ID of the AlgoSetup or ScreenerSetup
+    setup_type: str  # "algo" or "screener"
+    setup_name: str
+    
+    # Core Trade Info
+    asset: str
+    product_id: Optional[int] = None
     direction: str  # "long" or "short"
     lot_size: int
+    timeframe: str
+    
+    # Lifecycle Status
+    status: str  # "pending_entry", "open", "closed", "cancelled"
+    
+    # Paper Trading Flags
+    is_paper_trade: bool = False
+    paper_leverage: Optional[int] = None
+    paper_margin_used: Optional[float] = None
+    paper_fees: Optional[float] = None
+    paper_liquidation_price: Optional[float] = None
+    
+    # Entry Info
+    entry_trigger_price: Optional[float] = None
+    pending_entry_order_id: Optional[int] = None
+    last_entry_order_id: Optional[int] = None
+    entry_price: Optional[float] = None
+    entry_time: Optional[datetime] = None
+    
+    # Stop Loss / Trailing Info
+    stop_loss_order_id: Optional[int] = None
+    pending_sl_price: Optional[float] = None
+    
+    # Signals & Indicators
+    perusu_entry_signal: Optional[str] = None  # "uptrend" or "downtrend"
+    sirusu_exit_signal: Optional[str] = None  # exit reason
+    last_perusu_signal: Optional[int] = None
+    last_signal_time: Optional[datetime] = None
+    
+    # Exit & PnL
+    exit_price: Optional[float] = None
+    exit_time: Optional[datetime] = None
     pnl: Optional[float] = None  # In USD
     pnl_inr: Optional[float] = None  # In INR
-    perusu_entry_signal: str  # "uptrend" or "downtrend"
-    sirusu_exit_signal: Optional[str] = None  # "uptrend" or "downtrend" or stop-loss reason
-    asset: str
-    trade_date: str  # YYYY-MM-DD format
-    is_closed: bool = False
     
-    # ✅ NEW: Track entry trigger price
-    entry_trigger_price: Optional[float] = None
+    trade_date: Optional[str] = None  # YYYY-MM-DD format
     
-    # ========== PAPER TRADING ==========
-    is_paper_trade: bool = False  # True = virtual trade, False = real money
-    paper_leverage: Optional[int] = None  # Leverage used for this paper trade
-    paper_margin_used: Optional[float] = None  # Margin locked for this trade
-    paper_fees: Optional[float] = None  # Simulated trading fees
-    paper_liquidation_price: Optional[float] = None  # Liquidation price for paper trade
+    # Periodic Sync
+    last_position_sync: Optional[datetime] = None
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:
         populate_by_name = True
@@ -260,35 +261,3 @@ class PaperBalance(BaseModel):
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
 
 
-# ========== SUMMARY OF FIELDS ==========
-"""
-AlgoSetup Fields Organization:
-
-POSITION STATE:
-  - current_position: "long", "short", or None
-  - last_entry_price: Entry price
-  - last_signal_time: When signal triggered
-
-ENTRY TRACKING:
-  - last_perusu_signal: 1 (uptrend) or -1 (downtrend)
-  - pending_entry_order_id: Breakout stop-market order
-  - entry_trigger_price: Breakout price (candle high/low + pip)
-  - pending_entry_direction_signal: 1 or -1
-
-STOP-LOSS TRACKING:
-  - stop_loss_order_id: For cancellation on exit
-
-ASSET LOCK (✅ NEW):
-  - position_lock_acquired: Boolean flag
-  - Prevents multi-timeframe conflicts
-
-SYNC TRACKING:
-  - last_position_sync: For periodic validation
-
-Exit Detection Logic:
-  1. Check position exists on exchange
-  2. Check if SL order was filled (via position check)
-  3. If position size = 0 → SL triggered → sync state
-  4. If position exists → execute market exit
-  5. Release lock after exit
-"""

@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from bson import ObjectId
 from database.mongodb import mongodb
-from database.models import APICredential, AlgoSetup, AlgoActivity, IndicatorCache, PositionLock, PaperBalance
+from database.models import APICredential, AlgoSetup, TradeState, IndicatorCache, PositionLock, PaperBalance
 from cryptography.fernet import Fernet
 from config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -100,7 +100,7 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
         setup_id = str(setup["_id"])
         await db.orders.delete_many({"algo_setup_id": setup_id})
         await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+        await db.trade_states.delete_many({"algo_setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
 
     # Delete setups linked to this credential
@@ -196,7 +196,7 @@ async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     # Clean up all related DB records first
     await db.orders.delete_many({"algo_setup_id": setup_id})
     await db.positions.delete_many({"algo_setup_id": setup_id})
-    await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+    await db.trade_states.delete_many({"algo_setup_id": setup_id})
     await db.position_locks.delete_many({"setup_id": setup_id})  # If you lock by setup_id
     # Delete the setup itself
     result = await db.algo_setups.delete_one({
@@ -224,93 +224,115 @@ async def get_all_active_algo_setups() -> List[Dict[str, Any]]:
         return []
 
 
-# ==================== Algo Activity CRUD ====================
 
-async def create_algo_activity(activity_data: Dict[str, Any]) -> str:
-    """Create new algo activity record."""
+# ==================== Trade State CRUD (Replaces TradeState) ====================
+
+async def create_trade_state(trade_data: Dict[str, Any]) -> str:
+    """Create new trade state record."""
     try:
-        activity = AlgoActivity(**activity_data)
-        result = await mongodb.get_db().algo_activity.insert_one(activity.dict(by_alias=True, exclude={"id"}))
-        logger.info(f"✅ Algo activity created for setup: {activity.algo_setup_name}")
+        trade = TradeState(**trade_data)
+        result = await mongodb.get_db().trade_states.insert_one(trade.dict(by_alias=True, exclude={"id"}))
+        logger.info(f"✅ Trade state created for setup: {trade.setup_name} ({trade.status})")
         return str(result.inserted_id)
-        
     except Exception as e:
-        logger.error(f"❌ Failed to create algo activity: {e}")
+        logger.error(f"❌ Failed to create trade state: {e}")
         raise
 
-
-async def update_algo_activity(activity_id: str, update_data: Dict[str, Any]) -> bool:
-    """Update algo activity (usually for exit data)."""
+async def update_trade_state(trade_id: str, update_data: Dict[str, Any]) -> bool:
+    """Update trade state."""
     try:
-        result = await mongodb.get_db().algo_activity.update_one(
-            {"_id": ObjectId(activity_id)},
+        update_data["updated_at"] = datetime.utcnow()
+        result = await mongodb.get_db().trade_states.update_one(
+            {"_id": ObjectId(trade_id)},
             {"$set": update_data}
         )
-        
-        if result.modified_count > 0:
-            logger.info(f"✅ Algo activity updated: {activity_id}")
-            return True
-        return False
-        
+        return result.modified_count > 0
     except Exception as e:
-        logger.error(f"❌ Failed to update algo activity: {e}")
+        logger.error(f"❌ Failed to update trade state: {e}")
         return False
 
-
-async def get_algo_activity_by_user(user_id: str, days: int = 3) -> List[Dict[str, Any]]:
-    """Get algo activity for a user for the last N days."""
+async def get_trade_state_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
+    """Get trade state by ID."""
     try:
-        cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
-        cursor = mongodb.get_db().algo_activity.find({
-            "user_id": user_id,
-            "trade_date": {"$gte": cutoff_date}
-        }).sort("entry_time", -1)
-        
-        activities = await cursor.to_list(length=1000)
-        
-        for activity in activities:
-            activity["_id"] = str(activity["_id"])
-        
-        return activities
-        
+        trade = await mongodb.get_db().trade_states.find_one({"_id": ObjectId(trade_id)})
+        if trade:
+            trade["_id"] = str(trade["_id"])
+        return trade
     except Exception as e:
-        logger.error(f"❌ Failed to get algo activity: {e}")
-        return []
-
-
-async def get_open_activity_by_setup(algo_setup_id: str) -> Optional[Dict[str, Any]]:
-    """Get open (unclosed) activity for an algo setup."""
-    try:
-        activity = await mongodb.get_db().algo_activity.find_one({
-            "algo_setup_id": algo_setup_id,
-            "is_closed": False
-        })
-        
-        if activity:
-            activity["_id"] = str(activity["_id"])
-        
-        return activity
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to get open activity: {e}")
+        logger.error(f"❌ Failed to get trade state by ID: {e}")
         return None
 
-
-async def cleanup_old_activities():
-    """Delete activities older than retention period."""
+async def get_open_trade_states() -> List[Dict[str, Any]]:
+    """Get all currently open trade states (real and paper)."""
     try:
-        cutoff_date = (datetime.utcnow() - timedelta(days=3)).strftime("%Y-%m-%d")
-        
-        result = await mongodb.get_db().algo_activity.delete_many({
-            "trade_date": {"$lt": cutoff_date}
-        })
-        
-        if result.deleted_count > 0:
-            logger.info(f"🗑️ Cleaned up {result.deleted_count} old activity records")
-        
+        cursor = mongodb.get_db().trade_states.find({"status": "open"})
+        trades = await cursor.to_list(length=1000)
+        for t in trades:
+            t["_id"] = str(t["_id"])
+        return trades
     except Exception as e:
-        logger.error(f"❌ Failed to cleanup old activities: {e}")
+        logger.error(f"❌ Failed to get open trade states: {e}")
+        return []
+
+async def get_pending_entry_trade_states() -> List[Dict[str, Any]]:
+    """Get all pending entry trade states (real and paper)."""
+    try:
+        cursor = mongodb.get_db().trade_states.find({"status": "pending_entry"})
+        trades = await cursor.to_list(length=1000)
+        for t in trades:
+            t["_id"] = str(t["_id"])
+        return trades
+    except Exception as e:
+        logger.error(f"❌ Failed to get pending entry trade states: {e}")
+        return []
+
+async def get_open_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
+    """Get open trade for a specific setup."""
+    try:
+        trade = await mongodb.get_db().trade_states.find_one({
+            "setup_id": setup_id,
+            "status": "open"
+        })
+        if trade:
+            trade["_id"] = str(trade["_id"])
+        return trade
+    except Exception as e:
+        logger.error(f"❌ Failed to get open trade by setup: {e}")
+        return None
+
+async def get_pending_trade_by_setup(setup_id: str) -> Optional[Dict[str, Any]]:
+    """Get pending trade for a specific setup."""
+    try:
+        trade = await mongodb.get_db().trade_states.find_one({
+            "setup_id": setup_id,
+            "status": "pending_entry"
+        })
+        if trade:
+            trade["_id"] = str(trade["_id"])
+        return trade
+    except Exception as e:
+        logger.error(f"❌ Failed to get pending trade by setup: {e}")
+        return None
+
+async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: bool = False, days: int = None) -> List[Dict[str, Any]]:
+    """Get historical/active trades for a user."""
+    try:
+        from datetime import datetime, timedelta
+        query = {"user_id": user_id, "is_paper_trade": is_paper}
+        if closed_only:
+            query["status"] = "closed"
+        if days:
+            cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            query["trade_date"] = {"$gte": cutoff}
+        
+        cursor = mongodb.get_db().trade_states.find(query).sort("created_at", -1)
+        trades = await cursor.to_list(length=5000)
+        for t in trades:
+            t["_id"] = str(t["_id"])
+        return trades
+    except Exception as e:
+        logger.error(f"❌ Failed to get trades by user: {e}")
+        return []
 
 
 # ==================== Indicator Cache CRUD ====================
@@ -510,7 +532,7 @@ async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
         # Clean up all related DB records first
         await db.orders.delete_many({"algo_setup_id": setup_id})
         await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.algo_activity.delete_many({"algo_setup_id": setup_id})
+        await db.trade_states.delete_many({"algo_setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
         
         result = await db.screener_setups.delete_one({
@@ -886,9 +908,9 @@ async def get_paper_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["is_closed"] = True
+            query["status"] = "closed"
         
-        cursor = mongodb.get_db().algo_activity.find(query).sort("entry_time", -1)
+        cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
         
         for activity in activities:
@@ -921,9 +943,9 @@ async def get_real_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["is_closed"] = True
+            query["status"] = "closed"
         
-        cursor = mongodb.get_db().algo_activity.find(query).sort("entry_time", -1)
+        cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
         
         for activity in activities:
@@ -939,11 +961,11 @@ async def get_real_trade_activities(
 async def get_open_paper_positions(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get all open paper trade positions (for monitoring loop)."""
     try:
-        query = {"is_paper_trade": True, "is_closed": False}
+        query = {"is_paper_trade": True, "status": "open"}
         if user_id:
             query["user_id"] = user_id
         
-        cursor = mongodb.get_db().algo_activity.find(query)
+        cursor = mongodb.get_db().trade_states.find(query)
         positions = await cursor.to_list(length=1000)
         
         for pos in positions:

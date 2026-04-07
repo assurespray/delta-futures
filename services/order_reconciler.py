@@ -171,146 +171,50 @@ async def _handle_sl_fill(order, setup, client, logger_bot=None):
 
 
 async def reconcile_pending_orders(logger_bot=None):
-    """
-    Poll all DB orders with status 'pending', check Delta Exchange,
-    and update to 'filled', 'closed', 'cancelled', or 'not_found' in DB.
-    Also checks pending entry orders from algo_setups.
-    """
-    db = mongodb.get_db()
-    pending_orders = await db.orders.find({
-        "status": {"$in": ["pending", "open", "untriggered", "submitted"]}
-    }).to_list(200)
+    from database.crud import get_open_trade_states, get_pending_entry_trade_states, update_trade_state, get_algo_setup_by_id, get_screener_setup_by_id, get_api_credential_by_id
+    from api.delta_client import DeltaExchangeClient
+    from api.orders import get_order_status_by_id
     
-    logger.info(f"Reconciling {len(pending_orders)} pending orders")
-    updated_count = 0
-    not_found_count = 0
-
-    # Check pending orders in orders collection
-    for order in pending_orders:
-        client = None
-        order_id = order.get("order_id")
-        algo_setup_id = order.get("algo_setup_id")
+    open_trades = await get_open_trade_states()
+    pending_trades = await get_pending_entry_trade_states()
+    
+    for trade in open_trades + pending_trades:
+        if trade.get("is_paper_trade"):
+            continue
+            
+        trade_id = str(trade["_id"])
+        setup_id = trade["setup_id"]
+        setup = await get_algo_setup_by_id(setup_id) or await get_screener_setup_by_id(setup_id)
+        if not setup: continue
+        
+        api_id = setup.get("api_id")
+        cred = await get_api_credential_by_id(api_id, decrypt=True)
+        if not cred: continue
+        
+        client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+        symbol = trade["asset"]
+        product_id = trade.get("product_id")
         
         try:
-            # Get the algo setup first
-            setup = await get_algo_setup_by_id(algo_setup_id)
-            if not setup:
-                logger.warning(f"Setup {algo_setup_id} not found, skipping order {order_id}")
-                continue
+            if trade["status"] == "open":
+                sl_order_id = trade.get("stop_loss_order_id")
+                if sl_order_id and product_id:
+                    status = await get_order_status_by_id(client, sl_order_id, product_id)
+                    if status == "filled":
+                        from strategy.position_manager import PositionManager
+                        pm = PositionManager()
+                        # The SL was hit!
+                        await pm.execute_exit(client, trade, "Stop Loss Triggered")
             
-            # ========== SKIP PAPER TRADES ==========
-            if is_paper_trade(setup):
-                logger.debug(f"[PAPER] Skipping reconciliation for paper order {order_id}")
-                continue
-            # ========== END SKIP ==========
-            
-            # Get credentials using api_id from setup
-            api_id = setup.get("api_id")
-            if not api_id:
-                logger.warning(f"No api_id for setup {algo_setup_id}, skipping order {order_id}")
-                continue
-            
-            cred = await get_api_credential_by_id(api_id, decrypt=True)
-            if not cred:
-                logger.warning(f"No credentials for api_id {api_id}, skipping order {order_id}")
-                continue
-            
-            client = DeltaExchangeClient(
-                api_key=cred['api_key'],
-                api_secret=cred['api_secret']
-            )
-
-            # Get product_id
-            product_id = order.get("product_id") or setup.get("product_id")
-            if not product_id:
-                logger.warning(f"No product_id for order {order_id}, skipping")
-                continue
-
-            # Check current order status on the exchange
-            status = await get_order_status_by_id(client, order_id, product_id)
-            
-            if status == "not_found":
-                await db.orders.update_one(
-                    {"order_id": order_id},
-                    {"$set": {"status": "not_found", "updated_at": datetime.utcnow()}}
-                )
-                not_found_count += 1
-                logger.info(f"✅ Order {order_id} not found; marked not_found")
-            else:
-                # CRITICAL: If this was a stop-loss order that got filled,
-                # do full exit handling BEFORE updating status in DB.
-                # This ensures that if _handle_sl_fill fails, the order stays
-                # "pending" and gets retried on the next reconciliation cycle.
-                # Delta Exchange returns "closed"/"triggered" for stop-market orders, not "filled"
-                if status in ("filled", "closed", "triggered") and order.get("reduce_only"):
-                    logger.info(
-                        f"🛡️ Reduce-only order {order_id} {status.upper()} — "
-                        f"triggering SL exit handling for setup {algo_setup_id}"
-                    )
-                    await _handle_sl_fill(order, setup, client, logger_bot)
-
-                # Only update status AFTER successful SL handling (or if not an SL order)
-                await db.orders.update_one(
-                    {"order_id": order_id},
-                    {"$set": {"status": status, "updated_at": datetime.utcnow()}}
-                )
-    
-                updated_count += 1
-                logger.info(f"✅ Order {order_id} status updated to '{status}'")
-
-        except Exception as e:
-            logger.error(f"❌ Error checking order {order_id}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            if logger_bot:
-                await logger_bot.send_error(f"Order reconciliation error: {order_id} | {str(e)}")
+            elif trade["status"] == "pending_entry":
+                order_id = trade.get("pending_entry_order_id")
+                if order_id and product_id:
+                    status = await get_order_status_by_id(client, order_id, product_id)
+                    if status in ("cancelled", "rejected", "closed"):
+                        await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
+                    elif status == "filled":
+                        from strategy.position_manager import PositionManager
+                        pm = PositionManager()
+                        await pm.check_entry_order_filled(client, trade, None)
         finally:
-            if client:
-                await client.close()
-    
-    # Check pending entry orders from algo_setups
-    position_manager = PositionManager()
-    all_setups = await get_all_active_algo_setups()
-    
-    for setup in all_setups:
-        # ========== SKIP PAPER TRADES ==========
-        if is_paper_trade(setup):
-            continue
-        # ========== END SKIP ==========
-        
-        pending_entry_id = setup.get("pending_entry_order_id")
-        if not pending_entry_id:
-            continue
-        
-        client = None
-        try:
-            api_id = setup.get("api_id")
-            if not api_id:
-                continue
-            
-            cred = await get_api_credential_by_id(api_id, decrypt=True)
-            if not cred:
-                continue
-            
-            client = DeltaExchangeClient(
-                api_key=cred['api_key'],
-                api_secret=cred['api_secret']
-            )
-            
-            filled = await position_manager.check_entry_order_filled(
-                client, setup, None  # sirusu_value=None; fill monitor will calculate fresh
-            )
-            
-            if filled:
-                logger.info(f"✅ Pending entry filled for {setup.get('setup_name')}")
-            
-        except Exception as e:
-            logger.error(f"❌ Error checking pending entry for {setup.get('setup_name')}: {e}")
-        finally:
-            if client:
-                await client.close()
-    
-    logger.info(
-        f"📊 Reconciliation complete: {updated_count} updated, "
-        f"{not_found_count} not found, {len(pending_orders)} total"
-        )
+            await client.close()

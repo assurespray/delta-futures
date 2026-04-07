@@ -111,8 +111,8 @@ async def cleanup_closed_activities(max_age_days: int = 7):
         db = mongodb.get_db()
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
         
-        result = await db.algo_activity.delete_many({
-            "is_closed": True,
+        result = await db.trade_states.delete_many({
+            "status": {"$in": ["closed", "cancelled"]},
             "exit_time": {"$lt": cutoff}
         })
         
@@ -202,7 +202,7 @@ async def get_db_storage_stats():
     try:
         db = mongodb.get_db()
         
-        collections = ["orders", "positions", "algo_activity", "indicator_cache",
+        collections = ["orders", "positions", "trade_states", "indicator_cache",
                        "algo_setups", "position_locks", "api_credentials"]
         
         stats = {}
