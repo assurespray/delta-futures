@@ -773,7 +773,7 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
     
     for setup in algo_setups:
         status = "Active" if setup.get("is_active") else "Inactive"
-        position = setup.get("current_position", "None")
+        position = setup.get("current_position")
         pos_text = f" | {position.upper()}" if position else ""
         
         message += (
@@ -955,10 +955,10 @@ async def paper_open_positions_callback(update: Update, context: ContextTypes.DE
     message = "**Open Paper Positions**\n\n"
     
     for pos in positions:
-        direction = pos.get("direction", "").upper()
+        direction = (pos.get("direction") or "").upper()
         asset = pos.get("asset", "")
-        entry = pos.get("entry_price", 0)
-        lot = pos.get("lot_size", 0)
+        entry = pos.get("entry_price") or 0
+        lot = pos.get("lot_size") or 0
         entry_time = pos.get("entry_time")
         liq_price = pos.get("paper_liquidation_price")
         
@@ -969,6 +969,9 @@ async def paper_open_positions_callback(update: Update, context: ContextTypes.DE
         if liq_price:
             message += f"  Liquidation: ${liq_price:.5f}\n"
         if entry_time:
+            if isinstance(entry_time, str):
+                from datetime import datetime as dt
+                entry_time = dt.fromisoformat(entry_time)
             message += f"  Since: {entry_time.strftime('%m/%d %H:%M')}\n"
         message += "\n"
     

@@ -40,6 +40,12 @@ class OrderMonitor:
 
         Returns: "filled", "cancelled", "reversed", "pending", or None
         """
+        # ========== PAPER TRADE GUARD ==========
+        from strategy.paper_trader import is_paper_trade
+        if is_paper_trade(algo_setup):
+            return None  # Paper entries monitored by paper_trader.check_pending_entries()
+        # ========== END GUARD ==========
+        
         pending_order_id = algo_setup.get('pending_entry_order_id')
         if not pending_order_id:
             return None

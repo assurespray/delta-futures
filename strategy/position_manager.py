@@ -247,6 +247,11 @@ class PositionManager:
         Only creates position + SL if the order was actually FILLED.
         """
         try:
+            # ========== PAPER TRADE GUARD ==========
+            if is_paper_trade(algo_setup):
+                return False  # Paper entries monitored by paper_trader.check_pending_entries()
+            # ========== END GUARD ==========
+            
             setup_id = str(algo_setup["_id"])
             setup_name = algo_setup["setup_name"]
             symbol = algo_setup["asset"]

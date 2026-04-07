@@ -19,6 +19,7 @@ from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.position_manager import PositionManager
 from utils.timeframe import get_next_boundary_time
 from services.logger_bot import LoggerBot
+from strategy.paper_trader import is_paper_trade
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
 
     for setup in setups:
         # ========== SKIP PAPER TRADES ==========
-        if setup.get("is_paper_trade", False):
+        if is_paper_trade(setup):
             logger.info(f"[PAPER] Skipping reconciliation for paper setup: {setup.get('setup_name')}")
             continue
         # ========== END SKIP ==========
@@ -157,8 +158,12 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 logger.warning(
                     f"[SYNC] symbol={symbol} - NO OPEN POSITION (wanted product_id={product_id}, got {position.get('product_id') if position else None})"
                 )
-                # optionally update algo setup DB here as well
-                await update_algo_setup(setup_id, setup)
+                # Update only the specific fields (NOT the entire setup dict which contains _id)
+                await update_algo_setup(setup_id, {
+                    "current_position": None,
+                    "last_entry_price": None,
+                    "product_id": product_id,
+                })
                 await client.close()
                 continue
 
@@ -269,11 +274,12 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 await logger_bot.send_info(f"Sirusu flip detected for {symbol} ({position_side}), exiting at market!")
 
                 logger.info(f"Passing to manager: symbol={symbol}, setup product_id={setup['product_id']}, position={setup.get('position_obj')}")
-                exit_success = await position_manager.execute_exit(
+                exit_result = await position_manager.execute_exit(
                     client=client,
                     algo_setup=setup,
                     sirusu_signal_text=sirusu_text
                 )
+                exit_success = exit_result[0] if isinstance(exit_result, tuple) else exit_result
                 if exit_success:
                     await delete_position_lock(symbol)
                     logger.info(f"Deleted position lock for {symbol}")

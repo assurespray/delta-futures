@@ -146,6 +146,7 @@ class PaperTrader:
                     "leverage": leverage,
                     "user_id": user_id,
                     "setup_name": setup_name,
+                    "margin_locked": margin_required,  # Store actual locked amount
                     "created_at": datetime.utcnow()
                 }
                 
@@ -320,7 +321,7 @@ class PaperTrader:
                 new_total_fees = paper_bal.get("total_fees", 0) + exit_fee
                 new_total_trades = paper_bal.get("total_trades", 0) + 1
                 new_wins = paper_bal.get("total_wins", 0) + (1 if net_pnl > 0 else 0)
-                new_losses = paper_bal.get("total_losses", 0) + (1 if net_pnl <= 0 else 0)
+                new_losses = paper_bal.get("total_losses", 0) + (1 if net_pnl < 0 else 0)
                 
                 await update_paper_balance(user_id, {
                     "balance": new_balance,
@@ -416,11 +417,11 @@ class PaperTrader:
                     margin_required = (live_price * entry_data["lot_size"]) / leverage
                     entry_fee = live_price * entry_data["lot_size"] * PAPER_TRADE_TAKER_FEE
                     
-                    # Release the pre-locked margin (will be re-locked in fill)
+                    # Release the pre-locked margin (use stored amount, not recalculated)
                     user_id = entry_data["user_id"]
                     paper_bal = await get_paper_balance(user_id)
                     if paper_bal:
-                        old_margin = (trigger_price * entry_data["lot_size"]) / leverage
+                        old_margin = entry_data.get("margin_locked", (trigger_price * entry_data["lot_size"]) / leverage)
                         new_locked = max(0, paper_bal.get("locked_margin", 0) - old_margin)
                         await update_paper_balance(user_id, {"locked_margin": new_locked})
                     
@@ -437,6 +438,13 @@ class PaperTrader:
                     
                     if success:
                         filled_setups.append(setup_id)
+                    else:
+                        # Fill failed — re-lock the margin we just released
+                        paper_bal = await get_paper_balance(user_id)
+                        if paper_bal:
+                            re_locked = paper_bal.get("locked_margin", 0) + old_margin
+                            await update_paper_balance(user_id, {"locked_margin": re_locked})
+                        logger.warning(f"[PAPER] Fill failed for {symbol}, margin re-locked")
                         
             except Exception as e:
                 logger.error(f"[PAPER] Error checking pending entry {setup_id}: {e}")
@@ -505,19 +513,22 @@ class PaperTrader:
         if setup_id in self._active_stop_losses:
             old_sl = self._active_stop_losses[setup_id]["sl_price"]
             self._active_stop_losses[setup_id]["sl_price"] = new_sl_price
+            # Persist to DB so reboot recovery uses the updated SL
+            await update_algo_setup(setup_id, {"pending_sl_price": new_sl_price})
             logger.info(
                 f"[PAPER] SL updated for {setup_id}: "
                 f"${old_sl:.5f} -> ${new_sl_price:.5f}"
             )
     
     async def restore_open_positions(self, client) -> int:
-        """Restore open paper positions after bot restart (reboot resiliency)."""
+        """Restore open paper positions and pending entries after bot restart."""
         try:
-            from database.crud import get_open_paper_positions, get_algo_setup_by_id
+            from database.crud import get_open_paper_positions, get_algo_setup_by_id, get_all_active_algo_setups
             
             open_positions = await get_open_paper_positions()
             restored = 0
             
+            # ---- Restore open positions into _active_stop_losses ----
             for pos in open_positions:
                 setup_id = pos.get("algo_setup_id")
                 if not setup_id or setup_id in self._active_stop_losses:
@@ -529,13 +540,20 @@ class PaperTrader:
                 
                 symbol = pos.get("asset", "")
                 side = pos.get("direction", "")
-                entry_price = pos.get("entry_price", 0)
-                lot_size = pos.get("lot_size", 1)
+                entry_price = pos.get("entry_price") or 0
+                lot_size = pos.get("lot_size") or 1
                 leverage = pos.get("paper_leverage") or algo_setup.get("paper_leverage") or PAPER_TRADE_DEFAULT_LEVERAGE
-                liquidation_price = pos.get("paper_liquidation_price", 0)
-                sl_price = algo_setup.get("pending_sl_price", 0)
-                margin_used = pos.get("paper_margin_used", (entry_price * lot_size) / leverage)
+                liquidation_price = pos.get("paper_liquidation_price") or 0
+                sl_price = algo_setup.get("pending_sl_price") or 0
+                margin_used = pos.get("paper_margin_used") or ((entry_price * lot_size) / leverage if leverage else 0)
                 user_id = pos.get("user_id", "")
+                
+                # Skip if SL price is missing/zero — would cause false triggers
+                if not sl_price:
+                    logger.warning(
+                        f"[PAPER] Restored position {symbol} has no SL price — "
+                        f"will rely on liquidation price only until next Sirusu update"
+                    )
                 
                 if not liquidation_price:
                     if side == "long":
@@ -561,10 +579,54 @@ class PaperTrader:
                     f"@ ${entry_price:.5f} | SL: ${sl_price:.5f}"
                 )
             
+            # ---- Restore pending entries into _pending_entries ----
+            all_setups = await get_all_active_algo_setups()
+            pending_restored = 0
+            for setup in all_setups:
+                if not is_paper_trade(setup):
+                    continue
+                setup_id = str(setup["_id"])
+                pending_order_id = setup.get("pending_entry_order_id")
+                current_position = setup.get("current_position")
+                # Only restore if has pending order and no open position
+                if not pending_order_id or current_position:
+                    continue
+                if setup_id in self._pending_entries:
+                    continue
+                
+                trigger_price = setup.get("entry_trigger_price", 0)
+                entry_side = setup.get("pending_entry_side", "long")
+                sirusu_value = setup.get("pending_sl_price", 0)
+                leverage = setup.get("paper_leverage") or PAPER_TRADE_DEFAULT_LEVERAGE
+                lot_size = setup.get("lot_size", 1)
+                user_id = setup.get("user_id", "")
+                margin_locked = (trigger_price * lot_size) / leverage if leverage else 0
+                
+                self._pending_entries[setup_id] = {
+                    "order_id": pending_order_id,
+                    "symbol": setup.get("asset", ""),
+                    "side": entry_side,
+                    "trigger_price": trigger_price,
+                    "lot_size": lot_size,
+                    "sirusu_value": sirusu_value,
+                    "leverage": leverage,
+                    "user_id": user_id,
+                    "setup_name": setup.get("setup_name", ""),
+                    "margin_locked": margin_locked,
+                    "created_at": datetime.utcnow()
+                }
+                pending_restored += 1
+                logger.info(
+                    f"[PAPER] Restored pending entry: {entry_side.upper()} {setup.get('asset', '')} "
+                    f"@ ${trigger_price:.5f}"
+                )
+            
             if restored > 0:
                 logger.info(f"[PAPER] Restored {restored} open paper positions")
+            if pending_restored > 0:
+                logger.info(f"[PAPER] Restored {pending_restored} pending paper entries")
             
-            return restored
+            return restored + pending_restored
             
         except Exception as e:
             logger.error(f"[PAPER] Error restoring positions: {e}")
@@ -577,10 +639,10 @@ class PaperTrader:
         try:
             entry_data = self._pending_entries.pop(setup_id, None)
             if entry_data:
-                # Release locked margin
+                # Release locked margin (use stored amount for consistency)
                 user_id = entry_data["user_id"]
                 leverage = entry_data["leverage"]
-                margin = (entry_data["trigger_price"] * entry_data["lot_size"]) / leverage
+                margin = entry_data.get("margin_locked", (entry_data["trigger_price"] * entry_data["lot_size"]) / leverage)
                 
                 paper_bal = await get_paper_balance(user_id)
                 if paper_bal:

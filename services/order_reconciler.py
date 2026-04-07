@@ -9,6 +9,7 @@ from database.mongodb import mongodb
 from api.delta_client import DeltaExchangeClient
 from api.orders import get_order_status_by_id, get_order_history
 from strategy.position_manager import PositionManager
+from strategy.paper_trader import is_paper_trade
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ async def reconcile_pending_orders(logger_bot=None):
                 continue
             
             # ========== SKIP PAPER TRADES ==========
-            if setup.get("is_paper_trade", False):
+            if is_paper_trade(setup):
                 logger.debug(f"[PAPER] Skipping reconciliation for paper order {order_id}")
                 continue
             # ========== END SKIP ==========
@@ -272,6 +273,11 @@ async def reconcile_pending_orders(logger_bot=None):
     all_setups = await get_all_active_algo_setups()
     
     for setup in all_setups:
+        # ========== SKIP PAPER TRADES ==========
+        if is_paper_trade(setup):
+            continue
+        # ========== END SKIP ==========
+        
         pending_entry_id = setup.get("pending_entry_order_id")
         if not pending_entry_id:
             continue

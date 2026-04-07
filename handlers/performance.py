@@ -456,7 +456,7 @@ def _generate_pnl_bar_chart(
         
         pnls = [a.get("pnl", 0) or 0 for a in sorted_acts]
         labels = [
-            f"{a.get('asset', '?')}\n{a.get('direction', '?')[0].upper()}"
+            f"{a.get('asset', '?')}\n{(a.get('direction') or '?')[0].upper()}"
             for a in sorted_acts
         ]
         colors = ['#4CAF50' if p >= 0 else '#F44336' for p in pnls]
