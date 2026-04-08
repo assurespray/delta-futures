@@ -346,20 +346,26 @@ class PositionManager:
             
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
-            exit_size = abs(actual_size) if actual_size != 0 else lot_size
             
-            if stop_loss_order_id:
-                await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
+            if actual_size == 0:
+                logger.info(f"✅ Position for {symbol} already closed on exchange (likely SL hit). Syncing DB.")
+                exit_price = trade_state.get("pending_sl_price") or trade_state.get("entry_price", 0.0)
+                exit_size = lot_size
+            else:
+                exit_size = abs(actual_size)
+                
+                if stop_loss_order_id:
+                    await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
 
-            exit_side = "sell" if current_position == "long" else "buy"
-            exit_order = await place_market_order(client, product_id, exit_size, exit_side, reduce_only=True)
-            
-            if not exit_order:
-                logger.error(f"❌ Failed to place exit order for {symbol}")
-                return False, 0.0, ""
+                exit_side = "sell" if current_position == "long" else "buy"
+                exit_order = await place_market_order(client, product_id, exit_size, exit_side, reduce_only=True)
+                
+                if not exit_order:
+                    logger.error(f"❌ Failed to place exit order for {symbol}")
+                    return False, 0.0, ""
 
-            raw_fill_price = exit_order.get("average_fill_price")
-            exit_price = float(raw_fill_price) if raw_fill_price is not None else 0.0
+                raw_fill_price = exit_order.get("average_fill_price")
+                exit_price = float(raw_fill_price) if raw_fill_price is not None else 0.0
             
             entry_price = trade_state.get("entry_price", 0)
             pnl = 0.0
