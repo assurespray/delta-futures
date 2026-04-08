@@ -202,7 +202,7 @@ async def lifespan(app: FastAPI):
         async_tasks.append(asyncio.create_task(algo_engine.run_continuous_monitoring()))
         logger.info("✅ Algo monitoring task started")
 
-        async_tasks.append(asyncio.create_task(algo_engine.monitor_pending_entries(poll_interval=5)))
+        async_tasks.append(asyncio.create_task(algo_engine.monitor_pending_entries(poll_interval=2)))
         logger.info("✅ Monitoring pending entry order")
         async_tasks.append(asyncio.create_task(screener_engine.run_continuous_monitoring()))
         logger.info("✅ Monitoring screener pending entry order")

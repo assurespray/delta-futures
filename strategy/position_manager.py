@@ -239,7 +239,22 @@ class PositionManager:
                     "source": "algo"
                 })
 
-                sl_price = sirusu_value if sirusu_value else trade_state.get("pending_sl_price")
+                sl_price = sirusu_value
+                if not sl_price:
+                    # Fetch absolute latest Sirusu value from IndicatorCache
+                    from database.mongodb import mongodb
+                    db = mongodb.get_db()
+                    cache = await db.indicator_cache.find_one({
+                        "setup_id": setup_id,
+                        "asset": symbol,
+                        "timeframe": trade_state.get("timeframe")
+                    })
+                    if cache and cache.get("sirusu_value"):
+                        sl_price = cache.get("sirusu_value")
+                        logger.info(f"✅ Fetched latest Sirusu value from cache: ${sl_price}")
+                    else:
+                        sl_price = trade_state.get("pending_sl_price")
+
                 if trade_state.get("additional_protection", False) and sl_price:
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sl_price,
@@ -274,7 +289,7 @@ class PositionManager:
             from api.orders import cancel_order
             if existing_order_id:
                 try:
-                    await cancel_order(client, existing_order_id, product_id)
+                    await cancel_order(client, product_id, existing_order_id)
                 except Exception as e:
                     logger.warning(f"Could not cancel old SL {existing_order_id}: {e}")
 
@@ -391,12 +406,12 @@ class PositionManager:
                 if stop_loss_order_id:
                     for order in stop_orders:
                         if str(order.get("id")) == str(stop_loss_order_id):
-                            await cancel_order(client, order["id"], product_id)
+                            await cancel_order(client, product_id, order["id"])
                             logger.info(f"✅ Cancelled specific SL order {stop_loss_order_id} for {symbol}")
                             return
                 
                 for order in stop_orders:
-                    await cancel_order(client, order["id"], product_id)
+                    await cancel_order(client, product_id, order["id"])
                     logger.info(f"✅ Cancelled generic SL order {order['id']} for {symbol}")
         except Exception as e:
             logger.error(f"❌ Error cancelling SL orders for {symbol}: {e}")

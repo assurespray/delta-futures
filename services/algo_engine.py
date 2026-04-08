@@ -80,24 +80,29 @@ class AlgoEngine:
             try:
                 active_setups = await get_all_active_algo_setups()
                 open_trades = await get_open_trade_states()
+                pending_trades = await get_pending_entry_trade_states()
                 
-                if not active_setups and not open_trades:
+                if not active_setups and not open_trades and not pending_trades:
                     logger.debug("ℹ️ No active algo setups or open trades found.")
                     import asyncio
                     await asyncio.sleep(60)
                     continue
                 
-                # Check configs for entries
                 import asyncio
+                # 1. Check configs for entries
                 for setup in active_setups:
                     asyncio.create_task(self.process_algo_setup(setup))
                     
-                # Check open trades for trailing SL / exits
+                # 2. Check open trades for EXITS
                 for trade in open_trades:
                     asyncio.create_task(self.process_open_trade(trade))
                     
+                # 3. Check pending trades for INVALIDATION (Sirusu flip)
+                for trade in pending_trades:
+                    asyncio.create_task(self.process_pending_trade(trade))
+                    
                 # Boundary-aligned sleep calculation
-                timeframes = [s.get("timeframe", "15m") for s in active_setups] + [t.get("timeframe", "15m") for t in open_trades]
+                timeframes = [s.get("timeframe", "15m") for s in active_setups] + [t.get("timeframe", "15m") for t in open_trades] + [t.get("timeframe", "15m") for t in pending_trades]
                 if not timeframes:
                     await asyncio.sleep(60)
                     continue
@@ -261,22 +266,8 @@ class AlgoEngine:
                 await client.close()
                 return
                 
-            # Trailing SL
-            new_sirusu_value = sirusu_data.get('supertrend_value')
-            if new_sirusu_value and new_sirusu_value != trade_state.get("pending_sl_price"):
-                from database.crud import update_trade_state
-                await update_trade_state(trade_id, {"pending_sl_price": new_sirusu_value})
-                if trade_state.get("is_paper_trade"):
-                    await paper_trader.update_stop_loss(trade_id, new_sirusu_value)
-                else:
-                    sl_order_id = trade_state.get("stop_loss_order_id")
-                    if sl_order_id:
-                        product_id = trade_state.get("product_id")
-                        await self.position_manager._place_stop_loss_protection(
-                            client, product_id, trade_state["lot_size"], current_position,
-                            new_sirusu_value, setup_id, asset, trade_state["user_id"],
-                            existing_order_id=sl_order_id
-                        )
+            # Trailing SL disabled per user request. 
+            # Initial hard SL stays on exchange, we just monitor for Sirusu flip exit.
                         
             # Exit Check
             exit_signal = self.strategy.generate_exit_signal(
@@ -292,6 +283,104 @@ class AlgoEngine:
             
         except Exception as e:
             logger.error(f"❌ Error processing open trade {trade_id}: {e}")
+
+    async def process_pending_trade(self, trade_state: Dict[str, Any]):
+        trade_id = str(trade_state['_id'])
+        setup_id = trade_state['setup_id']
+        asset = trade_state['asset']
+        timeframe = trade_state['timeframe']
+        pending_side = trade_state.get('pending_entry_side')
+        
+        now = datetime.utcnow()
+        from utils.timeframe import is_at_candle_boundary
+        if not is_at_candle_boundary(timeframe, now):
+            return
+            
+        try:
+            from database.crud import get_algo_setup_by_id, get_screener_setup_by_id
+            setup = await get_algo_setup_by_id(setup_id)
+            if not setup:
+                setup = await get_screener_setup_by_id(setup_id)
+            if not setup: return
+            
+            api_id = setup['api_id']
+            from database.crud import get_api_credential_by_id
+            cred = await get_api_credential_by_id(api_id, decrypt=True)
+            if not cred: return
+            
+            from api.delta_client import DeltaExchangeClient
+            client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+            
+            try:
+                indicator_result = await self.strategy.calculate_indicators(
+                    client, asset, timeframe
+                )
+                if not indicator_result:
+                    return
+                
+                # Save to Indicator Cache for Dashboard
+                from database.crud import save_indicator_cache
+                cache_data = {
+                    "setup_id": setup_id,
+                    "setup_type": trade_state.get("setup_type", "algo"),
+                    "setup_name": trade_state.get("setup_name", "Unknown"),
+                    "is_paper_trade": trade_state.get("is_paper_trade", False),
+                    "asset": asset,
+                    "timeframe": timeframe,
+                    "current_price": indicator_result.get("current_price", 0.0),
+                    "perusu_signal": indicator_result["perusu"]["signal"],
+                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
+                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
+                    "sirusu_signal": indicator_result["sirusu"]["signal"],
+                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
+                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
+                }
+                await save_indicator_cache(cache_data)
+                
+            except Exception as e:
+                logger.error(f"❌ Error calculating indicators for pending {asset}: {e}")
+                await client.close()
+                return
+                
+            sirusu_data = indicator_result.get('sirusu')
+            if not sirusu_data:
+                await client.close()
+                return
+                
+            # Invalidation Check: Sirusu flip against entry side
+            current_sirusu_signal = sirusu_data['signal']
+            is_invalidated = False
+            if pending_side == "long" and current_sirusu_signal == -1:
+                is_invalidated = True
+            elif pending_side == "short" and current_sirusu_signal == 1:
+                is_invalidated = True
+                
+            if is_invalidated:
+                logger.info(f"🚫 [INVALIDATION] Sirusu flipped against pending {pending_side.upper()} for {asset}. Cancelling entry.")
+                
+                if trade_state.get("is_paper_trade", False):
+                    from strategy.paper_trader import paper_trader
+                    await paper_trader.cancel_pending_entry(trade_id)
+                else:
+                    pending_order_id = trade_state.get("pending_entry_order_id")
+                    product_id = trade_state.get("product_id")
+                    if pending_order_id and product_id:
+                        from api.orders import cancel_order
+                        await cancel_order(client, product_id, pending_order_id)
+                        
+                    from database.crud import update_trade_state, get_db, release_position_lock
+                    await update_trade_state(trade_id, {
+                        "status": "cancelled",
+                        "pending_entry_order_id": None
+                    })
+                    db = await get_db()
+                    await release_position_lock(db, asset, setup_id)
+                    
+            await client.close()
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing pending trade {trade_id}: {e}")
+
 
     async def monitor_pending_entries(self, poll_interval=3):
         """
