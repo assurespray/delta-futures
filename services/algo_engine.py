@@ -10,7 +10,7 @@ from database.crud import (
     get_trade_state_by_id,
     update_trade_state,
     get_all_active_algo_setups, get_api_credential_by_id,
-    update_algo_setup, save_indicator_cache, get_indicator_cache,
+    update_algo_setup, save_indicator_cache,
     get_algo_setup_by_id
 )
 from api.delta_client import DeltaExchangeClient
