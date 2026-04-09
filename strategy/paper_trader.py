@@ -152,19 +152,23 @@ class PaperTrader:
         for trade in pending_trades:
             if not trade.get("is_paper_trade"): continue
                 
-            symbol = trade["asset"]
+            symbol = trade.get("asset")
+            if not symbol: continue
+            
             live_price = await get_latest_price(client, symbol)
             if not live_price: continue
                 
-            side = trade["pending_entry_side"]
-            trigger = trade["entry_trigger_price"]
+            side = trade.get("pending_entry_side")
+            trigger = trade.get("entry_trigger_price")
+            if not side or not trigger: continue
             
             if (side == "long" and live_price >= trigger) or (side == "short" and live_price <= trigger):
-                leverage = trade["paper_leverage"]
-                entry_fee = live_price * trade["lot_size"] * PAPER_TRADE_TAKER_FEE
+                leverage = trade.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
+                lot_size = trade.get("lot_size", 1)
+                entry_fee = live_price * lot_size * PAPER_TRADE_TAKER_FEE
                 liquidation_price = live_price * (1 - 1/leverage) if side == "long" else live_price * (1 + 1/leverage)
                 
-                user_id = trade["user_id"]
+                user_id = trade.get("user_id", "")
                 paper_bal = await get_paper_balance(user_id)
                 if paper_bal:
                     new_balance = paper_bal["balance"] - entry_fee
@@ -187,11 +191,15 @@ class PaperTrader:
         for trade in open_trades:
             if not trade.get("is_paper_trade"): continue
                 
-            symbol = trade["asset"]
+            symbol = trade.get("asset")
+            if not symbol: continue
+            
             live_price = await get_latest_price(client, symbol)
             if not live_price: continue
                 
-            side = trade["current_position"]
+            side = trade.get("current_position")
+            if not side: continue
+            
             sl_price = trade.get("pending_sl_price", 0)
             liq_price = trade.get("paper_liquidation_price", 0)
             
