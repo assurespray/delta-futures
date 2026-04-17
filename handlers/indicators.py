@@ -4,7 +4,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from database.crud import get_api_credentials_by_user, get_api_credential_by_id
 from api.delta_client import DeltaExchangeClient
-from strategy.dual_supertrend import DualSuperTrendStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -12,34 +11,27 @@ logger = logging.getLogger(__name__)
 INDICATOR_ASSET = 0
 
 
+from database.crud import get_strategy_presets_by_user, ensure_default_presets
+
 async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Display indicator selection menu.
-    
-    Args:
-        update: Telegram update
-        context: Callback context
-    """
     query = update.callback_query
     await query.answer()
     
-    message = "📊 **Indicators**\n\n"
-    message += "Select an indicator to view current signal:\n\n"
-    message += "• **Perusu** (SuperTrend 20,20) - Entry indicator\n"
-    message += "• **Sirusu** (SuperTrend 10,10) - Exit indicator\n"
+    user_id = str(query.from_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
     
-    keyboard = [
-        [InlineKeyboardButton("🟢 Perusu (20,20)", callback_data="indicator_select_perusu")],
-        [InlineKeyboardButton("🔴 Sirusu (10,10)", callback_data="indicator_select_sirusu")],
-        [InlineKeyboardButton("🟢🔴 Both (20,20 & 10,10)", callback_data="indicator_select_both")],
-        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
-    ]
+    message = "📊 **Indicators**\n\nSelect an indicator preset to view current signals:\n\n"
     
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Unnamed')
+        keyboard.append([InlineKeyboardButton(f"🟢 {name}", callback_data=f"indicator_select_{pid}")])
+        
+    keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-    
-    # End any active conversation state so buttons remain responsive
     return ConversationHandler.END
 
 
@@ -213,11 +205,14 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
             api_key=full_cred['api_key'],
             api_secret=full_cred['api_secret']
         )
-        strategy = DualSuperTrendStrategy()
+        preset_id = context.user_data.get('selected_preset_id')
+        preset = await get_strategy_preset_by_id(preset_id)
+        from strategy.factory import StrategyFactory
+        strategy = StrategyFactory.get_strategy(preset['strategy_type'], preset['parameters'])
         result = await strategy.calculate_indicators(
             client, asset, timeframe,
-            skip_boundary_check=True,   # <--
-            force_recalc=True           # optional but useful for fresh value
+            skip_boundary_check=True,
+            force_recalc=True
         )
         await client.close()
 
@@ -245,48 +240,35 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                     f"🔹 **Candles Used:** {result.get('candles_used', 100)}\n\n"
                 )
 
-                if indicator_type == "perusu":
-                    d = result['perusu']
-                    msg = (
-                        info +
-                        f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
-                        f"├ ATR Length: {d['atr_length']}\n"
-                        f"├ Factor: {d['factor']}\n"
-                        f"├ ATR Value: {d['atr']}\n"
-                        f"├ Current Price: ${d['latest_close']}\n"
-                        f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
-                        f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
-                    )
-                elif indicator_type == "sirusu":
-                    d = result['sirusu']
-                    msg = (
-                        info +
-                        f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
-                        f"├ ATR Length: {d['atr_length']}\n"
-                        f"├ Factor: {d['factor']}\n"
-                        f"├ ATR Value: {d['atr']}\n"
-                        f"├ Current Price: ${d['latest_close']}\n"
-                        f"├ Signal: {'📈' if d['signal'] == 1 else '📉'} {d['signal_text']}\n"
-                        f"└ SuperTrend Value: ${d['supertrend_value']}\n\n"
-                    )
-                elif indicator_type == "both":
+                ptype = preset['strategy_type']
+                name = preset.get('preset_name', 'Indicator')
+                if ptype == "dual_supertrend":
                     p, s = result['perusu'], result['sirusu']
                     msg = (
                         info +
-                        f"🟢 **Perusu Indicator (SuperTrend 20,20)**\n"
-                        f"├ ATR Length: {p['atr_length']}\n"
-                        f"├ Factor: {p['factor']}\n"
-                        f"├ ATR Value: {p['atr']}\n"
-                        f"├ Current Price: ${p['latest_close']}\n"
-                        f"├ Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']}\n"
-                        f"└ SuperTrend Value: ${p['supertrend_value']}\n\n"
-                        f"🔴 **Sirusu Indicator (SuperTrend 10,10)**\n"
-                        f"├ ATR Length: {s['atr_length']}\n"
-                        f"├ Factor: {s['factor']}\n"
-                        f"├ ATR Value: {s['atr']}\n"
-                        f"├ Current Price: ${s['latest_close']}\n"
-                        f"├ Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']}\n"
-                        f"└ SuperTrend Value: ${s['supertrend_value']}\n"
+                        f"🟢 **Dual SuperTrend**\n"
+                        f"├ P Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']} (${p['supertrend_value']:.4f})\n"
+                        f"└ S Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']} (${s['supertrend_value']:.4f})\n"
+                    )
+                elif ptype == "single_supertrend":
+                    d = result['single_st']
+                    msg = (
+                        info +
+                        f"🟢 **Single SuperTrend**\n"
+                        f"├ Signal: {'📈' if d['signal']==1 else '📉'} {d['signal_text']}\n"
+                        f"└ ST Value: ${d['supertrend_value']:.4f}\n"
+                    )
+                elif ptype == "range_breakout_lazybear":
+                    d = result['range_data']
+                    msg = (
+                        info +
+                        f"🏔️ **LazyBear Range Breakout**\n"
+                        f"├ Trend Phase: {'📈 LONG' if d['trend_phase']==1 else '📉 SHORT'}\n"
+                        f"├ Range Up: ${d['up']:.4f}\n"
+                        f"├ Range Down: ${d['down']:.4f}\n"
+                        f"├ Range Mid: ${d['mid']:.4f}\n"
+                        f"├ EMA (34): ${d['ema']:.4f}\n"
+                        f"└ Breakout Signal: {d['signal_text']}\n"
                     )
             else:
                 msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
@@ -305,7 +287,7 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
 
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data="indicator_refresh")],
-        [InlineKeyboardButton("🔄 Try Another Asset", callback_data=f"indicator_select_{indicator_type}")],
+        [InlineKeyboardButton("🔄 Try Another Asset", callback_data=f"indicator_select_{preset_id}")],
         [InlineKeyboardButton("🔙 Back to Indicators", callback_data="menu_indicators")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
     ]

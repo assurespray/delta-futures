@@ -62,23 +62,27 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
             tf = c["timeframe"]
             price = c.get("current_price", 0.0)
             
-            p_sig = "🔵 UP" if c["perusu_signal"] == 1 else "🔴 DOWN"
-            s_sig = "🔵 UP" if c["sirusu_signal"] == 1 else "🔴 DOWN"
+            # Support multiple strategies via the mapped values
+            p_sig_val = c.get("perusu_signal", 0)
+            s_sig_val = c.get("sirusu_signal", 0)
+            p_val = c.get("perusu_value", 0.0)
+            s_val = c.get("sirusu_value", 0.0)
             
-            p_val = c["perusu_value"]
-            s_val = c["sirusu_value"]
+            p_sig = "🔵 UP" if p_sig_val == 1 else ("🔴 DOWN" if p_sig_val == -1 else "⚪ NEUTRAL")
+            s_sig = "🔵 UP" if s_sig_val == 1 else ("🔴 DOWN" if s_sig_val == -1 else "⚪ NEUTRAL")
             
             # Calc age
             calc_time = c["calculated_at"]
             age_sec = (datetime.utcnow() - calc_time).total_seconds()
-            if age_sec < 60:
-                age_str = f"{int(age_sec)}s ago"
-            else:
-                age_str = f"{int(age_sec // 60)}m ago"
+            age_str = f"{int(age_sec)}s ago" if age_sec < 60 else f"{int(age_sec // 60)}m ago"
 
             message += f"  • **{asset}** ({tf}) - ${price:.4f} `[{age_str}]`\n"
-            message += f"    ├ P: {p_sig} (${p_val:.4f})\n"
-            message += f"    └ S: {s_sig} (${s_val:.4f})\n"
+            # Generic rendering for Tracker
+            if p_val == s_val and p_sig_val == s_sig_val:
+                message += f"    └ Signal: {p_sig} (${p_val:.4f})\n"
+            else:
+                message += f"    ├ P: {p_sig} (${p_val:.4f})\n"
+                message += f"    └ S: {s_sig} (${s_val:.4f})\n"
         message += "\n"
 
     # Truncate if too long

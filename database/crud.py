@@ -8,7 +8,7 @@ from database.models import APICredential, AlgoSetup, TradeState, IndicatorCache
 from cryptography.fernet import Fernet
 from config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from database.models import OrderRecord
+from database.models import OrderRecord, StrategyPreset
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,89 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
         return True
     return False
 
+
+
+# ==================== Strategy Presets CRUD ====================
+
+async def create_strategy_preset(preset_data: Dict[str, Any]) -> str:
+    db = mongodb.get_db()
+    collection = db["strategy_presets"]
+    preset = StrategyPreset(**preset_data)
+    result = await collection.insert_one(preset.model_dump(by_alias=True, exclude={"id"}))
+    return str(result.inserted_id)
+
+async def get_strategy_presets_by_user(user_id: str) -> List[Dict[str, Any]]:
+    db = mongodb.get_db()
+    collection = db["strategy_presets"]
+    cursor = collection.find({"user_id": user_id})
+    return await cursor.to_list(length=100)
+
+async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        db = mongodb.get_db()
+        collection = db["strategy_presets"]
+        return await collection.find_one({"_id": ObjectId(preset_id)})
+    except Exception as e:
+        logger.error(f"Error getting preset by id: {e}")
+        return None
+
+async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
+    try:
+        db = mongodb.get_db()
+        collection = db["strategy_presets"]
+        result = await collection.delete_one({"_id": ObjectId(preset_id), "user_id": user_id})
+        return result.deleted_count > 0
+    except Exception as e:
+        logger.error(f"Error deleting preset: {e}")
+        return False
+
+async def ensure_default_presets(user_id: str) -> None:
+    presets = await get_strategy_presets_by_user(user_id)
+    if not presets:
+        await create_strategy_preset({
+            "user_id": user_id,
+            "preset_name": "Default Dual SuperTrend",
+            "strategy_type": "dual_supertrend",
+            "parameters": {
+                "perusu_atr": 20,
+                "perusu_factor": 20.0,
+                "sirusu_atr": 10,
+                "sirusu_factor": 10.0
+            },
+            "is_default": True
+        })
+        await create_strategy_preset({
+            "user_id": user_id,
+            "preset_name": "Default Range Breakout",
+            "strategy_type": "range_breakout_lazybear",
+            "parameters": {
+                "ema_length": 34,
+                "sl_type": "middle",
+                "min_range_candles": 2
+            },
+            "is_default": True
+        })
+        await create_strategy_preset({
+            "user_id": user_id,
+            "preset_name": "Default Single SuperTrend",
+            "strategy_type": "single_supertrend",
+            "parameters": {
+                "atr_length": 15,
+                "factor": 15.0
+            },
+            "is_default": True
+        })
+        await create_strategy_preset({
+            "user_id": user_id,
+            "preset_name": "Default Range Breakout",
+            "strategy_type": "range_breakout_lazybear",
+            "parameters": {
+                "ema_length": 34,
+                "sl_type": "middle",
+                "min_range_candles": 2
+            },
+            "is_default": True
+        })
 
 # ==================== Algo Setups CRUD ====================
 

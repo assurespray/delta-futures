@@ -20,7 +20,7 @@ from api.market_screener import (
     get_top_losers,
     get_all_perpetual_symbols
 )
-from strategy.dual_supertrend import DualSuperTrendStrategy
+from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
 from services.logger_bot import LoggerBot
 from config.settings import settings
@@ -40,7 +40,7 @@ class ScreenerEngine:
     """
     
     def __init__(self, logger_bot: LoggerBot):
-        self.strategy = DualSuperTrendStrategy()
+        
         self.position_manager = PositionManager()
         self.logger_bot = logger_bot
     

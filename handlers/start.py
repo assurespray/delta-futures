@@ -39,7 +39,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("⚙️ Algo Setups", callback_data="menu_algo_setups")
         ],
         [
-            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups"),
+            InlineKeyboardButton("🎛️ Strategy Presets", callback_data="menu_indicator_settings"),
+            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups")
+        ],
+        [
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
         ],
         [
@@ -84,7 +87,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("⚙️ Algo Setups", callback_data="menu_algo_setups")
         ],
         [
-            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups"),
+            InlineKeyboardButton("🎛️ Strategy Presets", callback_data="menu_indicator_settings"),
+            InlineKeyboardButton("📊 Screener Setups", callback_data="menu_screener_setups")
+        ],
+        [
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity")
         ],
         [

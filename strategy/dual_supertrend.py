@@ -45,17 +45,24 @@ class DualSuperTrendStrategy:
     - Sirusu value used as stop-loss (additional protection)
     """
     
-    def __init__(self):
-        """Initialize strategy with indicators."""
+    def __init__(self, params: Dict[str, Any] = None):
+        """Initialize strategy with dynamic or default indicators."""
+        self.params = params or {}
+        
+        self.perusu_atr = self.params.get("perusu_atr", PERUSU_ATR_LENGTH)
+        self.perusu_factor = self.params.get("perusu_factor", PERUSU_FACTOR)
+        self.sirusu_atr = self.params.get("sirusu_atr", SIRUSU_ATR_LENGTH)
+        self.sirusu_factor = self.params.get("sirusu_factor", SIRUSU_FACTOR)
+        
         self.perusu = SuperTrend(
-            atr_length=PERUSU_ATR_LENGTH,
-            factor=PERUSU_FACTOR,
+            atr_length=int(self.perusu_atr),
+            factor=float(self.perusu_factor),
             name="Perusu"
         )
         
         self.sirusu = SuperTrend(
-            atr_length=SIRUSU_ATR_LENGTH,
-            factor=SIRUSU_FACTOR,
+            atr_length=int(self.sirusu_atr),
+            factor=float(self.sirusu_factor),
             name="Sirusu"
         )
         
@@ -221,7 +228,7 @@ class DualSuperTrendStrategy:
                 # In all cases we CONTINUE – no return here
                     
             # 5. Sufficient data?
-            min_required = max(PERUSU_ATR_LENGTH, SIRUSU_ATR_LENGTH) + 10
+            min_required = max(self.perusu_atr, self.sirusu_atr) + 10
             if actual_count < min_required:
                 logger.error(f"❌ INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
@@ -229,13 +236,13 @@ class DualSuperTrendStrategy:
                 logger.warning(f"⚠️ Got {actual_count} candles, wanted {required_candles}")
 
             # 6. Calculate Perusu & Sirusu
-            logger.info(f"🔵 Calculating PERUSU (ATR period={PERUSU_ATR_LENGTH}, factor={PERUSU_FACTOR})")
+            logger.info(f"🔵 Calculating PERUSU (ATR period={self.perusu_atr}, factor={self.perusu_factor})")
             perusu_result = self.perusu.calculate(candles)
             if not perusu_result:
                 logger.error(f"❌ Failed to calculate Perusu for {symbol}")
                 return None
         
-            logger.info(f"🔴 Calculating SIRUSU (ATR period={SIRUSU_ATR_LENGTH}, factor={SIRUSU_FACTOR})")
+            logger.info(f"🔴 Calculating SIRUSU (ATR period={self.sirusu_atr}, factor={self.sirusu_factor})")
             sirusu_result = self.sirusu.calculate(candles)
             if not sirusu_result:
                 logger.error(f"❌ Failed to calculate Sirusu for {symbol}")
@@ -406,6 +413,7 @@ class DualSuperTrendStrategy:
                 "immediate": False,
                 "perusu_signal": current_signal,
                 "perusu_value": perusu['supertrend_value'],
+                "sl_value": indicators_data.get('sirusu', {}).get('supertrend_value', 0),
                 "prev_high": prev_high,
                 "prev_low": prev_low,
                 "entry_reason": f"Perusu flip to {'uptrend' if entry_side == 'long' else 'downtrend'}"

@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
 
         # 🔥 ONE-TIME INDICATOR WARM-UP (force calculation)
         # 🔥 ONE-TIME INDICATOR WARM-UP (using DB-stored API keys)
-        from strategy.dual_supertrend import strategy_instance
+        from strategy.factory import StrategyFactory
         from api.delta_client import DeltaExchangeClient
         from database.crud import (
             get_all_active_algo_setups,
@@ -119,7 +119,6 @@ async def lifespan(app: FastAPI):
         setups = await get_all_active_algo_setups()
 
         for setup in setups:
-            setup_id = str(setup["_id"])
             setup_name = setup["setup_name"]
             symbol = setup["asset"].upper()
             timeframe = setup.get("timeframe", "3m")
@@ -139,11 +138,12 @@ async def lifespan(app: FastAPI):
                 )
 
                 logger.info(f"   🔄 Warm-up: {setup_name} ({symbol} {timeframe})")
-                await strategy_instance.calculate_indicators(
+                strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+                await strategy.calculate_indicators(
                     client,
                     symbol,
                     timeframe,
-                    skip_boundary_check=True,  # run regardless of candle boundary
+                    skip_boundary_check=True,
                     force_recalc=True,
                 )
                 await client.close()

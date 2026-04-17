@@ -15,7 +15,7 @@ from database.crud import (
 )
 from api.delta_client import DeltaExchangeClient
 from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust methods
-from strategy.dual_supertrend import DualSuperTrendStrategy
+from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
 from strategy.paper_trader import paper_trader, is_paper_trade
 from api.positions import get_ticker_mark_price
@@ -32,7 +32,7 @@ class AlgoEngine:
     """Main trading engine for executing algo strategies - ENHANCED WITH DYNAMIC SLEEP."""
 
     def __init__(self, logger_bot: LoggerBot):
-        self.strategy = DualSuperTrendStrategy()
+        
         self.position_manager = PositionManager()
         self.logger_bot = logger_bot
         self.running_tasks = {}
@@ -89,17 +89,18 @@ class AlgoEngine:
                     continue
                 
                 import asyncio
-                # 1. Check configs for entries
-                for setup in active_setups:
-                    asyncio.create_task(self.process_algo_setup(setup))
-                    
-                # 2. Check open trades for EXITS
-                for trade in open_trades:
-                    asyncio.create_task(self.process_open_trade(trade))
-                    
-                # 3. Check pending trades for INVALIDATION (Sirusu flip)
-                for trade in pending_trades:
-                    asyncio.create_task(self.process_pending_trade(trade))
+                # IMPORTANT: Run Exits and Invalidations FIRST and wait for them to finish
+                # This ensures that if a Single Supertrend flips, the position is closed
+                # before we check for the new reverse entry.
+                exit_tasks = [self.process_open_trade(trade) for trade in open_trades]
+                inv_tasks = [self.process_pending_trade(trade) for trade in pending_trades]
+                if exit_tasks or inv_tasks:
+                    await asyncio.gather(*(exit_tasks + inv_tasks))
+                
+                # Now check configs for entries
+                entry_tasks = [self.process_algo_setup(setup) for setup in active_setups]
+                if entry_tasks:
+                    await asyncio.gather(*entry_tasks)
                     
                 # Boundary-aligned sleep calculation
                 timeframes = [s.get("timeframe", "15m") for s in active_setups] + [t.get("timeframe", "15m") for t in open_trades] + [t.get("timeframe", "15m") for t in pending_trades]
@@ -143,7 +144,8 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                indicator_result = await self.strategy.calculate_indicators(
+                strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
+                indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )
                 if not indicator_result:
@@ -173,9 +175,10 @@ class AlgoEngine:
             finally:
                 await client.close()
                 
-            entry_signal = self.strategy.generate_entry_signal(
+            strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
+            entry_signal = strategy.generate_entry_signal(
                 setup_id,
-                None, # last_perusu_signal no longer needed for pure breakout
+                None,
                 indicator_result
             )
             
@@ -195,9 +198,11 @@ class AlgoEngine:
                 client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                 try:
                     await self.position_manager.place_breakout_entry_order(
-                        client, algo_setup, entry_signal,
-                        indicator_result['perusu']['supertrend_value'],
-                        sirusu_value, immediate=False
+                        client, algo_setup, 
+                        entry_side=entry_signal.get('side'),
+                        breakout_price=entry_signal.get('trigger_price'),
+                        sirusu_value=entry_signal.get('sl_value', sirusu_value),
+                        immediate=entry_signal.get('immediate', False)
                     )
                 finally:
                     await client.close()
@@ -231,7 +236,8 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                indicator_result = await self.strategy.calculate_indicators(
+                strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+                indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )
                 if not indicator_result:
@@ -270,7 +276,8 @@ class AlgoEngine:
             # Initial hard SL stays on exchange, we just monitor for Sirusu flip exit.
                         
             # Exit Check
-            exit_signal = self.strategy.generate_exit_signal(
+            strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+            exit_signal = strategy.generate_exit_signal(
                 setup_id, current_position, indicator_result
             )
             
@@ -312,7 +319,8 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                indicator_result = await self.strategy.calculate_indicators(
+                strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+                indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )
                 if not indicator_result:

@@ -14,6 +14,12 @@ from handlers.api_menu import (
     api_secret_received, api_delete_callback, api_delete_confirm_callback,
     cancel_conversation, API_NAME, API_KEY, API_SECRET
 )
+from handlers.presets_menu import (
+    presets_menu_callback, preset_add_start, preset_name_received,
+    preset_type_selected, preset_params_received, cancel_preset,
+    preset_delete_list, preset_delete_confirm,
+    PRESET_NAME, PRESET_TYPE, PRESET_P1, PRESET_P2
+)
 from handlers.balance import balance_callback
 from handlers.positions import positions_callback
 from handlers.orders import (
@@ -127,6 +133,23 @@ def create_application() -> Application:
     )
     application.add_handler(indicator_conv_handler)
     
+
+    # Preset Setup conversation handler
+    preset_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(preset_add_start, pattern="^preset_add_start$")],
+        states={
+            PRESET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_name_received)],
+            PRESET_TYPE: [CallbackQueryHandler(preset_type_selected, pattern="^preset_type_")],
+            PRESET_P1: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_params_received)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_preset),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(preset_conv_handler)
     # Algo Setup conversation handler
     algo_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(algo_add_start, pattern="^algo_add_start$")],
@@ -179,6 +202,11 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(indicator_refresh_callback, pattern="^indicator_refresh$"))
     # Note: indicator_timeframe_callback is handled by ConversationHandler entry point above
     
+
+    # Strategy Presets handlers
+    application.add_handler(CallbackQueryHandler(presets_menu_callback, pattern="^menu_indicator_settings$"))
+    application.add_handler(CallbackQueryHandler(preset_delete_list, pattern="^preset_delete_list$"))
+    application.add_handler(CallbackQueryHandler(preset_delete_confirm, pattern="^preset_del_"))
     # Algo Setups handlers
     application.add_handler(CallbackQueryHandler(algo_setups_callback, pattern="^menu_algo_setups$"))
     application.add_handler(CallbackQueryHandler(algo_view_list_callback, pattern="^algo_view_list$"))

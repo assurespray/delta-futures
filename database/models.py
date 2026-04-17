@@ -24,6 +24,23 @@ class PyObjectId(ObjectId):
         field_schema.update(type="string")
 
 
+
+class StrategyPreset(BaseModel):
+    """Model for storing user-defined strategy presets."""
+    
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    preset_name: str
+    strategy_type: str  # e.g., "single_supertrend", "dual_supertrend"
+    parameters: dict  # Generic dictionary of parameters
+    is_default: bool = False  # To mark system defaults
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
+
 class APICredential(BaseModel):
     """Model for storing API credentials."""
     
@@ -49,7 +66,9 @@ class AlgoSetup(BaseModel):
     description: str
     api_id: str  # Reference to APICredential
     api_name: str  # Cached for quick display
-    indicator: str  # "dual_supertrend"
+    indicator: str  # "dual_supertrend", "single_supertrend"
+    preset_id: Optional[str] = None
+    indicator_params: dict = Field(default_factory=dict)
     direction: str  # "both", "long_only", "short_only"
     timeframe: str  # "1m", "5m", "15m", "30m", "1h", "4h", "1d"
     asset: str  # Symbol like "BTCUSD"
@@ -183,7 +202,9 @@ class ScreenerSetup(BaseModel):
     description: str
     api_id: str
     api_name: str
-    indicator: str  # "dual_supertrend"
+    indicator: str  # "dual_supertrend", "single_supertrend"
+    preset_id: Optional[str] = None
+    indicator_params: dict = Field(default_factory=dict)
     asset_selection_type: str  # "every", "gainers", "losers", "mixed"
     timeframe: str
     direction: str  # "both", "long_only", "short_only"

@@ -5,7 +5,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 from database.crud import (
     get_api_credentials_by_user, get_algo_setups_by_user,
     create_algo_setup, delete_algo_setup, get_algo_setup_by_id,
-    get_api_credential_by_id
+    get_api_credential_by_id,
+    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets
 )
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_product_by_symbol
@@ -134,17 +135,24 @@ async def setup_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['api_id'] = api_id
     
     # Get API name
-    cred = await get_api_credential_by_id(api_id, decrypt=False)
+    cred = await get_api_credential_by_id,
+    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets(api_id, decrypt=False)
     api_name = cred['api_name'] if cred else "Unknown"
     context.user_data['api_name'] = api_name
     
-    # Show indicator selection (currently only dual supertrend)
+    # Show indicator presets selection
     message = f"✅ API: {api_name}\n\n"
     message += f"Step 4/9: Select Indicator Strategy:\n"
     
-    keyboard = [
-        [InlineKeyboardButton("📊 Dual SuperTrend (Perusu + Sirusu)", callback_data="setup_ind_dual_st")]
-    ]
+    user_id = str(query.from_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+    
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Strategy')
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"setup_ind_{pid}")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -373,6 +381,8 @@ async def setup_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "api_id": user_data['api_id'],
             "api_name": user_data['api_name'],
             "indicator": user_data['indicator'],
+            "preset_id": user_data.get('preset_id'),
+            "indicator_params": user_data.get('indicator_params', {}),
             "direction": user_data['direction'],
             "timeframe": user_data['timeframe'],
             "asset": user_data['asset'],
