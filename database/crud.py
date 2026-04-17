@@ -154,11 +154,6 @@ async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
         return False
 
 async def ensure_default_presets(user_id: str) -> None:
-    # One-time cleanup: remove old default presets so they get recreated with new names
-    db = mongodb.get_db()
-    collection = db["strategy_presets"]
-    await collection.delete_many({"user_id": user_id, "is_default": True})
-
     presets = await get_strategy_presets_by_user(user_id)
     has_defaults = any(p.get("is_default") for p in presets)
     if not has_defaults:
