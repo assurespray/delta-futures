@@ -2,16 +2,18 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from database.crud import get_api_credentials_by_user, get_api_credential_by_id
+from database.crud import (
+    get_api_credentials_by_user, get_api_credential_by_id,
+    get_strategy_presets_by_user, ensure_default_presets,
+    get_strategy_preset_by_id
+)
 from api.delta_client import DeltaExchangeClient
+from strategy.factory import StrategyFactory
 
 logger = logging.getLogger(__name__)
 
 # Conversation states
 INDICATOR_ASSET = 0
-
-
-from database.crud import get_strategy_presets_by_user, ensure_default_presets
 
 async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -34,8 +36,6 @@ async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
     return ConversationHandler.END
 
-
-from database.crud import get_strategy_preset_by_id
 
 async def indicator_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -91,7 +91,6 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     context.user_data['selected_timeframe'] = timeframe
     
     preset_id = context.user_data.get('selected_preset_id')
-    from database.crud import get_strategy_preset_by_id
     preset = await get_strategy_preset_by_id(preset_id)
     name = preset.get('preset_name', 'Strategy') if preset else 'Strategy'
     
@@ -199,7 +198,6 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
         )
         preset_id = context.user_data.get('selected_preset_id')
         preset = await get_strategy_preset_by_id(preset_id)
-        from strategy.factory import StrategyFactory
         strategy = StrategyFactory.get_strategy(preset['strategy_type'], preset['parameters'])
         result = await strategy.calculate_indicators(
             client, asset, timeframe,
