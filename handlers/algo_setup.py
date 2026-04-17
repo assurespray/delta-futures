@@ -135,8 +135,7 @@ async def setup_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['api_id'] = api_id
     
     # Get API name
-    cred = await get_api_credential_by_id,
-    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets(api_id, decrypt=False)
+    cred = await get_api_credential_by_id(api_id, decrypt=False)
     api_name = cred['api_name'] if cred else "Unknown"
     context.user_data['api_name'] = api_name
     
