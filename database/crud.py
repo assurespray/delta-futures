@@ -154,11 +154,17 @@ async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
         return False
 
 async def ensure_default_presets(user_id: str) -> None:
+    # One-time cleanup: remove old default presets so they get recreated with new names
+    db = mongodb.get_db()
+    collection = db["strategy_presets"]
+    await collection.delete_many({"user_id": user_id, "is_default": True})
+
     presets = await get_strategy_presets_by_user(user_id)
-    if not presets:
+    has_defaults = any(p.get("is_default") for p in presets)
+    if not has_defaults:
         await create_strategy_preset({
             "user_id": user_id,
-            "preset_name": "Default Dual SuperTrend",
+            "preset_name": "[S] Dual ST (P:20,20 / S:10,10)",
             "strategy_type": "dual_supertrend",
             "parameters": {
                 "perusu_atr": 20,
@@ -170,18 +176,7 @@ async def ensure_default_presets(user_id: str) -> None:
         })
         await create_strategy_preset({
             "user_id": user_id,
-            "preset_name": "Default Range Breakout",
-            "strategy_type": "range_breakout_lazybear",
-            "parameters": {
-                "ema_length": 34,
-                "sl_type": "middle",
-                "min_range_candles": 2
-            },
-            "is_default": True
-        })
-        await create_strategy_preset({
-            "user_id": user_id,
-            "preset_name": "Default Single SuperTrend",
+            "preset_name": "[S] Single ST (15, 15)",
             "strategy_type": "single_supertrend",
             "parameters": {
                 "atr_length": 15,
@@ -191,7 +186,7 @@ async def ensure_default_presets(user_id: str) -> None:
         })
         await create_strategy_preset({
             "user_id": user_id,
-            "preset_name": "Default Range Breakout",
+            "preset_name": "[S] Range Breakout LB (EMA:34)",
             "strategy_type": "range_breakout_lazybear",
             "parameters": {
                 "ema_length": 34,
