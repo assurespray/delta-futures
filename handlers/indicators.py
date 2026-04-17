@@ -35,32 +35,22 @@ async def indicators_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+from database.crud import get_strategy_preset_by_id
+
 async def indicator_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Display timeframe selection after indicator selection.
-    
-    Args:
-        update: Telegram update
-        context: Callback context
-    """
     query = update.callback_query
+    preset_id = query.data.replace("indicator_select_", "")
+    preset = await get_strategy_preset_by_id(preset_id)
+    await query.answer(f"Select timeframe")
     
-    # Extract indicator type from callback data
-    indicator_type = query.data.replace("indicator_select_", "")
-    await query.answer(f"Select timeframe for {indicator_type}")
-    
-    # Store indicator type in user context
-    context.user_data['selected_indicator'] = indicator_type
-    
-    if indicator_type == "perusu":
-        message = "🟢 **Perusu Indicator (SuperTrend 20,20)**\n\n"
-    elif indicator_type == "sirusu":
-        message = "🔴 **Sirusu Indicator (SuperTrend 10,10)**\n\n"
+    if preset:
+        context.user_data['selected_preset_id'] = preset_id
+        context.user_data['selected_indicator'] = preset['strategy_type']
+        name = preset.get('preset_name', 'Strategy')
     else:
-        message = "🟢🔴 **Both Indicators (20,20 & 10,10)**\n\n"
-    
-    message += "**Select Timeframe:**\n\n"
-    message += "Choose a timeframe to calculate the indicator:\n"
+        name = "Unknown Strategy"
+        
+    message = f"🟢 **{name}**\n\n**Select Timeframe:**\n\nChoose a timeframe:\n"
     
     keyboard = [
         [
@@ -100,12 +90,14 @@ async def indicator_timeframe_callback(update: Update, context: ContextTypes.DEF
     # Store timeframe in context
     context.user_data['selected_timeframe'] = timeframe
     
-    # Get indicator type
-    indicator_type = context.user_data.get('selected_indicator', 'perusu')
+    preset_id = context.user_data.get('selected_preset_id')
+    from database.crud import get_strategy_preset_by_id
+    preset = await get_strategy_preset_by_id(preset_id)
+    name = preset.get('preset_name', 'Strategy') if preset else 'Strategy'
     
     await query.answer(f"Selected {timeframe} timeframe")
     
-    message = f"**{'🟢 Perusu' if indicator_type == 'perusu' else '🔴 Sirusu'} Indicator**\n\n"
+    message = f"**🟢 {name}**\n\n"
     message += f"**Timeframe:** {timeframe}\n\n"
     message += "**Enter Trading Symbol:**\n\n"
     message += "Type the asset symbol you want to analyze.\n\n"
