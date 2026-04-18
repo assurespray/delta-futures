@@ -6,7 +6,8 @@ from database.crud import (
     get_api_credentials_by_user, get_algo_setups_by_user,
     create_algo_setup, delete_algo_setup, get_algo_setup_by_id,
     get_api_credential_by_id,
-    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets
+    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets,
+    get_open_trade_by_setup
 )
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_product_by_symbol
