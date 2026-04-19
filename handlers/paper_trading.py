@@ -22,6 +22,7 @@ from database.crud import (
     create_screener_setup, get_screener_setups_by_paper_mode,
     get_screener_setup_by_id, update_screener_setup,
     delete_screener_setup,
+    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets,
 )
 from strategy.paper_trader import paper_trader
 from api.delta_client import DeltaExchangeClient
@@ -42,6 +43,10 @@ PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE, PSCR_PROTECTION, P
 
 # Conversation state for editable virtual balance
 PAPER_SET_BALANCE_AMOUNT = 120
+
+# Conversation states for indicator preset selection
+PAPER_INDICATOR = 121
+PSCR_INDICATOR = 122
 
 
 # ==================== MAIN PAPER TRADING MENU ====================
@@ -160,7 +165,7 @@ async def paper_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def paper_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection."""
+    """Handle API selection — show indicator presets."""
     query = update.callback_query
     await query.answer()
     
@@ -174,6 +179,42 @@ async def paper_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['paper_api_id'] = api_id
     context.user_data['paper_api_name'] = cred['api_name']
     
+    user_id = str(query.from_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+    
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Strategy')
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"paper_ind_{pid}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"API: {cred['api_name']}\n\n"
+        "Step 4/10: Select Indicator Strategy:",
+        reply_markup=reply_markup
+    )
+    return PAPER_INDICATOR
+
+
+async def paper_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle indicator preset selection for paper setup."""
+    query = update.callback_query
+    await query.answer()
+    
+    preset_id = query.data.replace("paper_ind_", "")
+    preset = await get_strategy_preset_by_id(preset_id)
+    
+    if not preset:
+        await query.edit_message_text("Preset not found. Use /start to return.")
+        return ConversationHandler.END
+    
+    context.user_data['paper_indicator'] = preset['strategy_type']
+    context.user_data['paper_preset_id'] = preset_id
+    context.user_data['paper_indicator_params'] = preset.get('parameters', {})
+    context.user_data['paper_preset_name'] = preset.get('preset_name', 'Unknown')
+    
     keyboard = [
         [InlineKeyboardButton("Both (Long & Short)", callback_data="paper_dir_both")],
         [InlineKeyboardButton("Long Only", callback_data="paper_dir_long_only")],
@@ -182,8 +223,8 @@ async def paper_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        f"API: {cred['api_name']}\n\n"
-        "Step 4/9: Select trading direction:",
+        f"Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
+        "Step 5/10: Select trading direction:",
         reply_markup=reply_markup
     )
     return PAPER_DIRECTION
@@ -328,7 +369,7 @@ async def paper_protection_selected(update: Update, context: ContextTypes.DEFAUL
         f"**Name:** {ud['paper_setup_name']}\n"
         f"**Description:** {ud['paper_description']}\n"
         f"**API:** {ud['paper_api_name']}\n"
-        f"**Indicator:** Dual SuperTrend\n"
+        f"**Indicator:** {ud.get('paper_preset_name', ud.get('paper_indicator', 'Unknown'))}\n"
         f"**Direction:** {ud['paper_direction'].replace('_', ' ').title()}\n"
         f"**Timeframe:** {ud['paper_timeframe']}\n"
         f"**Asset:** {ud['paper_asset']}\n"
@@ -380,7 +421,9 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "description": ud['paper_description'],
             "api_id": ud['paper_api_id'],
             "api_name": ud['paper_api_name'],
-            "indicator": "dual_supertrend",
+            "indicator": ud.get('paper_indicator', 'dual_supertrend'),
+            "preset_id": ud.get('paper_preset_id'),
+            "indicator_params": ud.get('paper_indicator_params', {}),
             "direction": ud['paper_direction'],
             "timeframe": ud['paper_timeframe'],
             "asset": ud['paper_asset'],
@@ -478,7 +521,7 @@ async def pscr_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def pscr_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection for paper screener."""
+    """Handle API selection for paper screener — show indicator presets."""
     query = update.callback_query
     await query.answer()
     
@@ -492,6 +535,42 @@ async def pscr_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['pscr_api_id'] = api_id
     context.user_data['pscr_api_name'] = cred['api_name']
     
+    user_id = str(query.from_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+    
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Strategy')
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"pscr_ind_{pid}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"API: {cred['api_name']}\n\n"
+        "Step 4/11: Select Indicator Strategy:",
+        reply_markup=reply_markup
+    )
+    return PSCR_INDICATOR
+
+
+async def pscr_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle indicator preset selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    preset_id = query.data.replace("pscr_ind_", "")
+    preset = await get_strategy_preset_by_id(preset_id)
+    
+    if not preset:
+        await query.edit_message_text("Preset not found. Use /start to return.")
+        return ConversationHandler.END
+    
+    context.user_data['pscr_indicator'] = preset['strategy_type']
+    context.user_data['pscr_preset_id'] = preset_id
+    context.user_data['pscr_indicator_params'] = preset.get('parameters', {})
+    context.user_data['pscr_preset_name'] = preset.get('preset_name', 'Unknown')
+    
     keyboard = [
         [InlineKeyboardButton("Every Available Asset", callback_data="pscr_atype_every")],
         [InlineKeyboardButton("Top 10 Gainers Only", callback_data="pscr_atype_gainers")],
@@ -501,8 +580,8 @@ async def pscr_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        f"API: {cred['api_name']}\n\n"
-        "Step 4/10: Select Asset Selection Type:",
+        f"Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
+        "Step 5/11: Select Asset Selection Type:",
         reply_markup=reply_markup
     )
     return PSCR_ASSET_TYPE
@@ -669,7 +748,7 @@ async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT
         f"**Name:** {ud['pscr_name']}\n"
         f"**Description:** {ud['pscr_description']}\n"
         f"**API:** {ud['pscr_api_name']}\n"
-        f"**Indicator:** Dual SuperTrend\n"
+        f"**Indicator:** {ud.get('pscr_preset_name', ud.get('pscr_indicator', 'Unknown'))}\n"
         f"**Asset Selection:** {asset_type_text}\n"
         f"**Direction:** {ud['pscr_direction'].replace('_', ' ').title()}\n"
         f"**Timeframe:** {ud['pscr_timeframe']}\n"
@@ -709,7 +788,9 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "description": ud['pscr_description'],
             "api_id": ud['pscr_api_id'],
             "api_name": ud['pscr_api_name'],
-            "indicator": "dual_supertrend",
+            "indicator": ud.get('pscr_indicator', 'dual_supertrend'),
+            "preset_id": ud.get('pscr_preset_id'),
+            "indicator_params": ud.get('pscr_indicator_params', {}),
             "asset_selection_type": ud['pscr_asset_type'],
             "timeframe": ud['pscr_timeframe'],
             "direction": ud['pscr_direction'],

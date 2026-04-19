@@ -18,7 +18,9 @@ from handlers.presets_menu import (
     presets_menu_callback, preset_add_start, preset_name_received,
     preset_type_selected, preset_params_received, cancel_preset,
     preset_delete_list, preset_delete_confirm,
-    PRESET_NAME, PRESET_TYPE, PRESET_P1, PRESET_P2
+    preset_edit_list, preset_edit_select, preset_edit_params_received,
+    preset_back_to_name,
+    PRESET_NAME, PRESET_TYPE, PRESET_P1, PRESET_P2, PRESET_EDIT_PARAMS
 )
 from handlers.balance import balance_callback
 from handlers.positions import positions_callback
@@ -36,23 +38,34 @@ from handlers.algo_setup import (
     setup_protection_selected, setup_confirmed, cancel_algo_setup,
     algo_view_list_callback, algo_view_detail_callback,
     algo_delete_list_callback, algo_delete_confirm_callback,
+    algo_edit_menu_callback, algo_edit_direction_callback, algo_edit_direction_set,
+    algo_edit_timeframe_callback, algo_edit_timeframe_set,
+    algo_edit_preset_callback, algo_edit_preset_set,
+    algo_edit_protection_callback, algo_edit_protection_set,
+    algo_edit_lotsize_callback, algo_edit_lotsize_received, cancel_edit_setup,
+    setup_back_to_name, setup_back_to_desc, setup_back_to_api,
+    setup_back_to_indicator, setup_back_to_direction, setup_back_to_timeframe,
+    setup_back_to_asset, setup_back_to_lotsize, setup_back_to_protection,
     SETUP_NAME, SETUP_DESC, SETUP_API, SETUP_INDICATOR, SETUP_DIRECTION,
-    SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM
+    SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM,
+    EDIT_LOT_SIZE
 )
 from handlers.screener_setup import (
     screener_setups_callback, screener_add_start, screener_name_received, screener_desc_received,
-    screener_api_selected, screener_asset_type_selected, screener_timeframe_selected,
+    screener_api_selected, screener_indicator_selected, screener_asset_type_selected,
+    screener_timeframe_selected,
     screener_direction_selected, screener_lot_size_received, screener_protection_selected,
     screener_confirmed, cancel_screener_setup,
     screener_view_list_callback, screener_view_detail_callback,
     screener_delete_list_callback, screener_delete_confirm_callback,
-    SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_ASSET_TYPE,
+    SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_INDICATOR, SCREENER_ASSET_TYPE,
     SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
 )
 from handlers.algo_activity import algo_activity_callback
 from handlers.paper_trading import (
     paper_trading_menu_callback, paper_add_start, paper_name_received,
-    paper_desc_received, paper_api_selected, paper_direction_selected,
+    paper_desc_received, paper_api_selected, paper_indicator_selected,
+    paper_direction_selected,
     paper_timeframe_selected, paper_asset_received, paper_lot_size_received,
     paper_leverage_selected, paper_protection_selected, paper_confirmed,
     cancel_paper_setup, paper_view_list_callback, paper_detail_callback,
@@ -60,13 +73,14 @@ from handlers.paper_trading import (
     paper_delete_list_callback, paper_delete_confirm_callback,
     paper_set_balance_callback, paper_set_balance_amount_received,
     pscr_add_start, pscr_name_received, pscr_desc_received,
-    pscr_api_selected, pscr_asset_type_selected, pscr_timeframe_selected,
+    pscr_api_selected, pscr_indicator_selected, pscr_asset_type_selected,
+    pscr_timeframe_selected,
     pscr_direction_selected, pscr_lot_size_received, pscr_leverage_selected,
     pscr_protection_selected, pscr_confirmed,
-    PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION,
+    PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_INDICATOR, PAPER_DIRECTION,
     PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
     PAPER_PROTECTION, PAPER_CONFIRM,
-    PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_ASSET_TYPE,
+    PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_INDICATOR, PSCR_ASSET_TYPE,
     PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE,
     PSCR_PROTECTION, PSCR_CONFIRM,
     PAPER_SET_BALANCE_AMOUNT,
@@ -134,13 +148,32 @@ def create_application() -> Application:
     application.add_handler(indicator_conv_handler)
     
 
-    # Preset Setup conversation handler
+    # Preset Setup conversation handler (create new preset)
     preset_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(preset_add_start, pattern="^preset_add_start$")],
         states={
             PRESET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_name_received)],
-            PRESET_TYPE: [CallbackQueryHandler(preset_type_selected, pattern="^preset_type_")],
+            PRESET_TYPE: [
+                CallbackQueryHandler(preset_type_selected, pattern="^preset_type_"),
+                CallbackQueryHandler(preset_back_to_name, pattern="^preset_back_name$"),
+            ],
             PRESET_P1: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_params_received)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_preset),
+            CallbackQueryHandler(preset_back_to_name, pattern="^preset_back_name$"),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(preset_conv_handler)
+
+    # Preset Edit conversation handler (edit existing preset parameters)
+    preset_edit_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(preset_edit_select, pattern="^preset_edit_select_")],
+        states={
+            PRESET_EDIT_PARAMS: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_edit_params_received)],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_preset),
@@ -149,21 +182,49 @@ def create_application() -> Application:
         per_message=False,
         allow_reentry=True
     )
-    application.add_handler(preset_conv_handler)
+    application.add_handler(preset_edit_conv_handler)
+
     # Algo Setup conversation handler
     algo_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(algo_add_start, pattern="^algo_add_start$")],
         states={
             SETUP_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_name_received)],
-            SETUP_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_desc_received)],
-            SETUP_API: [CallbackQueryHandler(setup_api_selected, pattern="^setup_api_")],
-            SETUP_INDICATOR: [CallbackQueryHandler(setup_indicator_selected, pattern="^setup_ind_")],
-            SETUP_DIRECTION: [CallbackQueryHandler(setup_direction_selected, pattern="^setup_dir_")],
-            SETUP_TIMEFRAME: [CallbackQueryHandler(setup_timeframe_selected, pattern="^setup_tf_")],
-            SETUP_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_asset_received)],
-            SETUP_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_lot_size_received)],
-            SETUP_PROTECTION: [CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_")],
-            SETUP_CONFIRM: [CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_")]
+            SETUP_DESC: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_desc_received),
+                CallbackQueryHandler(setup_back_to_name, pattern="^setup_back_name$"),
+            ],
+            SETUP_API: [
+                CallbackQueryHandler(setup_api_selected, pattern="^setup_api_"),
+                CallbackQueryHandler(setup_back_to_desc, pattern="^setup_back_desc$"),
+            ],
+            SETUP_INDICATOR: [
+                CallbackQueryHandler(setup_indicator_selected, pattern="^setup_ind_"),
+                CallbackQueryHandler(setup_back_to_api, pattern="^setup_back_api$"),
+            ],
+            SETUP_DIRECTION: [
+                CallbackQueryHandler(setup_direction_selected, pattern="^setup_dir_"),
+                CallbackQueryHandler(setup_back_to_indicator, pattern="^setup_back_indicator$"),
+            ],
+            SETUP_TIMEFRAME: [
+                CallbackQueryHandler(setup_timeframe_selected, pattern="^setup_tf_"),
+                CallbackQueryHandler(setup_back_to_direction, pattern="^setup_back_direction$"),
+            ],
+            SETUP_ASSET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_asset_received),
+                CallbackQueryHandler(setup_back_to_timeframe, pattern="^setup_back_timeframe$"),
+            ],
+            SETUP_LOT_SIZE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_lot_size_received),
+                CallbackQueryHandler(setup_back_to_asset, pattern="^setup_back_asset$"),
+            ],
+            SETUP_PROTECTION: [
+                CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_"),
+                CallbackQueryHandler(setup_back_to_lotsize, pattern="^setup_back_lotsize$"),
+            ],
+            SETUP_CONFIRM: [
+                CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_"),
+                CallbackQueryHandler(setup_back_to_protection, pattern="^setup_back_protection$"),
+            ]
         },
         fallbacks=[
             CommandHandler("cancel", cancel_algo_setup),
@@ -173,6 +234,21 @@ def create_application() -> Application:
         allow_reentry=True
     )
     application.add_handler(algo_conv_handler)
+
+    # Algo Edit Lot Size conversation handler (text input)
+    algo_edit_lotsize_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(algo_edit_lotsize_callback, pattern="^algo_editf_lotsize_")],
+        states={
+            EDIT_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, algo_edit_lotsize_received)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_edit_setup),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(algo_edit_lotsize_conv_handler)
     
     # ============================================================
     # CALLBACK QUERY HANDLERS (Order matters - most specific first)
@@ -191,10 +267,10 @@ def create_application() -> Application:
     # Positions handler
     application.add_handler(CallbackQueryHandler(positions_callback, pattern="^(menu_positions|refresh_positions)$"))
     
-    # Orders handlers
+    # Orders handlers (order_cancel_all_ BEFORE order_cancel_ to avoid prefix interception)
     application.add_handler(CallbackQueryHandler(orders_callback, pattern="^menu_orders$"))
-    application.add_handler(CallbackQueryHandler(order_cancel_callback, pattern="^order_cancel_"))
     application.add_handler(CallbackQueryHandler(order_cancel_all_callback, pattern="^order_cancel_all_"))
+    application.add_handler(CallbackQueryHandler(order_cancel_callback, pattern="^order_cancel_"))
     
     # ✅ Indicators handlers (ALL handlers needed)
     application.add_handler(CallbackQueryHandler(indicators_callback, pattern="^menu_indicators$"))
@@ -205,11 +281,25 @@ def create_application() -> Application:
 
     # Strategy Presets handlers
     application.add_handler(CallbackQueryHandler(presets_menu_callback, pattern="^menu_indicator_settings$"))
+    application.add_handler(CallbackQueryHandler(preset_edit_list, pattern="^preset_edit_list$"))
     application.add_handler(CallbackQueryHandler(preset_delete_list, pattern="^preset_delete_list$"))
     application.add_handler(CallbackQueryHandler(preset_delete_confirm, pattern="^preset_del_"))
+
     # Algo Setups handlers
     application.add_handler(CallbackQueryHandler(algo_setups_callback, pattern="^menu_algo_setups$"))
     application.add_handler(CallbackQueryHandler(algo_view_list_callback, pattern="^algo_view_list$"))
+    # Edit setup handlers - SPECIFIC patterns first, then general algo_edit_ last
+    application.add_handler(CallbackQueryHandler(algo_edit_direction_callback, pattern="^algo_editf_direction_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_timeframe_callback, pattern="^algo_editf_timeframe_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_preset_callback, pattern="^algo_editf_preset_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_protection_callback, pattern="^algo_editf_protection_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_direction_set, pattern="^algo_edset_dir_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_timeframe_set, pattern="^algo_edset_tf_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_preset_set, pattern="^algo_edset_preset_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_protection_set, pattern="^algo_edset_prot_"))
+    # General edit menu (algo_edit_{setup_id}) - AFTER specific algo_editf_/algo_edset_ patterns
+    application.add_handler(CallbackQueryHandler(algo_edit_menu_callback, pattern="^algo_edit_"))
+    # View/delete handlers
     application.add_handler(CallbackQueryHandler(algo_view_detail_callback, pattern="^algo_view_"))
     application.add_handler(CallbackQueryHandler(algo_delete_list_callback, pattern="^algo_delete_list$"))
     application.add_handler(CallbackQueryHandler(algo_delete_confirm_callback, pattern="^algo_delete_confirm_"))
@@ -223,6 +313,7 @@ def create_application() -> Application:
             SCREENER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_name_received)],
             SCREENER_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_desc_received)],
             SCREENER_API: [CallbackQueryHandler(screener_api_selected, pattern="^screener_api_")],
+            SCREENER_INDICATOR: [CallbackQueryHandler(screener_indicator_selected, pattern="^screener_ind_")],
             SCREENER_ASSET_TYPE: [CallbackQueryHandler(screener_asset_type_selected, pattern="^screener_atype_")],
             SCREENER_TIMEFRAME: [CallbackQueryHandler(screener_timeframe_selected, pattern="^screener_tf_")],
             SCREENER_DIRECTION: [CallbackQueryHandler(screener_direction_selected, pattern="^screener_dir_")],
@@ -258,6 +349,7 @@ def create_application() -> Application:
             PAPER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_name_received)],
             PAPER_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_desc_received)],
             PAPER_API: [CallbackQueryHandler(paper_api_selected, pattern="^paper_api_")],
+            PAPER_INDICATOR: [CallbackQueryHandler(paper_indicator_selected, pattern="^paper_ind_")],
             PAPER_DIRECTION: [CallbackQueryHandler(paper_direction_selected, pattern="^paper_dir_")],
             PAPER_TIMEFRAME: [CallbackQueryHandler(paper_timeframe_selected, pattern="^paper_tf_")],
             PAPER_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_asset_received)],
@@ -282,6 +374,7 @@ def create_application() -> Application:
             PSCR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_name_received)],
             PSCR_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_desc_received)],
             PSCR_API: [CallbackQueryHandler(pscr_api_selected, pattern="^pscr_api_")],
+            PSCR_INDICATOR: [CallbackQueryHandler(pscr_indicator_selected, pattern="^pscr_ind_")],
             PSCR_ASSET_TYPE: [CallbackQueryHandler(pscr_asset_type_selected, pattern="^pscr_atype_")],
             PSCR_TIMEFRAME: [CallbackQueryHandler(pscr_timeframe_selected, pattern="^pscr_tf_")],
             PSCR_DIRECTION: [CallbackQueryHandler(pscr_direction_selected, pattern="^pscr_dir_")],

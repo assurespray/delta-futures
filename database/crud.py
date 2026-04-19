@@ -143,6 +143,21 @@ async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error getting preset by id: {e}")
         return None
 
+async def update_strategy_preset(preset_id: str, update_data: Dict[str, Any]) -> bool:
+    """Update a strategy preset's fields."""
+    try:
+        db = mongodb.get_db()
+        collection = db["strategy_presets"]
+        update_data["updated_at"] = datetime.utcnow()
+        result = await collection.update_one(
+            {"_id": ObjectId(preset_id)},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"Error updating preset: {e}")
+        return False
+
 async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
     try:
         db = mongodb.get_db()

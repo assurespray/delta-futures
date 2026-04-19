@@ -8,7 +8,8 @@ from database.crud import (
     get_screener_setups_by_user,
     delete_screener_setup,
     get_screener_setup_by_id,
-    get_api_credential_by_id
+    get_api_credential_by_id,
+    get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets,
 )
 from api.delta_client import DeltaExchangeClient
 from utils.market_utils import get_available_assets, get_top_gainers, get_top_losers
@@ -16,9 +17,11 @@ from utils.market_utils import get_available_assets, get_top_gainers, get_top_lo
 logger = logging.getLogger(__name__)
 
 # Conversation states
-SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_ASSET_TYPE = range(4)
-SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION = range(4, 8)
-SCREENER_CONFIRM = 8
+SCREENER_NAME, SCREENER_DESC, SCREENER_API = range(3)
+SCREENER_INDICATOR = 3
+SCREENER_ASSET_TYPE = 4
+SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION = range(5, 9)
+SCREENER_CONFIRM = 9
 
 
 async def screener_setups_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,7 +61,7 @@ async def screener_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await query.edit_message_text(
         "➕ **Create New Screener Setup**\n\n"
-        "Step 1/8: Enter a name for this screener:\n\n"
+        "Step 1/9: Enter a name for this screener:\n\n"
         "Send /cancel to abort.",
         parse_mode="Markdown"
     )
@@ -78,7 +81,7 @@ async def screener_name_received(update: Update, context: ContextTypes.DEFAULT_T
     
     await update.message.reply_text(
         f"✅ Screener Name: {name}\n\n"
-        f"Step 2/8: Enter a description:\n\n"
+        f"Step 2/9: Enter a description:\n\n"
         f"Send /cancel to abort."
     )
     
@@ -105,7 +108,7 @@ async def screener_desc_received(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     
     message = f"✅ Description saved\n\n"
-    message += f"Step 3/8: Select API account:\n"
+    message += f"Step 3/9: Select API account:\n"
     
     keyboard = []
     for cred in credentials:
@@ -121,7 +124,7 @@ async def screener_desc_received(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def screener_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection."""
+    """Handle API selection — show indicator presets."""
     query = update.callback_query
     await query.answer()
     
@@ -133,8 +136,44 @@ async def screener_api_selected(update: Update, context: ContextTypes.DEFAULT_TY
     api_name = cred['api_name'] if cred else "Unknown"
     context.user_data['screener_api_name'] = api_name
     
-    message = f"✅ API: {api_name}\n\n"
-    message += f"Step 4/8: Select Asset Selection Type:\n"
+    # Ensure defaults exist and load presets
+    user_id = str(query.from_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+    
+    keyboard = []
+    for p in presets:
+        pid = str(p['_id'])
+        keyboard.append([InlineKeyboardButton(p['preset_name'], callback_data=f"screener_ind_{pid}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        f"✅ API: {api_name}\n\n"
+        "Step 4/9: Select Indicator Strategy:",
+        reply_markup=reply_markup
+    )
+    return SCREENER_INDICATOR
+
+
+async def screener_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle indicator preset selection for screener."""
+    query = update.callback_query
+    await query.answer()
+    
+    preset_id = query.data.replace("screener_ind_", "")
+    preset = await get_strategy_preset_by_id(preset_id)
+    
+    if not preset:
+        await query.edit_message_text("Preset not found. Use /start to return.")
+        return ConversationHandler.END
+    
+    context.user_data['screener_indicator'] = preset['strategy_type']
+    context.user_data['screener_preset_id'] = preset_id
+    context.user_data['screener_indicator_params'] = preset.get('parameters', {})
+    context.user_data['screener_preset_name'] = preset.get('preset_name', 'Unknown')
+    
+    message = f"✅ Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
+    message += f"Step 5/9: Select Asset Selection Type:\n"
     message += f"\n📊 How would you like to select assets to trade?"
     
     keyboard = [
@@ -169,7 +208,7 @@ async def screener_asset_type_selected(update: Update, context: ContextTypes.DEF
     type_text = type_text_map.get(asset_type, asset_type)
     
     message = f"✅ Asset Type: {type_text}\n\n"
-    message += f"Step 5/8: Select Timeframe:\n"
+    message += f"Step 6/9: Select Timeframe:\n"
     
     keyboard = [
         [
@@ -204,7 +243,7 @@ async def screener_timeframe_selected(update: Update, context: ContextTypes.DEFA
     context.user_data['screener_timeframe'] = timeframe
     
     message = f"✅ Timeframe: {timeframe}\n\n"
-    message += f"Step 6/8: Select Trading Direction:\n"
+    message += f"Step 7/9: Select Trading Direction:\n"
     
     keyboard = [
         [InlineKeyboardButton("↕️ Both Long and Short", callback_data="screener_dir_both")],
@@ -234,7 +273,7 @@ async def screener_direction_selected(update: Update, context: ContextTypes.DEFA
     context.user_data['screener_direction'] = direction_code
     
     message = f"✅ Direction: {direction_text}\n\n"
-    message += f"Step 7/8: Enter Lot Size (per trade):\n\n"
+    message += f"Step 8/9: Enter Lot Size (per trade):\n\n"
     message += f"Send /cancel to abort."
     
     await query.edit_message_text(message)
@@ -254,8 +293,8 @@ async def screener_lot_size_received(update: Update, context: ContextTypes.DEFAU
         context.user_data['screener_lot_size'] = lot_size
         
         message = f"✅ Lot Size: {lot_size}\n\n"
-        message += f"Step 8/8: Additional Protection (Stop-Loss)?\n\n"
-        message += f"If enabled, a stop-loss order will be placed at Sirusu price during entry."
+        message += f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
+        message += f"If enabled, a stop-loss order will be placed based on the indicator strategy."
         
         keyboard = [
             [InlineKeyboardButton("✅ Yes (Enable Protection)", callback_data="screener_prot_yes")],
@@ -297,6 +336,7 @@ async def screener_protection_selected(update: Update, context: ContextTypes.DEF
     message += f"**Name:** {user_data['screener_name']}\n"
     message += f"**Description:** {user_data['screener_description']}\n"
     message += f"**API Account:** {user_data['screener_api_name']}\n"
+    message += f"**Indicator:** {user_data.get('screener_preset_name', user_data.get('screener_indicator', 'Unknown'))}\n"
     message += f"**Asset Selection:** {asset_type_text}\n"
     message += f"**Timeframe:** {user_data['screener_timeframe']}\n"
     message += f"**Direction:** {user_data['screener_direction'].replace('_', ' ').title()}\n"
@@ -340,7 +380,9 @@ async def screener_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "description": user_data['screener_description'],
             "api_id": user_data['screener_api_id'],
             "api_name": user_data['screener_api_name'],
-            "indicator": "dual_supertrend",
+            "indicator": user_data.get('screener_indicator', 'dual_supertrend'),
+            "preset_id": user_data.get('screener_preset_id'),
+            "indicator_params": user_data.get('screener_indicator_params', {}),
             "asset_selection_type": user_data['screener_asset_type'],
             "timeframe": user_data['screener_timeframe'],
             "direction": user_data['screener_direction'],
@@ -372,7 +414,7 @@ async def screener_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"The bot will now automatically:\n"
             f"• Identify {asset_type_text.lower()}\n"
             f"• Calculate indicators on {user_data['screener_timeframe']} timeframe\n"
-            f"• Execute trades based on Perusu/Sirusu signals\n\n"
+            f"• Execute trades based on indicator signals\n\n"
             f"Use /start to return to main menu.",
             parse_mode="Markdown"
         )
