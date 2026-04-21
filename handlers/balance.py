@@ -48,7 +48,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    message = "💵 **Account Balances**\n\n"
+    message = "💵 <b>Account Balances</b>\n\n"
 
     for cred in credentials:
         api_name = cred['api_name']
@@ -56,7 +56,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             full_cred = await get_api_credential_by_id(cred_id, decrypt=True)
             if not full_cred:
-                message += f"❌ **{api_name}**: Failed to load credentials\n\n"
+                message += f"❌ <b>{api_name}</b>: Failed to load credentials\n\n"
                 continue
 
             client = DeltaExchangeClient(
@@ -70,7 +70,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             balances = balances_resp['result'] if balances_resp and 'result' in balances_resp else []
             if not balances:
-                message += f"❌ **{api_name}**: No wallet balances found\n\n"
+                message += f"❌ <b>{api_name}</b>: No wallet balances found\n\n"
                 continue
 
             # Filter out zero-balance assets
@@ -81,7 +81,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     active.append(asset)
 
             if not active:
-                message += f"✅ **{api_name}**\n└ No active balances\n\n"
+                message += f"✅ <b>{api_name}</b>\n└ No active balances\n\n"
                 continue
 
             # Sum total INR value across all assets
@@ -94,7 +94,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception:
                         pass
 
-            message += f"✅ **{api_name}**"
+            message += f"✅ <b>{api_name}</b>"
             if total_inr > 0:
                 message += f"  (Total: ₹{_fmt_inr(total_inr)})"
             message += "\n"
@@ -114,7 +114,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 avail_str = _fmt_amount(avail)
                 inr_str = f" (₹{_fmt_inr(inr_total)})" if inr_total is not None else ""
 
-                line = f"{prefix} **{sym}**: {bal_str}{inr_str}"
+                line = f"{prefix} <b>{sym}</b>: {bal_str}{inr_str}"
                 # Only show available/locked if they differ from total
                 if locked > 0:
                     line += f"\n{'│' if not is_last else ' '}   Avail: {avail_str} · Locked: {_fmt_amount(locked)}"
@@ -124,7 +124,7 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             logger.error(f"❌ Error fetching balance for {api_name}: {e}")
-            message += f"❌ **{api_name}**: Error - {str(e)[:50]}\n\n"
+            message += f"❌ <b>{api_name}</b>: Error - {str(e)[:50]}\n\n"
 
     keyboard = [
         [
@@ -133,5 +133,5 @@ async def balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
+    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
     

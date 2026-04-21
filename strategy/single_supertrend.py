@@ -121,6 +121,12 @@ class SingleSuperTrendStrategy:
             if not st_result:
                 return None
 
+            logger.info(f"✅ SINGLE ST CALCULATED SUCCESSFULLY")
+            logger.info(f"   📊 SuperTrend: {st_result['signal_text']} @ ${st_result['supertrend_value']:.5f}")
+            logger.info(f"   📊 Current Price: ${st_result.get('latest_close', 0):.5f}")
+            logger.info(f"   📊 Latest Candle: High ${prev_high:.5f}, Low ${prev_low:.5f}")
+            logger.info(f"   📊 ATR({self.atr_length}): {st_result.get('atr', 0):.6f}")
+
             result = {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -148,12 +154,15 @@ class SingleSuperTrendStrategy:
 
     def detect_signal_flip(self, current_signal: int, last_signal: Optional[int]) -> Optional[str]:
         if last_signal is None:
+            logger.info(f"📍 Initializing Single ST state: {'Uptrend' if current_signal == 1 else 'Downtrend'} (waiting for flip)")
             return None
         if current_signal == last_signal:
             return None
         if current_signal == 1 and last_signal == -1:
+            logger.info(f"🔄 Single ST FLIP: Downtrend → Uptrend (LONG entry signal)")
             return "long"
         elif current_signal == -1 and last_signal == 1:
+            logger.info(f"🔄 Single ST FLIP: Uptrend → Downtrend (SHORT entry signal)")
             return "short"
         return None
     
@@ -164,11 +173,13 @@ class SingleSuperTrendStrategy:
             current_price = indicators_data.get("current_price")
         
             if not st or not previous_candle or not current_price:
+                logger.error("❌ Missing indicator data for Single ST entry signal")
                 return None
         
             prev_high = previous_candle.get("high")
             prev_low = previous_candle.get("low")
             if not prev_high or not prev_low:
+                logger.error("❌ Missing latest candle high/low for Single ST")
                 return None
         
             current_signal = st.get("signal")
@@ -180,6 +191,8 @@ class SingleSuperTrendStrategy:
             if entry_side == "long":
                 trigger_price = prev_high + BREAKOUT_PIP_OFFSET
                 if current_price >= trigger_price:
+                    logger.warning(f"⚠️ Price already above breakout level!")
+                    logger.warning(f"   → Using MARKET order (immediate execution)")
                     return {
                         'side': 'long', 'trigger_price': current_price, 'immediate': True,
                         'entry_reason': 'ST flip to uptrend (immediate)',
@@ -188,12 +201,15 @@ class SingleSuperTrendStrategy:
             else:
                 trigger_price = prev_low - BREAKOUT_PIP_OFFSET
                 if current_price <= trigger_price:
+                    logger.warning(f"⚠️ Price already below breakout level!")
+                    logger.warning(f"   → Using MARKET order (immediate execution)")
                     return {
                         'side': 'short', 'trigger_price': current_price, 'immediate': True,
                         'entry_reason': 'ST flip to downtrend (immediate)',
                         'perusu_signal': current_signal, 'perusu_value': st['supertrend_value'], 'sl_value': st['supertrend_value'], 'latest_low': prev_low
                     }
         
+            logger.info(f"🎯 Single ST Breakout {entry_side.upper()} trigger: ${trigger_price:.5f} (SL: ${st['supertrend_value']:.5f})")
             return {
                 "side": entry_side, "trigger_price": trigger_price, "immediate": False,
                 "perusu_signal": current_signal, "perusu_value": st['supertrend_value'],
@@ -203,6 +219,7 @@ class SingleSuperTrendStrategy:
             }
         
         except Exception as e:
+            logger.error(f"❌ Exception generating Single ST entry signal: {e}")
             return None
     
     def generate_exit_signal(self, algo_setup_id: str, position_side: str, indicators_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -220,6 +237,7 @@ class SingleSuperTrendStrategy:
                 should_exit = True
             
             if should_exit:
+                logger.info(f"🚪 Single ST EXIT signal: {'Downtrend → Uptrend' if current_signal == 1 else 'Uptrend → Downtrend'} (Close {position_side.upper()})")
                 return {
                     "exit_reason": f"ST flip to {'uptrend' if current_signal == 1 else 'downtrend'}",
                     "sirusu_signal": current_signal,
@@ -227,6 +245,7 @@ class SingleSuperTrendStrategy:
                 }
             return None
         except Exception as e:
+            logger.error(f"❌ Exception generating Single ST exit signal: {e}")
             return None
 
 strategy_instance = SingleSuperTrendStrategy()

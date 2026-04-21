@@ -438,6 +438,23 @@ async def save_indicator_cache(cache_data: dict) -> bool:
         logger.error(f"❌ Failed to save indicator cache: {e}")
         return False
 
+async def get_last_perusu_signal(setup_id: str, asset: str, timeframe: str) -> int | None:
+    """Fetch the previously cached perusu_signal for a setup before it gets overwritten."""
+    try:
+        db = mongodb.get_db()
+        cache = await db.indicator_cache.find_one({
+            "setup_id": setup_id,
+            "asset": asset,
+            "timeframe": timeframe
+        })
+        if cache and "perusu_signal" in cache:
+            return cache["perusu_signal"]
+        return None
+    except Exception as e:
+        logger.error(f"❌ Failed to get last perusu signal: {e}")
+        return None
+
+
 async def get_indicator_cache_by_type(setup_type: str, is_paper_trade: bool) -> list:
     try:
         db = mongodb.get_db()

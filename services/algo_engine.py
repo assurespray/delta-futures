@@ -11,7 +11,7 @@ from database.crud import (
     update_trade_state,
     get_all_active_algo_setups, get_api_credential_by_id,
     update_algo_setup, save_indicator_cache,
-    get_algo_setup_by_id
+    get_algo_setup_by_id, get_last_perusu_signal
 )
 from api.delta_client import DeltaExchangeClient
 from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust methods
@@ -151,8 +151,10 @@ class AlgoEngine:
                 if not indicator_result:
                     return
                 
+                # Fetch previous perusu signal BEFORE overwriting cache
+                last_perusu_signal = await get_last_perusu_signal(setup_id, asset, timeframe)
+                
                 # Save to Indicator Cache for Dashboard
-                from database.crud import save_indicator_cache
                 cache_data = {
                     "setup_id": setup_id,
                     "setup_type": "algo",
@@ -178,7 +180,7 @@ class AlgoEngine:
             strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
             entry_signal = strategy.generate_entry_signal(
                 setup_id,
-                None,
+                last_perusu_signal,
                 indicator_result
             )
             
