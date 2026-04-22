@@ -162,3 +162,22 @@ PAPER_TRADE_TAKER_FEE = 0.0005                  # 0.05% taker fee (realistic)
 PAPER_TRADE_MAKER_FEE = 0.0002                  # 0.02% maker fee
 PAPER_TRADE_PRICE_CHECK_INTERVAL = 5            # Seconds between SL/entry price checks
 PAPER_TRADE_MAX_OPEN_POSITIONS = 20             # Max simultaneous paper positions
+
+# ===== SCREENER ASSET TYPE DISPLAY MAPS =====
+# Full labels for setup summaries and detail views
+ASSET_TYPE_TEXT = {
+    "every": "Every Available Asset",
+    "gainers": "Top 10 Gainers",
+    "losers": "Top 10 Losers",
+    "mixed": "Top 10 Gainers + Losers",
+    "volume": "Top 10 Highest Volume",
+}
+
+# Short labels for compact list views
+ASSET_TYPE_TEXT_SHORT = {
+    "every": "All Assets",
+    "gainers": "Gainers",
+    "losers": "Losers",
+    "mixed": "G+L",
+    "volume": "Volume",
+}

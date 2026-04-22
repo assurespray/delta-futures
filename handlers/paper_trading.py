@@ -13,6 +13,7 @@ Features:
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+from config.constants import ASSET_TYPE_TEXT, ASSET_TYPE_TEXT_SHORT
 from database.crud import (
     get_api_credentials_by_user, create_algo_setup,
     get_algo_setups_by_paper_mode, get_algo_setup_by_id,
@@ -596,14 +597,7 @@ async def pscr_asset_type_selected(update: Update, context: ContextTypes.DEFAULT
     asset_type = query.data.replace("pscr_atype_", "")
     context.user_data['pscr_asset_type'] = asset_type
     
-    type_text_map = {
-        "every": "Every Available Asset",
-        "gainers": "Top 10 Gainers",
-        "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers",
-        "volume": "Top 10 Highest Volume"
-    }
-    type_text = type_text_map.get(asset_type, asset_type)
+    type_text = ASSET_TYPE_TEXT.get(asset_type, asset_type)
     
     keyboard = [
         [
@@ -737,14 +731,7 @@ async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT
     
     ud = context.user_data
     
-    type_text_map = {
-        "every": "Every Available Asset",
-        "gainers": "Top 10 Gainers",
-        "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers",
-        "volume": "Top 10 Highest Volume"
-    }
-    asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
+    asset_type_text = ASSET_TYPE_TEXT.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
     
     message = (
         "**Paper Screener Summary**\n\n"
@@ -809,14 +796,7 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Ensure paper balance exists
         await get_paper_balance(user_id)
         
-        type_text_map = {
-            "every": "Every Available Asset",
-            "gainers": "Top 10 Gainers",
-            "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers",
-            "volume": "Top 10 Highest Volume"
-        }
-        asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
+        asset_type_text = ASSET_TYPE_TEXT.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
         
         await query.edit_message_text(
             f"**Paper Screener Created!**\n\n"
@@ -874,17 +854,9 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
             callback_data=f"paper_detail_algo_{setup['_id']}"
         )])
     
-    type_text_map = {
-        "every": "All Assets",
-        "gainers": "Gainers",
-        "losers": "Losers",
-        "mixed": "G+L",
-        "volume": "Volume"
-    }
-    
     for setup in scr_setups:
         status = "Active" if setup.get("is_active") else "Inactive"
-        atype = type_text_map.get(setup.get("asset_selection_type", ""), "?")
+        atype = ASSET_TYPE_TEXT_SHORT.get(setup.get("asset_selection_type", ""), "?")
         
         message += (
             f"[Screener] **{setup['setup_name']}**\n"
@@ -953,14 +925,7 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if sl_price:
             message += f"**Stop-Loss:** ${sl_price:.5f}\n"
     else:
-        type_text_map = {
-            "every": "Every Available Asset",
-            "gainers": "Top 10 Gainers",
-            "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers",
-            "volume": "Top 10 Highest Volume"
-        }
-        atype = type_text_map.get(setup.get("asset_selection_type", ""), "Unknown")
+        atype = ASSET_TYPE_TEXT.get(setup.get("asset_selection_type", ""), "Unknown")
         
         message = (
             f"**{label} {setup['setup_name']}**\n\n"
@@ -1097,16 +1062,8 @@ async def paper_delete_list_callback(update: Update, context: ContextTypes.DEFAU
             callback_data=f"paper_del_confirm_algo_{setup['_id']}"
         )])
     
-    type_text_map = {
-        "every": "All Assets",
-        "gainers": "Gainers",
-        "losers": "Losers",
-        "mixed": "G+L",
-        "volume": "Volume"
-    }
-    
     for setup in scr_setups:
-        atype = type_text_map.get(setup.get("asset_selection_type", ""), "?")
+        atype = ASSET_TYPE_TEXT_SHORT.get(setup.get("asset_selection_type", ""), "?")
         keyboard.append([InlineKeyboardButton(
             f"[Screener] {setup['setup_name']} - {atype}",
             callback_data=f"paper_del_confirm_scr_{setup['_id']}"

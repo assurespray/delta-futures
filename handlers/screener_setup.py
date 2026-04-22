@@ -13,6 +13,7 @@ from database.crud import (
 )
 from api.delta_client import DeltaExchangeClient
 from utils.market_utils import get_available_assets, get_top_gainers, get_top_losers
+from config.constants import ASSET_TYPE_TEXT
 
 logger = logging.getLogger(__name__)
 
@@ -199,15 +200,7 @@ async def screener_asset_type_selected(update: Update, context: ContextTypes.DEF
     asset_type = query.data.replace("screener_atype_", "")
     context.user_data['screener_asset_type'] = asset_type
     
-    type_text_map = {
-        "every": "Every Available Asset",
-        "gainers": "Top 10 Gainers",
-        "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers",
-        "volume": "Top 10 Highest Volume"
-    }
-    
-    type_text = type_text_map.get(asset_type, asset_type)
+    type_text = ASSET_TYPE_TEXT.get(asset_type, asset_type)
     
     message = f"✅ Asset Type: {type_text}\n\n"
     message += f"Step 6/9: Select Timeframe:\n"
@@ -325,15 +318,7 @@ async def screener_protection_selected(update: Update, context: ContextTypes.DEF
     # Show confirmation
     user_data = context.user_data
     
-    type_text_map = {
-        "every": "Every Available Asset",
-        "gainers": "Top 10 Gainers",
-        "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers",
-        "volume": "Top 10 Highest Volume"
-    }
-    
-    asset_type_text = type_text_map.get(user_data['screener_asset_type'], "Unknown")
+    asset_type_text = ASSET_TYPE_TEXT.get(user_data['screener_asset_type'], "Unknown")
     
     message = "✅ **Screener Setup Summary**\n\n"
     message += f"**Name:** {user_data['screener_name']}\n"
@@ -399,15 +384,7 @@ async def screener_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not setup_id:
             raise Exception("Failed to create screener setup")
         
-        type_text_map = {
-            "every": "Every Available Asset",
-            "gainers": "Top 10 Gainers",
-            "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers",
-            "volume": "Top 10 Highest Volume"
-        }
-        
-        asset_type_text = type_text_map.get(user_data['screener_asset_type'], "Unknown")
+        asset_type_text = ASSET_TYPE_TEXT.get(user_data['screener_asset_type'], "Unknown")
         
         await query.edit_message_text(
             f"✅ **Screener Setup Created Successfully!**\n\n"
@@ -492,15 +469,7 @@ async def screener_view_detail_callback(update: Update, context: ContextTypes.DE
     
     status_emoji = "🟢 Active" if setup.get('is_active', False) else "🔴 Inactive"
     
-    type_text_map = {
-        "every": "Every Available Asset",
-        "gainers": "Top 10 Gainers",
-        "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers",
-        "volume": "Top 10 Highest Volume"
-    }
-    
-    asset_type_text = type_text_map.get(setup.get('asset_selection_type'), "Unknown")
+    asset_type_text = ASSET_TYPE_TEXT.get(setup.get('asset_selection_type'), "Unknown")
     
     message = f"📋 **Screener Setup Details**\n\n"
     message += f"**Name:** {setup['setup_name']}\n"

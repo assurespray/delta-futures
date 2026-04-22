@@ -31,21 +31,6 @@ async def get_all_perpetual_tickers(client: DeltaExchangeClient) -> List[Dict]:
     except Exception as e:
         logger.error(f"❌ Error fetching tickers: {e}")
         return []
-        
-        tickers = data.get("result", [])
-        
-        # Filter only perpetual futures (contract_type = "perpetual_futures")
-        perpetual_tickers = [
-            t for t in tickers 
-            if t.get("contract_type") == "perpetual_futures"
-        ]
-        
-        logger.info(f"✅ Fetched {len(perpetual_tickers)} perpetual futures tickers")
-        return perpetual_tickers
-        
-    except Exception as e:
-        logger.error(f"❌ Error fetching tickers: {e}")
-        return []
 
 
 async def calculate_percentage_change_24h(
