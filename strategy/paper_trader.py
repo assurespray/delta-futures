@@ -33,7 +33,7 @@ class PaperTrader:
         pass
     
     async def place_virtual_entry(
-        self, client, algo_setup, entry_side, breakout_price, sirusu_value, immediate=False
+        self, client, algo_setup, entry_side, breakout_price, stop_loss_price, immediate=False
     ) -> bool:
         try:
             setup_id = str(algo_setup["_id"])
@@ -67,7 +67,7 @@ class PaperTrader:
                 "status": "pending_entry",
                 "entry_trigger_price": breakout_price,
                 "pending_entry_side": entry_side,
-                "pending_sl_price": sirusu_value,
+                "pending_sl_price": stop_loss_price,
                 "is_paper_trade": True,
                 "paper_leverage": leverage,
                 "paper_margin_used": margin_required,

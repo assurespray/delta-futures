@@ -41,7 +41,7 @@ class PositionManager:
                                         algo_setup: Dict[str, Any],
                                         entry_side: str, 
                                         breakout_price: float,
-                                        sirusu_value: float,
+                                        stop_loss_price: float,
                                         immediate: bool = False) -> bool:
         try:
             # ========== PAPER TRADE ROUTING ==========
@@ -51,7 +51,7 @@ class PositionManager:
                     algo_setup=algo_setup,
                     entry_side=entry_side,
                     breakout_price=breakout_price,
-                    sirusu_value=sirusu_value,
+                    stop_loss_price=stop_loss_price,
                     immediate=immediate
                 )
             # ========== END PAPER TRADE ROUTING ==========
@@ -95,7 +95,7 @@ class PositionManager:
                 "entry_trigger_price": breakout_price,
                 "pending_entry_direction_signal": 1 if entry_side == "long" else -1,
                 "pending_entry_side": entry_side,
-                "pending_sl_price": sirusu_value,
+                "pending_sl_price": stop_loss_price,
                 "is_paper_trade": False,
                 "last_signal_time": datetime.utcnow()
             }
@@ -138,7 +138,7 @@ class PositionManager:
                 })
                 
                 if algo_setup.get("additional_protection", False):
-                    sl_price = sirusu_value
+                    sl_price = stop_loss_price
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sl_price,
                         setup_id, symbol, algo_setup.get("user_id")
@@ -185,7 +185,7 @@ class PositionManager:
 
     async def check_entry_order_filled(self, client: DeltaExchangeClient,
                                       trade_state: Dict[str, Any],
-                                      sirusu_value: float = None) -> bool:
+                                      stop_loss_price: float = None) -> bool:
         try:
             if trade_state.get("is_paper_trade", False):
                 return False
@@ -239,7 +239,7 @@ class PositionManager:
                     "source": "algo"
                 })
 
-                sl_price = sirusu_value
+                sl_price = stop_loss_price
                 if not sl_price:
                     # Fetch absolute latest Sirusu value from IndicatorCache
                     from database.mongodb import mongodb

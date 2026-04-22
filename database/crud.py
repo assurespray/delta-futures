@@ -439,7 +439,22 @@ async def save_indicator_cache(cache_data: dict) -> bool:
         return False
 
 async def get_last_perusu_signal(setup_id: str, asset: str, timeframe: str) -> int | None:
-    """Fetch the previously cached perusu_signal for a setup before it gets overwritten."""
+    """Fetch the previously cached perusu_signal for a setup before it gets overwritten.
+    DEPRECATED: Use get_last_strategy_state() instead. Kept for backwards compat.
+    """
+    state = await get_last_strategy_state(setup_id, asset, timeframe)
+    if state and "perusu_signal" in state:
+        return state["perusu_signal"]
+    return None
+
+
+async def get_last_strategy_state(setup_id: str, asset: str, timeframe: str) -> dict | None:
+    """Fetch the previously cached strategy_state dict for a setup before it gets overwritten.
+    
+    This is the generic replacement for get_last_perusu_signal().
+    Each strategy stores whatever state it needs in strategy_state (e.g., {"perusu_signal": 1}).
+    The engine fetches this before saving new cache, then passes it to generate_entry_signal().
+    """
     try:
         db = mongodb.get_db()
         cache = await db.indicator_cache.find_one({
@@ -447,11 +462,14 @@ async def get_last_perusu_signal(setup_id: str, asset: str, timeframe: str) -> i
             "asset": asset,
             "timeframe": timeframe
         })
+        if cache and "strategy_state" in cache:
+            return cache["strategy_state"]
+        # Backwards compat: if no strategy_state but has perusu_signal, synthesize one
         if cache and "perusu_signal" in cache:
-            return cache["perusu_signal"]
+            return {"perusu_signal": cache["perusu_signal"]}
         return None
     except Exception as e:
-        logger.error(f"❌ Failed to get last perusu signal: {e}")
+        logger.error(f"❌ Failed to get last strategy state: {e}")
         return None
 
 

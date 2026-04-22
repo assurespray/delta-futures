@@ -11,10 +11,10 @@ from database.crud import (
     update_trade_state,
     get_all_active_algo_setups, get_api_credential_by_id,
     update_algo_setup, save_indicator_cache,
-    get_algo_setup_by_id, get_last_perusu_signal
+    get_algo_setup_by_id, get_last_strategy_state
 )
 from api.delta_client import DeltaExchangeClient
-from api.orders import is_order_gone, cancel_order  # CRITICAL: import robust methods
+from api.orders import is_order_gone, cancel_order
 from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
 from strategy.paper_trader import paper_trader, is_paper_trade
@@ -29,7 +29,8 @@ from utils.timeframe import (
 logger = logging.getLogger(__name__)
 
 class AlgoEngine:
-    """Main trading engine for executing algo strategies - ENHANCED WITH DYNAMIC SLEEP."""
+    """Strategy-agnostic trading engine. Delegates all indicator and signal
+    logic to the strategy returned by StrategyFactory."""
 
     def __init__(self, logger_bot: LoggerBot):
         
@@ -66,7 +67,7 @@ class AlgoEngine:
             "3d": 259200, "7d": 604800, "1w": 604800, "2w": 1209600, "1mo": 2592000,
         }
         sleep_seconds = timeframe_map.get(timeframe, 60)
-        logger.debug(f"⏱️ Sleep time for timeframe '{timeframe}': {sleep_seconds}s ({sleep_seconds/60:.1f} minutes)")
+        logger.debug(f"Sleep time for timeframe '{timeframe}': {sleep_seconds}s ({sleep_seconds/60:.1f} minutes)")
         return sleep_seconds
 
 
@@ -74,7 +75,7 @@ class AlgoEngine:
         """
         Background loop to monitor active setups and open trades on candle boundaries.
         """
-        logger.info("🚀 Starting boundary-aligned algo monitoring loop.")
+        logger.info("Starting boundary-aligned algo monitoring loop.")
         
         while True:
             try:
@@ -83,12 +84,10 @@ class AlgoEngine:
                 pending_trades = await get_pending_entry_trade_states()
                 
                 if not active_setups and not open_trades and not pending_trades:
-                    logger.debug("ℹ️ No active algo setups or open trades found.")
-                    import asyncio
+                    logger.debug("No active algo setups or open trades found.")
                     await asyncio.sleep(60)
                     continue
                 
-                import asyncio
                 # IMPORTANT: Run Exits and Invalidations FIRST and wait for them to finish
                 # This ensures that if a Single Supertrend flips, the position is closed
                 # before we check for the new reverse entry.
@@ -117,13 +116,32 @@ class AlgoEngine:
                 next_boundary = get_next_boundary_time(shortest_tf, now)
                 
                 sleep_seconds = (next_boundary - now).total_seconds() + 2.0
-                logger.info(f"⏳ Algo Engine sleeping for {sleep_seconds:.1f} seconds (until next {shortest_tf} boundary)")
+                logger.info(f"Algo Engine sleeping for {sleep_seconds:.1f} seconds (until next {shortest_tf} boundary)")
                 await asyncio.sleep(sleep_seconds)
                 
             except Exception as e:
-                logger.error(f"❌ Error in algo monitoring loop: {e}")
-                import asyncio
+                logger.error(f"Error in algo monitoring loop: {e}")
                 await asyncio.sleep(60)
+
+    def _build_cache_data(self, strategy, indicator_result, setup_id, setup_type, setup_name, is_paper, asset, timeframe):
+        """Build IndicatorCache document from strategy's get_cache_mapping()."""
+        mapping = strategy.get_cache_mapping(indicator_result)
+        return {
+            "setup_id": setup_id,
+            "setup_type": setup_type,
+            "setup_name": setup_name,
+            "is_paper_trade": is_paper,
+            "asset": asset,
+            "timeframe": timeframe,
+            "current_price": mapping["current_price"],
+            "perusu_signal": mapping["perusu_signal"],
+            "perusu_signal_text": mapping["perusu_signal_text"],
+            "perusu_value": mapping["perusu_value"],
+            "sirusu_signal": mapping["sirusu_signal"],
+            "sirusu_signal_text": mapping["sirusu_signal_text"],
+            "sirusu_value": mapping["sirusu_value"],
+            "strategy_state": mapping.get("strategy_state", {}),
+        }
 
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         start_time = time.time()
@@ -151,25 +169,14 @@ class AlgoEngine:
                 if not indicator_result:
                     return
                 
-                # Fetch previous perusu signal BEFORE overwriting cache
-                last_perusu_signal = await get_last_perusu_signal(setup_id, asset, timeframe)
+                # Fetch previous strategy state BEFORE overwriting cache
+                previous_state = await get_last_strategy_state(setup_id, asset, timeframe)
                 
-                # Save to Indicator Cache for Dashboard
-                cache_data = {
-                    "setup_id": setup_id,
-                    "setup_type": "algo",
-                    "setup_name": setup_name,
-                    "is_paper_trade": algo_setup.get("is_paper_trade", False),
-                    "asset": asset,
-                    "timeframe": timeframe,
-                    "current_price": indicator_result.get("current_price", 0.0),
-                    "perusu_signal": indicator_result["perusu"]["signal"],
-                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
-                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
-                    "sirusu_signal": indicator_result["sirusu"]["signal"],
-                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
-                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
-                }
+                # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                cache_data = self._build_cache_data(
+                    strategy, indicator_result, setup_id, "algo", setup_name,
+                    algo_setup.get("is_paper_trade", False), asset, timeframe
+                )
                 await save_indicator_cache(cache_data)
                 
                 if indicator_result.get("cached"):
@@ -177,10 +184,11 @@ class AlgoEngine:
             finally:
                 await client.close()
                 
+            # Generate entry signal using the strategy (strategy-agnostic)
             strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
             entry_signal = strategy.generate_entry_signal(
                 setup_id,
-                last_perusu_signal,
+                previous_state,
                 indicator_result
             )
             
@@ -192,25 +200,24 @@ class AlgoEngine:
                 pending_trade = await get_pending_trade_by_setup(setup_id)
                 
                 if open_trade or pending_trade:
-                    logger.info(f"⏭️ SKIP entry for {setup_name} - already active trade exists.")
+                    logger.info(f"SKIP entry for {setup_name} - already active trade exists.")
                     return
                     
-                sirusu_value = indicator_result.get('sirusu', {}).get('supertrend_value', 0)
                 # Ensure client is connected for order placement
                 client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                 try:
                     await self.position_manager.place_breakout_entry_order(
                         client, algo_setup, 
-                        entry_side=entry_signal.get('side'),
-                        breakout_price=entry_signal.get('trigger_price'),
-                        sirusu_value=entry_signal.get('sl_value', sirusu_value),
-                        immediate=entry_signal.get('immediate', False)
+                        entry_side=entry_signal.side,
+                        breakout_price=entry_signal.trigger_price,
+                        stop_loss_price=entry_signal.stop_loss,
+                        immediate=entry_signal.immediate
                     )
                 finally:
                     await client.close()
                     
         except Exception as e:
-            logger.error(f"❌ Error processing algo setup {setup_name}: {e}")
+            logger.error(f"Error processing algo setup {setup_name}: {e}")
 
     async def process_open_trade(self, trade_state: Dict[str, Any]):
         trade_id = str(trade_state['_id'])
@@ -246,52 +253,34 @@ class AlgoEngine:
                     await client.close()
                     return
                 
-                # Save to Indicator Cache for Dashboard
-                from database.crud import save_indicator_cache
-                cache_data = {
-                    "setup_id": setup_id,
-                    "setup_type": trade_state.get("setup_type", "algo"),
-                    "setup_name": trade_state.get("setup_name", "Unknown"),
-                    "is_paper_trade": trade_state.get("is_paper_trade", False),
-                    "asset": asset,
-                    "timeframe": timeframe,
-                    "current_price": indicator_result.get("current_price", 0.0),
-                    "perusu_signal": indicator_result["perusu"]["signal"],
-                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
-                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
-                    "sirusu_signal": indicator_result["sirusu"]["signal"],
-                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
-                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
-                }
+                # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                cache_data = self._build_cache_data(
+                    strategy, indicator_result, setup_id,
+                    trade_state.get("setup_type", "algo"),
+                    trade_state.get("setup_name", "Unknown"),
+                    trade_state.get("is_paper_trade", False),
+                    asset, timeframe
+                )
                 await save_indicator_cache(cache_data)
             except Exception as e:
-                logger.error(f"❌ Error calculating indicators for {asset}: {e}")
+                logger.error(f"Error calculating indicators for {asset}: {e}")
                 await client.close()
                 return
-                
-            sirusu_data = indicator_result.get('sirusu')
-            if not sirusu_data:
-                await client.close()
-                return
-                
-            # Trailing SL disabled per user request. 
-            # Initial hard SL stays on exchange, we just monitor for Sirusu flip exit.
                         
-            # Exit Check
-            strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+            # Exit Check (strategy-agnostic)
             exit_signal = strategy.generate_exit_signal(
                 setup_id, current_position, indicator_result
             )
             
             if exit_signal:
                 await self.position_manager.execute_exit(
-                    client, trade_state, f"Sirusu flip to {indicator_result['sirusu']['signal_text']}"
+                    client, trade_state, exit_signal.reason
                 )
                 
             await client.close()
             
         except Exception as e:
-            logger.error(f"❌ Error processing open trade {trade_id}: {e}")
+            logger.error(f"Error processing open trade {trade_id}: {e}")
 
     async def process_pending_trade(self, trade_state: Dict[str, Any]):
         trade_id = str(trade_state['_id'])
@@ -328,45 +317,26 @@ class AlgoEngine:
                 if not indicator_result:
                     return
                 
-                # Save to Indicator Cache for Dashboard
-                from database.crud import save_indicator_cache
-                cache_data = {
-                    "setup_id": setup_id,
-                    "setup_type": trade_state.get("setup_type", "algo"),
-                    "setup_name": trade_state.get("setup_name", "Unknown"),
-                    "is_paper_trade": trade_state.get("is_paper_trade", False),
-                    "asset": asset,
-                    "timeframe": timeframe,
-                    "current_price": indicator_result.get("current_price", 0.0),
-                    "perusu_signal": indicator_result["perusu"]["signal"],
-                    "perusu_signal_text": indicator_result["perusu"]["signal_text"],
-                    "perusu_value": indicator_result["perusu"]["supertrend_value"],
-                    "sirusu_signal": indicator_result["sirusu"]["signal"],
-                    "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
-                    "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
-                }
+                # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                cache_data = self._build_cache_data(
+                    strategy, indicator_result, setup_id,
+                    trade_state.get("setup_type", "algo"),
+                    trade_state.get("setup_name", "Unknown"),
+                    trade_state.get("is_paper_trade", False),
+                    asset, timeframe
+                )
                 await save_indicator_cache(cache_data)
                 
             except Exception as e:
-                logger.error(f"❌ Error calculating indicators for pending {asset}: {e}")
+                logger.error(f"Error calculating indicators for pending {asset}: {e}")
                 await client.close()
                 return
                 
-            sirusu_data = indicator_result.get('sirusu')
-            if not sirusu_data:
-                await client.close()
-                return
-                
-            # Invalidation Check: Sirusu flip against entry side
-            current_sirusu_signal = sirusu_data['signal']
-            is_invalidated = False
-            if pending_side == "long" and current_sirusu_signal == -1:
-                is_invalidated = True
-            elif pending_side == "short" and current_sirusu_signal == 1:
-                is_invalidated = True
+            # Invalidation Check (strategy-agnostic)
+            is_invalidated = strategy.should_invalidate_pending_entry(pending_side, indicator_result)
                 
             if is_invalidated:
-                logger.info(f"🚫 [INVALIDATION] Sirusu flipped against pending {pending_side.upper()} for {asset}. Cancelling entry.")
+                logger.info(f"[INVALIDATION] Strategy invalidated pending {pending_side.upper()} for {asset}. Cancelling entry.")
                 
                 if trade_state.get("is_paper_trade", False):
                     from strategy.paper_trader import paper_trader
@@ -389,14 +359,14 @@ class AlgoEngine:
             await client.close()
             
         except Exception as e:
-            logger.error(f"❌ Error processing pending trade {trade_id}: {e}")
+            logger.error(f"Error processing pending trade {trade_id}: {e}")
 
 
     async def monitor_pending_entries(self, poll_interval=3):
         """
         Polls all pending stop-market entries every few seconds and attaches stop-loss if filled.
         """
-        logger.info("🚦 Starting fast fill-monitor for pending entries.")
+        logger.info("Starting fast fill-monitor for pending entries.")
         while True:
             try:
                 from database.crud import get_pending_entry_trade_states, get_algo_setup_by_id, get_screener_setup_by_id, get_api_credential_by_id

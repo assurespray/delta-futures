@@ -1,4 +1,4 @@
-"""Screener processing engine with full trading logic."""
+"""Screener processing engine with full trading logic — strategy-agnostic."""
 import logging
 import asyncio
 from typing import List, Dict, Any, Optional
@@ -9,6 +9,7 @@ from database.crud import (
     get_api_credential_by_id,
     get_screener_positions_by_asset,
     get_screener_indicator_cache,
+    save_indicator_cache,
     
     acquire_position_lock,
     release_position_lock,
@@ -32,12 +33,11 @@ logger = logging.getLogger(__name__)
 
 class ScreenerEngine:
     """
-    Screener engine with full entry/exit/SL logic.
+    Strategy-agnostic screener engine with full entry/exit/SL logic.
     
-    ✅ Fetches top gainers/losers or all assets
-    ✅ Filters algo assets
-    ✅ First-come-first-served across screeners
-    ✅ Option 1: Conservative new asset entry (wait for flip)
+    Fetches top gainers/losers or all assets, filters algo assets,
+    uses first-come-first-served across screeners.
+    Option 1: Conservative new asset entry (wait for flip).
     """
     
     def __init__(self, logger_bot: LoggerBot):
@@ -57,7 +57,6 @@ class ScreenerEngine:
         
         # Use screener's timeframe
         timeframe = screener_setup.get("timeframe", "15m")
-        from utils.timeframe import get_timeframe_seconds
         return get_timeframe_seconds(timeframe)
     
     async def fetch_screener_assets(
@@ -93,7 +92,7 @@ class ScreenerEngine:
                 return []
                 
         except Exception as e:
-            logger.error(f"❌ Error fetching screener assets: {e}")
+            logger.error(f"Error fetching screener assets: {e}")
             return []
     
     async def filter_assets(
@@ -115,37 +114,57 @@ class ScreenerEngine:
         for asset in screener_assets:
             # Filter algo assets
             if asset in algo_assets:
-                logger.warning(f"⏭️ SKIP {asset}: Already in algo setup")
+                logger.warning(f"SKIP {asset}: Already in algo setup")
                 continue
             
             # Filter assets with existing screener positions (first-come-first-served)
             existing_positions = await get_screener_positions_by_asset(asset)
             if existing_positions:
                 logger.warning(
-                    f"⏭️ SKIP {asset}: Already in screener position "
+                    f"SKIP {asset}: Already in screener position "
                     f"({existing_positions[0].get('screener_setup_name')})"
                 )
                 continue
             
             allowed_assets.append(asset)
-            logger.info(f"✅ ALLOWED: {asset}")
+            logger.info(f"ALLOWED: {asset}")
         
         return allowed_assets
+    
+    def _build_cache_data(self, strategy, indicator_result, setup_id, setup_name, is_paper, asset, timeframe):
+        """Build IndicatorCache document from strategy's get_cache_mapping()."""
+        mapping = strategy.get_cache_mapping(indicator_result)
+        return {
+            "setup_id": setup_id,
+            "setup_type": "screener",
+            "setup_name": setup_name,
+            "is_paper_trade": is_paper,
+            "asset": asset,
+            "timeframe": timeframe,
+            "current_price": mapping["current_price"],
+            "perusu_signal": mapping["perusu_signal"],
+            "perusu_signal_text": mapping["perusu_signal_text"],
+            "perusu_value": mapping["perusu_value"],
+            "sirusu_signal": mapping["sirusu_signal"],
+            "sirusu_signal_text": mapping["sirusu_signal_text"],
+            "sirusu_value": mapping["sirusu_value"],
+            "strategy_state": mapping.get("strategy_state", {}),
+        }
     
     async def check_new_asset_entry(
         self,
         asset: str,
         screener_setup: Dict,
+        strategy,
         indicator_result: Dict,
         client: DeltaExchangeClient
-    ) -> Optional[Dict]:
+    ) -> Optional[Any]:
         """
         Option 1: Conservative entry for new assets.
         - First appearance: Cache signal, no entry
         - Second appearance: Enter if flipped
         """
         setup_id = str(screener_setup["_id"])
-        mode = screener_setup.get("asset_selection_type")
         
         # Get cached Perusu signal
         cached_perusu = await get_screener_indicator_cache(
@@ -157,7 +176,7 @@ class ScreenerEngine:
         if not cached_perusu:
             # First time seeing this asset - cache and wait
             logger.info(
-                f"🆕 New asset {asset} - Caching Perusu signal "
+                f"New asset {asset} - Caching signal "
                 f"({'Uptrend' if current_perusu_signal == 1 else 'Downtrend'}), "
                 f"waiting for flip..."
             )
@@ -170,13 +189,15 @@ class ScreenerEngine:
             # Flip detected!
             entry_side = "long" if current_perusu_signal == 1 else "short"
             logger.info(
-                f"🔄 Perusu FLIP detected for {asset}: "
-                f"{'Downtrend → Uptrend' if entry_side == 'long' else 'Uptrend → Downtrend'}"
+                f"FLIP detected for {asset}: "
+                f"{'Downtrend -> Uptrend' if entry_side == 'long' else 'Uptrend -> Downtrend'}"
             )
             
-            return self.strategy.generate_entry_signal(
+            # Build previous_state from cached signal for generate_entry_signal
+            previous_state = {"perusu_signal": last_signal}
+            return strategy.generate_entry_signal(
                 setup_id,
-                last_signal,
+                previous_state,
                 indicator_result
             )
         
@@ -187,9 +208,10 @@ class ScreenerEngine:
         self,
         asset: str,
         screener_setup: Dict,
+        strategy,
         client: DeltaExchangeClient
     ):
-        """Process single screener asset for entry signals."""
+        """Process single screener asset for entry signals (strategy-agnostic)."""
         try:
             setup_id = str(screener_setup["_id"])
             setup_name = screener_setup.get("setup_name")
@@ -197,52 +219,41 @@ class ScreenerEngine:
             
             # Calculate indicators (force_recalc to avoid cache conflicts
             # when multiple screener setups process the same asset)
-            indicator_result = await self.strategy.calculate_indicators(
+            indicator_result = await strategy.calculate_indicators(
                 client, asset, timeframe, force_recalc=True
             )
             
             if not indicator_result:
-                logger.warning(f"⚠️ Failed to calculate indicators for {asset}")
+                logger.warning(f"Failed to calculate indicators for {asset}")
                 return
             
-            # Cache indicators
-            from database.crud import save_indicator_cache
-            cache_data = {
-                "setup_id": setup_id,
-                "setup_type": "screener",
-                "setup_name": setup_name,
-                "is_paper_trade": screener_setup.get("is_paper_trade", False),
-                "asset": asset,
-                "timeframe": timeframe,
-                "current_price": indicator_result.get("current_price", 0.0),
-                "perusu_signal": indicator_result["perusu"]["signal"],
-                "perusu_signal_text": indicator_result["perusu"]["signal_text"],
-                "perusu_value": indicator_result["perusu"]["supertrend_value"],
-                "sirusu_signal": indicator_result["sirusu"]["signal"],
-                "sirusu_signal_text": indicator_result["sirusu"]["signal_text"],
-                "sirusu_value": indicator_result["sirusu"]["supertrend_value"],
-            }
+            # Cache indicators (strategy-agnostic)
+            cache_data = self._build_cache_data(
+                strategy, indicator_result, setup_id, setup_name,
+                screener_setup.get("is_paper_trade", False), asset, timeframe
+            )
             await save_indicator_cache(cache_data)
             
             # Check for entry signal (Option 1: wait for flip)
             entry_signal = await self.check_new_asset_entry(
-                asset, screener_setup, indicator_result, client
+                asset, screener_setup, strategy, indicator_result, client
             )
             
             if entry_signal:
-                side = entry_signal['side']
-                perusu_signal = indicator_result["perusu"]["signal"]
-                sirusu_signal = indicator_result["sirusu"]["signal"]
+                side = entry_signal.side
+                cache_mapping = strategy.get_cache_mapping(indicator_result)
+                perusu_signal = cache_mapping["perusu_signal"]
+                sirusu_signal = cache_mapping["sirusu_signal"]
                 
-                # Filter 1: Perusu & Sirusu must agree on direction
+                # Filter 1: Primary & secondary indicators must agree on direction
                 aligned = (
                     (side == "long"  and perusu_signal == 1  and sirusu_signal == 1) or
                     (side == "short" and perusu_signal == -1 and sirusu_signal == -1)
                 )
                 if not aligned:
                     logger.info(
-                        f"❌ [SCREENER] Entry blocked for {asset}: "
-                        f"Perusu={perusu_signal}, Sirusu={sirusu_signal}, "
+                        f"[SCREENER] Entry blocked for {asset}: "
+                        f"Primary={perusu_signal}, Secondary={sirusu_signal}, "
                         f"side={side} (indicators not aligned)"
                     )
                     return
@@ -251,62 +262,62 @@ class ScreenerEngine:
                 setup_direction = screener_setup.get("direction", "both")
                 if setup_direction == "long_only" and side != "long":
                     logger.info(
-                        f"❌ [SCREENER] Entry blocked for {asset}: "
+                        f"[SCREENER] Entry blocked for {asset}: "
                         f"setup is long_only but signal is {side.upper()}"
                     )
                     return
                 elif setup_direction == "short_only" and side != "short":
                     logger.info(
-                        f"❌ [SCREENER] Entry blocked for {asset}: "
+                        f"[SCREENER] Entry blocked for {asset}: "
                         f"setup is short_only but signal is {side.upper()}"
                     )
                     return
                 
-                logger.info(f"🚀 Entry signal for {asset}: {side.upper()}")
+                logger.info(f"Entry signal for {asset}: {side.upper()}")
                 
                 # Inject dynamic asset into setup dict for position_manager compatibility
                 setup_with_asset = dict(screener_setup)
                 setup_with_asset["asset"] = asset
                 
-                # Place entry order
+                # Place entry order (strategy-agnostic)
                 success = await self.position_manager.place_breakout_entry_order(
                     client=client,
                     algo_setup=setup_with_asset,
-                    entry_side=entry_signal['side'],
-                    breakout_price=entry_signal.get('trigger_price'),
-                    sirusu_value=indicator_result["sirusu"]["supertrend_value"],
-                    immediate=entry_signal.get('immediate', False)
+                    entry_side=entry_signal.side,
+                    breakout_price=entry_signal.trigger_price,
+                    stop_loss_price=entry_signal.stop_loss,
+                    immediate=entry_signal.immediate
                 )
                 
                 if success:
                     await self.logger_bot.send_trade_entry(
                         setup_name=f"[SCREENER] {setup_name}",
                         asset=asset,
-                        direction=entry_signal['side'],
-                        entry_price=indicator_result["perusu"]["latest_close"],
+                        direction=entry_signal.side,
+                        entry_price=cache_mapping["current_price"],
                         lot_size=screener_setup.get("lot_size", 1),
-                        perusu_signal=indicator_result["perusu"]["signal_text"],
-                        sirusu_sl=indicator_result["sirusu"]["supertrend_value"]
+                        perusu_signal=cache_mapping["perusu_signal_text"],
+                        sirusu_sl=cache_mapping["sirusu_value"]
                     )
                     
         except Exception as e:
-            logger.error(f"❌ Error processing screener asset {asset}: {e}")
+            logger.error(f"Error processing screener asset {asset}: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
     async def process_screener_setup(self, screener_setup: Dict):
-        """Main screener processing function."""
+        """Main screener processing function (strategy-agnostic)."""
         setup_id = str(screener_setup["_id"])
         setup_name = screener_setup.get("setup_name", "Unknown")
         
-        logger.info(f"📊 Processing Screener: {setup_name}")
+        logger.info(f"Processing Screener: {setup_name}")
         
         try:
             # Get API credentials
             api_id = screener_setup["api_id"]
             cred = await get_api_credential_by_id(api_id, decrypt=True)
             if not cred:
-                logger.error(f"❌ Failed to load credentials for {setup_name}")
+                logger.error(f"Failed to load credentials for {setup_name}")
                 return
             
             client = DeltaExchangeClient(
@@ -314,12 +325,18 @@ class ScreenerEngine:
                 api_secret=cred['api_secret']
             )
             
+            # Create strategy from setup (strategy-agnostic)
+            strategy = StrategyFactory.get_strategy(
+                screener_setup.get('indicator', 'dual_supertrend'),
+                screener_setup.get('indicator_params', {})
+            )
+            
             # Fetch screener assets
             screener_assets = await self.fetch_screener_assets(client, screener_setup)
             logger.info(f"   Total assets found: {len(screener_assets)}")
             
             if not screener_assets:
-                logger.warning(f"⚠️ No assets found for {setup_name}")
+                logger.warning(f"No assets found for {setup_name}")
                 await client.close()
                 return
             
@@ -328,32 +345,32 @@ class ScreenerEngine:
             logger.info(f"   Allowed assets: {len(allowed_assets)}")
             
             if not allowed_assets:
-                logger.warning(f"⚠️ All assets filtered out for {setup_name}")
+                logger.warning(f"All assets filtered out for {setup_name}")
                 await client.close()
                 return
             
-            # Process each allowed asset
+            # Process each allowed asset (strategy passed as parameter)
             for asset in allowed_assets:
-                await self.process_screener_asset(asset, screener_setup, client)
+                await self.process_screener_asset(asset, screener_setup, strategy, client)
             
             await client.close()
             
         except Exception as e:
-            logger.error(f"❌ Error processing screener {setup_name}: {e}")
+            logger.error(f"Error processing screener {setup_name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
     async def run_continuous_monitoring(self):
         """Main screener monitoring loop with boundary-aligned scheduling."""
-        logger.info("🚀 Starting screener monitoring...")
-        await self.logger_bot.send_info("🚀 Screener Engine Started")
+        logger.info("Starting screener monitoring...")
+        await self.logger_bot.send_info("Screener Engine Started")
         
         while True:
             try:
                 screener_setups = await get_all_active_screener_setups()
                 
                 if not screener_setups:
-                    logger.debug("ℹ️ No active screener setups")
+                    logger.debug("No active screener setups")
                     await asyncio.sleep(60)
                     continue
                 
@@ -378,13 +395,13 @@ class ScreenerEngine:
                 sleep_time = max(1, time_until_boundary + 0.5)
                 
                 logger.info(
-                    f"💤 Screener next check at {next_boundary.strftime('%H:%M:%S')} UTC "
+                    f"Screener next check at {next_boundary.strftime('%H:%M:%S')} UTC "
                     f"(sleeping {sleep_time:.1f}s for {shortest_tf} boundary)"
                 )
                 await asyncio.sleep(sleep_time)
                 
             except Exception as e:
-                logger.error(f"❌ Exception in screener monitoring: {e}")
+                logger.error(f"Exception in screener monitoring: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
                 await asyncio.sleep(60)

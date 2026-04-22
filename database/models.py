@@ -175,15 +175,19 @@ class IndicatorCache(BaseModel):
     # Price Context
     current_price: float
     
-    # Perusu Info
+    # Perusu Info (primary indicator — used by dashboard UI)
     perusu_signal: int  # 1 or -1
     perusu_signal_text: str  # "Uptrend" or "Downtrend"
     perusu_value: float
     
-    # Sirusu Info
+    # Sirusu Info (secondary indicator — SL reference for UI)
     sirusu_signal: int
     sirusu_signal_text: str
     sirusu_value: float
+    
+    # Generic strategy state persisted across cycles
+    # Each strategy stores whatever it needs here (e.g., {"perusu_signal": 1})
+    strategy_state: dict = Field(default_factory=dict)
     
     calculated_at: datetime = Field(default_factory=datetime.utcnow)
     
