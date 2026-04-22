@@ -180,7 +180,8 @@ async def screener_indicator_selected(update: Update, context: ContextTypes.DEFA
         [InlineKeyboardButton("📊 Every Available Asset", callback_data="screener_atype_every")],
         [InlineKeyboardButton("📈 Top 10 Gainers Only", callback_data="screener_atype_gainers")],
         [InlineKeyboardButton("📉 Top 10 Losers Only", callback_data="screener_atype_losers")],
-        [InlineKeyboardButton("📊 Top 10 Gainers + Losers", callback_data="screener_atype_mixed")]
+        [InlineKeyboardButton("📊 Top 10 Gainers + Losers", callback_data="screener_atype_mixed")],
+        [InlineKeyboardButton("🔊 Top 10 Highest Volume", callback_data="screener_atype_volume")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -202,7 +203,8 @@ async def screener_asset_type_selected(update: Update, context: ContextTypes.DEF
         "every": "Every Available Asset",
         "gainers": "Top 10 Gainers",
         "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers"
+        "mixed": "Top 10 Gainers + Losers",
+        "volume": "Top 10 Highest Volume"
     }
     
     type_text = type_text_map.get(asset_type, asset_type)
@@ -327,7 +329,8 @@ async def screener_protection_selected(update: Update, context: ContextTypes.DEF
         "every": "Every Available Asset",
         "gainers": "Top 10 Gainers",
         "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers"
+        "mixed": "Top 10 Gainers + Losers",
+        "volume": "Top 10 Highest Volume"
     }
     
     asset_type_text = type_text_map.get(user_data['screener_asset_type'], "Unknown")
@@ -400,7 +403,8 @@ async def screener_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "every": "Every Available Asset",
             "gainers": "Top 10 Gainers",
             "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers"
+            "mixed": "Top 10 Gainers + Losers",
+            "volume": "Top 10 Highest Volume"
         }
         
         asset_type_text = type_text_map.get(user_data['screener_asset_type'], "Unknown")
@@ -492,7 +496,8 @@ async def screener_view_detail_callback(update: Update, context: ContextTypes.DE
         "every": "Every Available Asset",
         "gainers": "Top 10 Gainers",
         "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers"
+        "mixed": "Top 10 Gainers + Losers",
+        "volume": "Top 10 Highest Volume"
     }
     
     asset_type_text = type_text_map.get(setup.get('asset_selection_type'), "Unknown")

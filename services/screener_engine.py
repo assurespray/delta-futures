@@ -18,7 +18,8 @@ from api.delta_client import DeltaExchangeClient
 from api.market_screener import (
     get_top_gainers,
     get_top_losers,
-    get_all_perpetual_symbols
+    get_all_perpetual_symbols,
+    get_top_volume
 )
 from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
@@ -83,6 +84,9 @@ class ScreenerEngine:
             
             elif mode == "every":
                 return await get_all_perpetual_symbols(client)
+            
+            elif mode == "volume":
+                return await get_top_volume(client, timeframe, top_n)
             
             else:
                 logger.error(f"Unknown screener mode: {mode}")

@@ -184,3 +184,42 @@ async def get_all_perpetual_symbols(client: DeltaExchangeClient) -> List[str]:
     except Exception as e:
         logger.error(f"❌ Error fetching all symbols: {e}")
         return []
+
+
+async def get_top_volume(
+    client: DeltaExchangeClient,
+    timeframe: str,
+    top_n: int = 10
+) -> List[str]:
+    """Get top N assets by 24h trading volume (turnover_usd)."""
+    try:
+        tickers = await get_all_perpetual_tickers(client)
+        
+        asset_volumes = []
+        for ticker in tickers:
+            symbol = ticker.get("symbol")
+            if not symbol:
+                continue
+            
+            turnover_usd = ticker.get("turnover_usd")
+            if turnover_usd is not None:
+                asset_volumes.append({
+                    "symbol": symbol,
+                    "volume_usd": float(turnover_usd)
+                })
+        
+        # Sort descending (highest volume first)
+        asset_volumes.sort(key=lambda x: x["volume_usd"], reverse=True)
+        
+        # Get top N
+        top_volume = [a["symbol"] for a in asset_volumes[:top_n]]
+        
+        logger.info(f"📊 Top {top_n} Volume: {top_volume}")
+        if asset_volumes[:top_n]:
+            for a in asset_volumes[:top_n]:
+                logger.debug(f"   {a['symbol']}: ${a['volume_usd']:,.0f}")
+        return top_volume
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching top volume: {e}")
+        return []

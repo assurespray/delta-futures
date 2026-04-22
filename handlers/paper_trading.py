@@ -575,7 +575,8 @@ async def pscr_indicator_selected(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("Every Available Asset", callback_data="pscr_atype_every")],
         [InlineKeyboardButton("Top 10 Gainers Only", callback_data="pscr_atype_gainers")],
         [InlineKeyboardButton("Top 10 Losers Only", callback_data="pscr_atype_losers")],
-        [InlineKeyboardButton("Top 10 Gainers + Losers", callback_data="pscr_atype_mixed")]
+        [InlineKeyboardButton("Top 10 Gainers + Losers", callback_data="pscr_atype_mixed")],
+        [InlineKeyboardButton("Top 10 Highest Volume", callback_data="pscr_atype_volume")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -599,7 +600,8 @@ async def pscr_asset_type_selected(update: Update, context: ContextTypes.DEFAULT
         "every": "Every Available Asset",
         "gainers": "Top 10 Gainers",
         "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers"
+        "mixed": "Top 10 Gainers + Losers",
+        "volume": "Top 10 Highest Volume"
     }
     type_text = type_text_map.get(asset_type, asset_type)
     
@@ -739,7 +741,8 @@ async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT
         "every": "Every Available Asset",
         "gainers": "Top 10 Gainers",
         "losers": "Top 10 Losers",
-        "mixed": "Top 10 Gainers + Losers"
+        "mixed": "Top 10 Gainers + Losers",
+        "volume": "Top 10 Highest Volume"
     }
     asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
     
@@ -810,7 +813,8 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "every": "Every Available Asset",
             "gainers": "Top 10 Gainers",
             "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers"
+            "mixed": "Top 10 Gainers + Losers",
+            "volume": "Top 10 Highest Volume"
         }
         asset_type_text = type_text_map.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
         
@@ -874,7 +878,8 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
         "every": "All Assets",
         "gainers": "Gainers",
         "losers": "Losers",
-        "mixed": "G+L"
+        "mixed": "G+L",
+        "volume": "Volume"
     }
     
     for setup in scr_setups:
@@ -952,7 +957,8 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "every": "Every Available Asset",
             "gainers": "Top 10 Gainers",
             "losers": "Top 10 Losers",
-            "mixed": "Top 10 Gainers + Losers"
+            "mixed": "Top 10 Gainers + Losers",
+            "volume": "Top 10 Highest Volume"
         }
         atype = type_text_map.get(setup.get("asset_selection_type", ""), "Unknown")
         
@@ -1095,7 +1101,8 @@ async def paper_delete_list_callback(update: Update, context: ContextTypes.DEFAU
         "every": "All Assets",
         "gainers": "Gainers",
         "losers": "Losers",
-        "mixed": "G+L"
+        "mixed": "G+L",
+        "volume": "Volume"
     }
     
     for setup in scr_setups:
