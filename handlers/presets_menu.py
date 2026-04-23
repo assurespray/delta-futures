@@ -62,7 +62,7 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['strategy_type'] = ptype
     
     if ptype == "single_supertrend":
-        await query.edit_message_text("Enter ATR Length and Factor separated by comma (e.g., 15,15):")
+        await query.edit_message_text("Enter ATR Length and Factor separated by comma (e.g., 20,20):")
         return PRESET_P1
     elif ptype == "dual_supertrend":
         await query.edit_message_text("Enter Perusu ATR, Perusu Factor, Sirusu ATR, Sirusu Factor separated by comma (e.g., 20,20,10,10):")
@@ -189,7 +189,7 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if ptype == "single_supertrend":
         message += f"• ATR Length: {params.get('atr_length', '?')}\n"
         message += f"• Factor: {params.get('factor', '?')}\n\n"
-        message += "Enter new ATR Length and Factor separated by comma (e.g., 15,15):"
+        message += "Enter new ATR Length and Factor separated by comma (e.g., 20,20):"
     elif ptype == "dual_supertrend":
         message += f"• Perusu ATR: {params.get('perusu_atr', '?')}, Factor: {params.get('perusu_factor', '?')}\n"
         message += f"• Sirusu ATR: {params.get('sirusu_atr', '?')}, Factor: {params.get('sirusu_factor', '?')}\n\n"

@@ -31,8 +31,8 @@ class SingleSuperTrendStrategy(BaseStrategy):
     def __init__(self, params: Dict[str, Any] = None):
         self.params = params or {}
 
-        self.atr_length = self.params.get("atr_length", 15)
-        self.factor = self.params.get("factor", 15.0)
+        self.atr_length = self.params.get("atr_length", 20)
+        self.factor = self.params.get("factor", 20.0)
 
         self.supertrend = SuperTrend(
             atr_length=int(self.atr_length),

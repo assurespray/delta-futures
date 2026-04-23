@@ -186,11 +186,11 @@ async def ensure_default_presets(user_id: str) -> None:
         })
         await create_strategy_preset({
             "user_id": user_id,
-            "preset_name": "[S] Single ST (15, 15)",
+            "preset_name": "[S] Single ST (20, 20)",
             "strategy_type": "single_supertrend",
             "parameters": {
-                "atr_length": 15,
-                "factor": 15.0
+                "atr_length": 20,
+                "factor": 20.0
             },
             "is_default": True
         })
