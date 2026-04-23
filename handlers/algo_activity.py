@@ -50,6 +50,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
         entry_time = activity['entry_time']
         
         entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
+        is_closed = (activity.get('status') == 'closed')
         
         if is_closed:
             exit_price = activity.get('exit_price', 0)
