@@ -197,6 +197,7 @@ async def reconcile_pending_orders(logger_bot=None):
         
         try:
             if trade["status"] == "open":
+                # Check 1: SL order filled?
                 sl_order_id = trade.get("stop_loss_order_id")
                 if sl_order_id and product_id:
                     status = await get_order_status_by_id(client, sl_order_id, product_id)
@@ -205,6 +206,18 @@ async def reconcile_pending_orders(logger_bot=None):
                         pm = PositionManager()
                         # The SL was hit!
                         await pm.execute_exit(client, trade, "Stop Loss Triggered")
+                        continue
+                
+                # Check 2: Position closed externally (manual close, liquidation, etc.)?
+                from api.positions import get_position_by_symbol
+                actual_position = await get_position_by_symbol(client, symbol)
+                actual_size = actual_position.get("size", 0) if actual_position else 0
+                
+                if actual_size == 0:
+                    logger.info(f"[RECON] Position {symbol} is closed on exchange but DB says open. Syncing...")
+                    from strategy.position_manager import PositionManager
+                    pm = PositionManager()
+                    await pm.execute_exit(client, trade, "Position closed externally")
             
             elif trade["status"] == "pending_entry":
                 order_id = trade.get("pending_entry_order_id")

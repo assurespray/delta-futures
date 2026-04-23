@@ -215,6 +215,7 @@ class PositionManager:
 
                 update_data = {
                     "current_position": entry_side,
+                    "entry_price": entry_price,
                     "last_entry_price": entry_price,
                     "last_entry_order_id": pending_order_id,
                     "status": "open",
