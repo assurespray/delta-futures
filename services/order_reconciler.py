@@ -197,6 +197,14 @@ async def reconcile_pending_orders(logger_bot=None):
         
         try:
             if trade["status"] == "open":
+                # Backfill: repair missing entry_price from legacy fields
+                if not trade.get("entry_price"):
+                    backfill_price = trade.get("last_entry_price") or trade.get("entry_trigger_price")
+                    if backfill_price:
+                        await update_trade_state(trade_id, {"entry_price": backfill_price})
+                        trade["entry_price"] = backfill_price
+                        logger.info(f"[RECON] Backfilled entry_price=${backfill_price} for {symbol}")
+                
                 # Check 1: SL order filled?
                 sl_order_id = trade.get("stop_loss_order_id")
                 if sl_order_id and product_id:

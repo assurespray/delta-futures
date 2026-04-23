@@ -46,10 +46,10 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
         asset = activity['asset']
         direction = activity['direction'].upper()
         lot_size = activity['lot_size']
-        entry_price = activity['entry_price']
+        entry_price = activity.get('entry_price') or activity.get('last_entry_price') or activity.get('entry_trigger_price')
         entry_time = activity['entry_time']
         
-        is_closed = (activity.get('status') == 'closed')
+        entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
         
         if is_closed:
             exit_price = activity.get('exit_price', 0)
@@ -67,18 +67,20 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             total_pnl_usd += pnl
             total_pnl_inr += pnl_inr
             
+            exit_price_str = f"${exit_price:.4f}" if exit_price else "N/A"
+            
             message += f"{'─' * 30}\n"
             message += f"📊 **{setup_name}** - {asset}\n"
             message += f"Direction: {direction} | Size: {lot_size}\n\n"
-            message += f"🔵 Entry: ${entry_price} | {entry_time.strftime('%m/%d %H:%M')}\n"
-            message += f"🔴 Exit: ${exit_price} | {exit_time.strftime('%m/%d %H:%M')}\n"
+            message += f"🔵 Entry: {entry_price_str} | {entry_time.strftime('%m/%d %H:%M')}\n"
+            message += f"🔴 Exit: {exit_price_str} | {exit_time.strftime('%m/%d %H:%M')}\n"
             message += f"{pnl_emoji} PnL: ${pnl:.2f} (₹{pnl_inr:.2f})\n\n"
         else:
             # Open position
             message += f"{'─' * 30}\n"
             message += f"📊 **{setup_name}** - {asset}\n"
             message += f"Direction: {direction} | Size: {lot_size}\n\n"
-            message += f"🔵 Entry: ${entry_price} | {entry_time.strftime('%m/%d %H:%M')}\n"
+            message += f"🔵 Entry: {entry_price_str} | {entry_time.strftime('%m/%d %H:%M')}\n"
             message += f"⏳ Position Still Open\n\n"
     
     message += f"{'═' * 30}\n"
