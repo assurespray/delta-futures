@@ -225,7 +225,23 @@ async def reconcile_pending_orders(logger_bot=None):
                     logger.info(f"[RECON] Position {symbol} is closed on exchange but DB says open. Syncing...")
                     from strategy.position_manager import PositionManager
                     pm = PositionManager()
-                    await pm.execute_exit(client, trade, "Position closed externally")
+                    success, _, _ = await pm.execute_exit(client, trade, "Position closed externally")
+                    
+                    # Safety net: if execute_exit failed (e.g. missing fields), force-close in DB
+                    if not success:
+                        logger.warning(f"[RECON] execute_exit failed for ghost {symbol}. Force-closing in DB.")
+                        entry_price = trade.get("entry_price") or trade.get("last_entry_price") or trade.get("entry_trigger_price") or 0
+                        await update_trade_state(trade_id, {
+                            "status": "closed",
+                            "exit_price": entry_price,
+                            "exit_time": datetime.utcnow(),
+                            "pnl": 0.0,
+                            "pnl_inr": 0.0,
+                            "sirusu_exit_signal": "Position closed externally (force-synced)"
+                        })
+                        from database.crud import get_db, release_position_lock
+                        db = await get_db()
+                        await release_position_lock(db, symbol, trade["setup_id"])
             
             elif trade["status"] == "pending_entry":
                 order_id = trade.get("pending_entry_order_id")

@@ -2,10 +2,39 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database.crud import get_trades_by_user
+from database.crud import get_trades_by_user, get_algo_setup_by_id, get_api_credential_by_id
+from api.delta_client import DeltaExchangeClient
+from api.positions import get_ticker_mark_price
+from config.settings import settings
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+async def _get_mark_price_for_open_trade(activity: dict) -> float:
+    """Fetch current mark price from exchange for an open trade."""
+    try:
+        setup_id = activity.get("setup_id")
+        if not setup_id:
+            return 0.0
+        setup = await get_algo_setup_by_id(setup_id)
+        if not setup:
+            return 0.0
+        api_id = setup.get("api_id")
+        if not api_id:
+            return 0.0
+        cred = await get_api_credential_by_id(api_id, decrypt=True)
+        if not cred:
+            return 0.0
+        client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+        try:
+            mark_price = await get_ticker_mark_price(client, activity['asset'])
+            return mark_price
+        finally:
+            await client.close()
+    except Exception as e:
+        logger.warning(f"Could not fetch mark price for activity display: {e}")
+        return 0.0
 
 
 async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,23 +69,25 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     total_pnl_inr = 0.0
     winning_trades = 0
     losing_trades = 0
+    open_count = 0
     
     for activity in activities:
         setup_name = activity['setup_name']
         asset = activity['asset']
-        direction = activity['direction'].upper()
+        direction = activity.get('direction', '').upper()
         lot_size = activity['lot_size']
         entry_price = activity.get('entry_price') or activity.get('last_entry_price') or activity.get('entry_trigger_price')
-        entry_time = activity['entry_time']
+        entry_time = activity.get('entry_time')
         
         entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
+        entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
         is_closed = (activity.get('status') == 'closed')
         
         if is_closed:
             exit_price = activity.get('exit_price', 0)
             exit_time = activity.get('exit_time')
-            pnl = activity.get('pnl', 0)
-            pnl_inr = activity.get('pnl_inr', 0)
+            pnl = activity.get('pnl', 0) or 0
+            pnl_inr = activity.get('pnl_inr', 0) or 0
             
             if pnl >= 0:
                 pnl_emoji = "🟢"
@@ -69,24 +100,50 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             total_pnl_inr += pnl_inr
             
             exit_price_str = f"${exit_price:.4f}" if exit_price else "N/A"
+            exit_time_str = exit_time.strftime('%m/%d %H:%M') if exit_time else "N/A"
             
             message += f"{'─' * 30}\n"
             message += f"📊 **{setup_name}** - {asset}\n"
             message += f"Direction: {direction} | Size: {lot_size}\n\n"
-            message += f"🔵 Entry: {entry_price_str} | {entry_time.strftime('%m/%d %H:%M')}\n"
-            message += f"🔴 Exit: {exit_price_str} | {exit_time.strftime('%m/%d %H:%M')}\n"
+            message += f"🔵 Entry: {entry_price_str} | {entry_time_str}\n"
+            message += f"🔴 Exit: {exit_price_str} | {exit_time_str}\n"
             message += f"{pnl_emoji} PnL: ${pnl:.2f} (₹{pnl_inr:.2f})\n\n"
         else:
-            # Open position
+            # Open position — fetch live data
+            open_count += 1
+            mark_price = await _get_mark_price_for_open_trade(activity)
+            sl_price = activity.get('pending_sl_price')
+            
+            # Calculate unrealized PnL
+            upnl = 0.0
+            upnl_inr = 0.0
+            upnl_str = "N/A"
+            if entry_price and mark_price:
+                pos_dir = activity.get('current_position') or activity.get('direction', '')
+                if pos_dir == "long":
+                    upnl = (mark_price - entry_price) * lot_size
+                elif pos_dir == "short":
+                    upnl = (entry_price - mark_price) * lot_size
+                upnl_inr = upnl * settings.usd_to_inr_rate
+                upnl_emoji = "🟢" if upnl >= 0 else "🔴"
+                upnl_str = f"{upnl_emoji} ${upnl:.2f} (₹{upnl_inr:.2f})"
+            
             message += f"{'─' * 30}\n"
             message += f"📊 **{setup_name}** - {asset}\n"
             message += f"Direction: {direction} | Size: {lot_size}\n\n"
-            message += f"🔵 Entry: {entry_price_str} | {entry_time.strftime('%m/%d %H:%M')}\n"
-            message += f"⏳ Position Still Open\n\n"
+            message += f"🔵 Entry: {entry_price_str} | {entry_time_str}\n"
+            if mark_price:
+                message += f"📈 Mark: ${mark_price:.4f}\n"
+            if sl_price:
+                message += f"🛡️ SL: ${sl_price:.4f}\n"
+            message += f"💰 Unrealized PnL: {upnl_str}\n"
+            message += f"⏳ Position Open\n\n"
     
     message += f"{'═' * 30}\n"
     message += f"**Summary:**\n"
-    message += f"Total Trades: {winning_trades + losing_trades}\n"
+    if open_count > 0:
+        message += f"Open Positions: {open_count}\n"
+    message += f"Closed Trades: {winning_trades + losing_trades}\n"
     message += f"Winning: {winning_trades} | Losing: {losing_trades}\n"
     
     if winning_trades + losing_trades > 0:
@@ -94,7 +151,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
         message += f"Win Rate: {win_rate:.1f}%\n"
     
     total_pnl_emoji = "🟢" if total_pnl_usd >= 0 else "🔴"
-    message += f"\n{total_pnl_emoji} **Total PnL: ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})**"
+    message += f"\n{total_pnl_emoji} **Realized PnL: ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})**"
     
     keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)

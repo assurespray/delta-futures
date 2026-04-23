@@ -336,7 +336,7 @@ class PositionManager:
             symbol = trade_state["asset"]
             lot_size = trade_state["lot_size"]
             product_id = trade_state.get("product_id")
-            current_position = trade_state.get("current_position")
+            current_position = trade_state.get("current_position") or trade_state.get("direction")
             stop_loss_order_id = trade_state.get("stop_loss_order_id")
 
             if not current_position or not product_id:
