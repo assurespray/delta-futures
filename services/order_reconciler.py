@@ -185,7 +185,25 @@ async def reconcile_pending_orders(logger_bot=None):
         trade_id = str(trade["_id"])
         setup_id = trade["setup_id"]
         setup = await get_algo_setup_by_id(setup_id) or await get_screener_setup_by_id(setup_id)
-        if not setup: continue
+        if not setup:
+            # Orphan trade: parent setup was deleted but trade wasn't cleaned up
+            logger.warning(f"[RECON] Orphan trade found: {trade.get('asset')} (setup_id={setup_id} no longer exists). Force-closing.")
+            entry_price = trade.get("entry_price") or trade.get("last_entry_price") or trade.get("entry_trigger_price") or 0
+            await update_trade_state(trade_id, {
+                "status": "closed",
+                "exit_price": entry_price,
+                "exit_time": datetime.utcnow(),
+                "pnl": 0.0,
+                "pnl_inr": 0.0,
+                "sirusu_exit_signal": "Setup deleted (orphan trade closed)"
+            })
+            try:
+                from database.crud import get_db, release_position_lock
+                db = await get_db()
+                await release_position_lock(db, trade.get("asset", ""), setup_id)
+            except Exception:
+                pass
+            continue
         
         api_id = setup.get("api_id")
         cred = await get_api_credential_by_id(api_id, decrypt=True)

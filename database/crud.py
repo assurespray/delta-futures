@@ -100,7 +100,7 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
         setup_id = str(setup["_id"])
         await db.orders.delete_many({"algo_setup_id": setup_id})
         await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.trade_states.delete_many({"algo_setup_id": setup_id})
+        await db.trade_states.delete_many({"setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
 
     # Delete setups linked to this credential
@@ -284,8 +284,8 @@ async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     # Clean up all related DB records first
     await db.orders.delete_many({"algo_setup_id": setup_id})
     await db.positions.delete_many({"algo_setup_id": setup_id})
-    await db.trade_states.delete_many({"algo_setup_id": setup_id})
-    await db.position_locks.delete_many({"setup_id": setup_id})  # If you lock by setup_id
+    await db.trade_states.delete_many({"setup_id": setup_id})
+    await db.position_locks.delete_many({"setup_id": setup_id})
     # Delete the setup itself
     result = await db.algo_setups.delete_one({
         "_id": ObjectId(setup_id),
@@ -565,7 +565,7 @@ async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
         # Clean up all related DB records first
         await db.orders.delete_many({"algo_setup_id": setup_id})
         await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.trade_states.delete_many({"algo_setup_id": setup_id})
+        await db.trade_states.delete_many({"setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
         
         result = await db.screener_setups.delete_one({
