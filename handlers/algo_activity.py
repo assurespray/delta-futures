@@ -63,27 +63,77 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
+    # Separate into open and closed trades
+    open_trades = [a for a in activities if a.get('status') != 'closed']
+    closed_trades = [a for a in activities if a.get('status') == 'closed']
+    
     message = "📜 **Algo Trading Activity (Last 3 Days)**\n\n"
     
     total_pnl_usd = 0.0
     total_pnl_inr = 0.0
     winning_trades = 0
     losing_trades = 0
-    open_count = 0
     
-    for activity in activities:
-        setup_name = activity['setup_name']
-        asset = activity['asset']
-        direction = activity.get('direction', '').upper()
-        lot_size = activity['lot_size']
-        entry_price = activity.get('entry_price') or activity.get('last_entry_price') or activity.get('entry_trigger_price')
-        entry_time = activity.get('entry_time')
+    # ── OPEN POSITIONS SECTION ──
+    if open_trades:
+        message += f"🟢 **OPEN POSITIONS** ({len(open_trades)})\n"
+        message += f"{'━' * 30}\n"
         
-        entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
-        entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
-        is_closed = (activity.get('status') == 'closed')
+        for activity in open_trades:
+            setup_name = activity['setup_name']
+            asset = activity['asset']
+            direction = activity.get('direction', '').upper()
+            lot_size = activity['lot_size']
+            entry_price = activity.get('entry_price') or activity.get('last_entry_price') or activity.get('entry_trigger_price')
+            entry_time = activity.get('entry_time')
+            
+            entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
+            entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
+            
+            mark_price = await _get_mark_price_for_open_trade(activity)
+            sl_price = activity.get('pending_sl_price')
+            
+            # Calculate unrealized PnL
+            upnl = 0.0
+            upnl_inr = 0.0
+            upnl_str = "N/A"
+            if entry_price and mark_price:
+                pos_dir = activity.get('current_position') or activity.get('direction', '')
+                if pos_dir == "long":
+                    upnl = (mark_price - entry_price) * lot_size
+                elif pos_dir == "short":
+                    upnl = (entry_price - mark_price) * lot_size
+                upnl_inr = upnl * settings.usd_to_inr_rate
+                upnl_emoji = "🟢" if upnl >= 0 else "🔴"
+                upnl_str = f"{upnl_emoji} ${upnl:.2f} (₹{upnl_inr:.2f})"
+            
+            message += f"\n📊 **{setup_name}** - {asset}\n"
+            message += f"Direction: {direction} | Size: {lot_size}\n"
+            message += f"🔵 Entry: {entry_price_str} | {entry_time_str}\n"
+            if mark_price:
+                message += f"📈 Mark: ${mark_price:.4f}\n"
+            if sl_price:
+                message += f"🛡️ SL: ${sl_price:.4f}\n"
+            message += f"💰 Unrealized PnL: {upnl_str}\n"
         
-        if is_closed:
+        message += "\n"
+    
+    # ── CLOSED TRADES SECTION ──
+    if closed_trades:
+        message += f"⚪ **CLOSED TRADES** ({len(closed_trades)})\n"
+        message += f"{'━' * 30}\n"
+        
+        for activity in closed_trades:
+            setup_name = activity['setup_name']
+            asset = activity['asset']
+            direction = activity.get('direction', '').upper()
+            lot_size = activity['lot_size']
+            entry_price = activity.get('entry_price') or activity.get('last_entry_price') or activity.get('entry_trigger_price')
+            entry_time = activity.get('entry_time')
+            
+            entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
+            entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
+            
             exit_price = activity.get('exit_price', 0)
             exit_time = activity.get('exit_time')
             pnl = activity.get('pnl', 0) or 0
@@ -102,48 +152,23 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             exit_price_str = f"${exit_price:.4f}" if exit_price else "N/A"
             exit_time_str = exit_time.strftime('%m/%d %H:%M') if exit_time else "N/A"
             
-            message += f"{'─' * 30}\n"
-            message += f"📊 **{setup_name}** - {asset}\n"
-            message += f"Direction: {direction} | Size: {lot_size}\n\n"
+            message += f"\n📊 **{setup_name}** - {asset}\n"
+            message += f"Direction: {direction} | Size: {lot_size}\n"
             message += f"🔵 Entry: {entry_price_str} | {entry_time_str}\n"
             message += f"🔴 Exit: {exit_price_str} | {exit_time_str}\n"
-            message += f"{pnl_emoji} PnL: ${pnl:.2f} (₹{pnl_inr:.2f})\n\n"
-        else:
-            # Open position — fetch live data
-            open_count += 1
-            mark_price = await _get_mark_price_for_open_trade(activity)
-            sl_price = activity.get('pending_sl_price')
-            
-            # Calculate unrealized PnL
-            upnl = 0.0
-            upnl_inr = 0.0
-            upnl_str = "N/A"
-            if entry_price and mark_price:
-                pos_dir = activity.get('current_position') or activity.get('direction', '')
-                if pos_dir == "long":
-                    upnl = (mark_price - entry_price) * lot_size
-                elif pos_dir == "short":
-                    upnl = (entry_price - mark_price) * lot_size
-                upnl_inr = upnl * settings.usd_to_inr_rate
-                upnl_emoji = "🟢" if upnl >= 0 else "🔴"
-                upnl_str = f"{upnl_emoji} ${upnl:.2f} (₹{upnl_inr:.2f})"
-            
-            message += f"{'─' * 30}\n"
-            message += f"📊 **{setup_name}** - {asset}\n"
-            message += f"Direction: {direction} | Size: {lot_size}\n\n"
-            message += f"🔵 Entry: {entry_price_str} | {entry_time_str}\n"
-            if mark_price:
-                message += f"📈 Mark: ${mark_price:.4f}\n"
-            if sl_price:
-                message += f"🛡️ SL: ${sl_price:.4f}\n"
-            message += f"💰 Unrealized PnL: {upnl_str}\n"
-            message += f"⏳ Position Open\n\n"
+            message += f"{pnl_emoji} PnL: ${pnl:.2f} (₹{pnl_inr:.2f})\n"
+        
+        message += "\n"
     
+    if not open_trades and not closed_trades:
+        message += "No trades found.\n\n"
+    
+    # ── SUMMARY ──
     message += f"{'═' * 30}\n"
     message += f"**Summary:**\n"
-    if open_count > 0:
-        message += f"Open Positions: {open_count}\n"
-    message += f"Closed Trades: {winning_trades + losing_trades}\n"
+    if open_trades:
+        message += f"Open: {len(open_trades)}\n"
+    message += f"Closed: {winning_trades + losing_trades}\n"
     message += f"Winning: {winning_trades} | Losing: {losing_trades}\n"
     
     if winning_trades + losing_trades > 0:
