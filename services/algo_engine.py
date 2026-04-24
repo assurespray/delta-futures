@@ -254,6 +254,9 @@ class AlgoEngine:
                     return
                 
                 # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                # IMPORTANT: Preserve existing strategy_state so that
+                # process_algo_setup can still detect the flip for reverse entry.
+                # Only process_algo_setup is allowed to overwrite strategy_state.
                 cache_data = self._build_cache_data(
                     strategy, indicator_result, setup_id,
                     trade_state.get("setup_type", "algo"),
@@ -261,6 +264,9 @@ class AlgoEngine:
                     trade_state.get("is_paper_trade", False),
                     asset, timeframe
                 )
+                existing_state = await get_last_strategy_state(setup_id, asset, timeframe)
+                if existing_state is not None:
+                    cache_data["strategy_state"] = existing_state
                 await save_indicator_cache(cache_data)
             except Exception as e:
                 logger.error(f"Error calculating indicators for {asset}: {e}")
@@ -318,6 +324,7 @@ class AlgoEngine:
                     return
                 
                 # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                # IMPORTANT: Preserve existing strategy_state (same reason as process_open_trade)
                 cache_data = self._build_cache_data(
                     strategy, indicator_result, setup_id,
                     trade_state.get("setup_type", "algo"),
@@ -325,6 +332,9 @@ class AlgoEngine:
                     trade_state.get("is_paper_trade", False),
                     asset, timeframe
                 )
+                existing_state = await get_last_strategy_state(setup_id, asset, timeframe)
+                if existing_state is not None:
+                    cache_data["strategy_state"] = existing_state
                 await save_indicator_cache(cache_data)
                 
             except Exception as e:
