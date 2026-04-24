@@ -267,9 +267,19 @@ async def reconcile_pending_orders(logger_bot=None):
                     status = await get_order_status_by_id(client, order_id, product_id)
                     if status in ("cancelled", "rejected", "closed"):
                         await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
+                        from database.crud import get_db, release_position_lock
+                        db = await get_db()
+                        await release_position_lock(db, symbol, trade["setup_id"])
                     elif status == "filled":
                         from strategy.position_manager import PositionManager
                         pm = PositionManager()
                         await pm.check_entry_order_filled(client, trade, None)
+                elif not order_id:
+                    # Stale pending trade with no order ID — can never fill, cancel it
+                    logger.warning(f"[RECON] Stale pending trade for {symbol} has no order_id. Cancelling.")
+                    await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
+                    from database.crud import get_db, release_position_lock
+                    db = await get_db()
+                    await release_position_lock(db, symbol, trade["setup_id"])
         finally:
             await client.close()

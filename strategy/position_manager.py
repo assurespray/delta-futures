@@ -256,7 +256,12 @@ class PositionManager:
                     else:
                         sl_price = trade_state.get("pending_sl_price")
 
-                if trade_state.get("additional_protection", False) and sl_price:
+                # Check additional_protection from parent setup (not trade_state)
+                from database.crud import get_algo_setup_by_id, get_screener_setup_by_id
+                parent_setup = await get_algo_setup_by_id(setup_id) or await get_screener_setup_by_id(setup_id)
+                has_protection = parent_setup.get("additional_protection", False) if parent_setup else False
+                
+                if has_protection and sl_price:
                     sl_order_id = await self._place_stop_loss_protection(
                         client, product_id, lot_size, entry_side, sl_price,
                         setup_id, symbol, trade_state.get("user_id")
