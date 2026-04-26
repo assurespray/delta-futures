@@ -9,6 +9,7 @@ from database.crud import (
     get_api_credential_by_id,
     get_screener_positions_by_asset,
     get_screener_indicator_cache,
+    upsert_screener_indicator_cache,
     save_indicator_cache,
     
     acquire_position_lock,
@@ -237,6 +238,18 @@ class ScreenerEngine:
                 screener_setup.get("is_paper_trade", False), asset, timeframe
             )
             await save_indicator_cache(cache_data)
+            
+            # Also persist to screener_indicator_cache so check_new_asset_entry()
+            # can detect flips across cycles (this collection is keyed per-asset)
+            mapping = strategy.get_cache_mapping(indicator_result)
+            await upsert_screener_indicator_cache({
+                "screener_setup_id": setup_id,
+                "asset": asset,
+                "indicator_name": "primary",
+                "last_signal": mapping["primary_signal"],
+                "last_signal_text": mapping["primary_signal_text"],
+                "updated_at": datetime.utcnow()
+            })
             
             # Check for entry signal (Option 1: wait for flip)
             entry_signal = await self.check_new_asset_entry(
