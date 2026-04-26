@@ -116,7 +116,7 @@ class PositionManager:
                 trade_data["last_entry_order_id"] = entry_order_id
                 trade_data["current_position"] = entry_side
                 trade_data["entry_time"] = datetime.utcnow()
-                trade_data["perusu_entry_signal"] = "uptrend" if entry_side == "long" else "downtrend"
+                trade_data["entry_signal"] = "uptrend" if entry_side == "long" else "downtrend"
                 trade_data["trade_date"] = datetime.utcnow().strftime("%Y-%m-%d")
                 
                 from database.crud import create_trade_state, update_trade_state, create_position_record, create_order_record
@@ -185,7 +185,8 @@ class PositionManager:
 
     async def check_entry_order_filled(self, client: DeltaExchangeClient,
                                       trade_state: Dict[str, Any],
-                                      stop_loss_price: float = None) -> bool:
+                                      stop_loss_price: float = None,
+                                      logger_bot=None) -> bool:
         try:
             if trade_state.get("is_paper_trade", False):
                 return False
@@ -221,7 +222,7 @@ class PositionManager:
                     "status": "open",
                     "entry_time": datetime.utcnow(),
                     "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend"
+                    "entry_signal": "uptrend" if entry_side == "long" else "downtrend"
                 }
                 
                 await update_trade_state(trade_id, update_data)
@@ -242,7 +243,7 @@ class PositionManager:
 
                 sl_price = stop_loss_price
                 if not sl_price:
-                    # Fetch absolute latest Sirusu value from IndicatorCache
+                    # Fetch absolute latest secondary indicator value from IndicatorCache
                     from database.mongodb import mongodb
                     db = mongodb.get_db()
                     cache = await db.indicator_cache.find_one({
@@ -250,9 +251,13 @@ class PositionManager:
                         "asset": symbol,
                         "timeframe": trade_state.get("timeframe")
                     })
-                    if cache and cache.get("sirusu_value"):
+                    if cache and cache.get("secondary_value"):
+                        sl_price = cache.get("secondary_value")
+                        logger.info(f"✅ Fetched latest secondary indicator value from cache: ${sl_price}")
+                    # Backwards compat: fallback to old field name
+                    elif cache and cache.get("sirusu_value"):
                         sl_price = cache.get("sirusu_value")
-                        logger.info(f"✅ Fetched latest Sirusu value from cache: ${sl_price}")
+                        logger.info(f"✅ Fetched latest SL value from cache (legacy): ${sl_price}")
                     else:
                         sl_price = trade_state.get("pending_sl_price")
 
@@ -268,6 +273,21 @@ class PositionManager:
                     )
                     await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
                     
+                # Send Telegram entry notification
+                if logger_bot:
+                    try:
+                        await logger_bot.send_trade_entry(
+                            setup_name=setup_name,
+                            asset=symbol,
+                            direction=entry_side,
+                            entry_price=entry_price,
+                            lot_size=lot_size,
+                            signal_text="Uptrend" if entry_side == "long" else "Downtrend",
+                            stop_loss=sl_price
+                        )
+                    except Exception as notif_err:
+                        logger.warning(f"⚠️ Failed to send Telegram entry notification: {notif_err}")
+
                 logger.info(f"✅ [FILL-MONITOR] Processed fill for {symbol} ({setup_name})")
                 return True
 
@@ -328,11 +348,11 @@ class PositionManager:
 
     async def execute_exit(self, client: DeltaExchangeClient,
                            trade_state: dict,
-                           sirusu_signal_text: str) -> tuple[bool, float, str]:
+                           exit_reason: str) -> tuple[bool, float, str]:
         try:
             if trade_state.get("is_paper_trade", False):
                 return await paper_trader.execute_virtual_exit(
-                    client=client, trade_state=trade_state, exit_reason=f"Sirusu flip to {sirusu_signal_text}"
+                    client=client, trade_state=trade_state, exit_reason=exit_reason
                 )
             
             trade_id = str(trade_state["_id"])
@@ -390,13 +410,13 @@ class PositionManager:
                 "exit_time": datetime.utcnow(),
                 "pnl": pnl,
                 "pnl_inr": pnl_inr,
-                "sirusu_exit_signal": sirusu_signal_text
+                "exit_signal": exit_reason
             })
 
             db = await get_db()
             await release_position_lock(db, symbol, setup_id)
             
-            return True, exit_price, sirusu_signal_text
+            return True, exit_price, exit_reason
 
         except Exception as e:
             logger.error(f"❌ Exception executing exit: {e}")

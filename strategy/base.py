@@ -132,12 +132,14 @@ class BaseStrategy(ABC):
 
         Must return a dict containing:
         - current_price: float
-        - perusu_signal: int (1 or -1) — primary indicator signal for UI
-        - perusu_signal_text: str — "Uptrend" or "Downtrend" for UI
-        - perusu_value: float — primary indicator value for UI
-        - sirusu_signal: int — secondary indicator signal for UI
-        - sirusu_signal_text: str — secondary signal text for UI
-        - sirusu_value: float — secondary indicator value (SL reference)
+        - primary_name: str — display name for primary indicator (e.g., "Perusu", "Single ST")
+        - primary_signal: int (1 or -1) — primary indicator signal for UI
+        - primary_signal_text: str — "Uptrend" or "Downtrend" for UI
+        - primary_value: float — primary indicator value for UI
+        - secondary_name: str — display name for secondary indicator (e.g., "Sirusu", "EMA 34")
+        - secondary_signal: int — secondary indicator signal for UI
+        - secondary_signal_text: str — secondary signal text for UI
+        - secondary_value: float — secondary indicator value (SL reference)
         - strategy_state: dict — generic state to persist for next cycle
         """
         ...

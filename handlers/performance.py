@@ -541,8 +541,8 @@ def _generate_csv(
                 round(act.get("pnl", 0) or 0, 4),
                 round(act.get("pnl_inr", 0) or 0, 2),
                 "Closed" if act.get("status") == "closed" else "Open",
-                act.get("perusu_entry_signal", ""),
-                act.get("sirusu_exit_signal", ""),
+                act.get("entry_signal", act.get("perusu_entry_signal", "")),
+                act.get("exit_signal", act.get("sirusu_exit_signal", "")),
             ]
             
             if mode == "paper":

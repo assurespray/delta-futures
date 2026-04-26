@@ -132,9 +132,9 @@ class TradeState(BaseModel):
     pending_sl_price: Optional[float] = None
     
     # Signals & Indicators
-    perusu_entry_signal: Optional[str] = None  # "uptrend" or "downtrend"
-    sirusu_exit_signal: Optional[str] = None  # exit reason
-    last_perusu_signal: Optional[int] = None
+    entry_signal: Optional[str] = None  # "uptrend" or "downtrend"
+    exit_signal: Optional[str] = None  # exit reason
+    last_primary_signal: Optional[int] = None
     last_signal_time: Optional[datetime] = None
     
     # Exit & PnL
@@ -175,18 +175,20 @@ class IndicatorCache(BaseModel):
     # Price Context
     current_price: float
     
-    # Perusu Info (primary indicator — used by dashboard UI)
-    perusu_signal: int  # 1 or -1
-    perusu_signal_text: str  # "Uptrend" or "Downtrend"
-    perusu_value: float
+    # Primary Indicator (entry signal — e.g., Perusu ST, Single ST, Range Breakout)
+    primary_name: str = "Primary"  # Display name for this indicator
+    primary_signal: int  # 1 or -1
+    primary_signal_text: str  # "Uptrend" or "Downtrend"
+    primary_value: float
     
-    # Sirusu Info (secondary indicator — SL reference for UI)
-    sirusu_signal: int
-    sirusu_signal_text: str
-    sirusu_value: float
+    # Secondary Indicator (exit/SL — e.g., Sirusu ST, EMA)
+    secondary_name: str = "Secondary"  # Display name for this indicator
+    secondary_signal: int
+    secondary_signal_text: str
+    secondary_value: float
     
     # Generic strategy state persisted across cycles
-    # Each strategy stores whatever it needs here (e.g., {"perusu_signal": 1})
+    # Each strategy stores whatever it needs here (e.g., {"primary_signal": 1})
     strategy_state: dict = Field(default_factory=dict)
     
     calculated_at: datetime = Field(default_factory=datetime.utcnow)

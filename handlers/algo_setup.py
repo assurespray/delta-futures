@@ -296,7 +296,7 @@ async def setup_lot_size_received(update: Update, context: ContextTypes.DEFAULT_
         # Show protection selection
         message = f"✅ Lot Size: {lot_size}\n\n"
         message += f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
-        message += f"If enabled, a stop-loss order will be placed at Sirusu price during entry."
+        message += f"If enabled, a stop-loss order will be placed at the secondary indicator price during entry."
         
         keyboard = [
             [InlineKeyboardButton("✅ Yes (Enable Protection)", callback_data="setup_prot_yes")],

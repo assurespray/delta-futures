@@ -94,8 +94,8 @@ class LoggerBot:
         await self.send_message(formatted)
     
     async def send_trade_entry(self, setup_name: str, asset: str, direction: str,
-                              entry_price: float, lot_size: int, perusu_signal: str,
-                              sirusu_sl: Optional[float] = None):
+                              entry_price: float, lot_size: int, signal_text: str,
+                              stop_loss: Optional[float] = None):
         """
         Send trade entry notification.
         
@@ -105,8 +105,8 @@ class LoggerBot:
             direction: Trade direction (long/short)
             entry_price: Entry price
             lot_size: Lot size
-            perusu_signal: Perusu signal text
-            sirusu_sl: Sirusu stop-loss value
+            signal_text: Entry signal text (e.g., "Uptrend", "Downtrend")
+            stop_loss: Stop-loss price value
         """
         emoji = "🟢" if direction == "long" else "🔴"
         
@@ -119,17 +119,17 @@ class LoggerBot:
         message += f"**Direction:** {direction.upper()}\n"
         message += f"**Entry Price:** {price_str}\n"
         message += f"**Lot Size:** {lot_size} contracts\n"
-        message += f"**Perusu Signal:** {perusu_signal}\n"
+        message += f"**Signal:** {signal_text}\n"
         
-        if sirusu_sl is not None:
-            message += f"**Stop-Loss:** ${float(sirusu_sl):.2f}\n"
+        if stop_loss is not None:
+            message += f"**Stop-Loss:** ${float(stop_loss):.2f}\n"
         
         message += f"\n_Time: {self._get_timestamp()}_"
         
         await self.send_message(message)
     
     async def send_trade_exit(self, setup_name: str, asset: str, direction: str,
-                             sirusu_signal: str):
+                             exit_reason: str):
         """
         Send trade exit notification.
         
@@ -137,13 +137,13 @@ class LoggerBot:
             setup_name: Algo setup name
             asset: Trading asset
             direction: Trade direction
-            sirusu_signal: Sirusu exit signal text
+            exit_reason: Exit reason text
         """
         message = f"🚪 **TRADE EXIT**\n\n"
         message += f"**Setup:** {setup_name}\n"
         message += f"**Asset:** {asset}\n"
         message += f"**Direction:** {direction.upper()}\n"
-        message += f"**Sirusu Signal:** {sirusu_signal}\n"
+        message += f"**Exit Reason:** {exit_reason}\n"
         message += f"\n_Time: {self._get_timestamp()}_"
         
         await self.send_message(message)
@@ -187,7 +187,7 @@ class LoggerBot:
         message = (
             f"⚠️ **ORDER CANCELLED**\n\n"
             f"**Setup:** {setup_name}\n"
-            f"**Reason:** Perusu signal reversed\n\n"
+            f"**Reason:** Primary signal reversed\n\n"
             f"**Old signal:** {old_signal}\n"
             f"**New signal:** {new_signal}\n\n"
             f"_No bad trade - signal protection active!_\n"
@@ -195,12 +195,74 @@ class LoggerBot:
         )
         await self.send_message(message)
 
+    async def send_indicator_flip(self, setup_name: str, asset: str, timeframe: str,
+                                  indicator_name: str, old_signal_text: str, new_signal_text: str,
+                                  primary_name: str = "Primary", primary_signal: int = 0,
+                                  primary_value: float = None,
+                                  secondary_name: str = "Secondary", secondary_signal: int = 0,
+                                  secondary_value: float = None,
+                                  current_price: float = None):
+        """
+        Send indicator flip notification to Telegram.
+        Works for ANY strategy - uses the dynamic indicator names from the strategy's cache mapping.
+        
+        Args:
+            setup_name: Algo setup name
+            asset: Trading asset symbol
+            timeframe: Candle timeframe
+            indicator_name: Display name of the indicator that flipped (e.g., "Perusu", "Single ST")
+            old_signal_text: Previous signal text (e.g., "Uptrend")
+            new_signal_text: Current signal text (e.g., "Downtrend")
+            primary_name: Display name of primary indicator
+            primary_signal: Current primary signal (1 or -1)
+            primary_value: Current primary indicator value
+            secondary_name: Display name of secondary indicator
+            secondary_signal: Current secondary signal (1 or -1)
+            secondary_value: Current secondary indicator value
+            current_price: Current asset price
+        """
+        flip_emoji = "📈" if new_signal_text == "Uptrend" else "📉"
+        primary_text = "UPTREND" if primary_signal == 1 else "DOWNTREND"
+        secondary_text = "UPTREND" if secondary_signal == 1 else "DOWNTREND"
+        
+        message = (
+            f"🔄 **INDICATOR FLIP**\n\n"
+            f"**Setup:** {setup_name}\n"
+            f"**Asset:** {asset} ({timeframe})\n"
+            f"**Indicator:** {indicator_name}\n"
+            f"**Flip:** {old_signal_text} {flip_emoji} {new_signal_text}\n\n"
+            f"**Current State:**\n"
+        )
+        
+        if current_price is not None:
+            message += f"├ Price: ${current_price:.2f}\n"
+        
+        # Show primary indicator
+        p_emoji = "📈" if primary_signal == 1 else "📉"
+        message += f"├ {primary_name}: {p_emoji} {primary_text}"
+        if primary_value is not None:
+            message += f" (${primary_value:.5f})"
+        message += "\n"
+        
+        # Only show secondary if it's different from primary
+        if primary_name != secondary_name:
+            s_emoji = "📈" if secondary_signal == 1 else "📉"
+            message += f"├ {secondary_name}: {s_emoji} {secondary_text}"
+            if secondary_value is not None:
+                message += f" (${secondary_value:.5f})"
+            message += "\n"
+        
+        message += f"\n_Time: {self._get_timestamp()}_"
+        
+        await self.send_message(message)
+
     async def send_flip_log(self, setup_name: str, asset: str, timeframe: str,
                            indicator_name: str, old_signal_text: str, new_signal_text: str,
-                           perusu_signal: int, sirusu_signal: int,
+                           primary_signal: int, secondary_signal: int,
                            current_position: str, action: str,
-                           perusu_value: float = None, sirusu_value: float = None,
-                           current_price: float = None):
+                           primary_value: float = None, secondary_value: float = None,
+                           current_price: float = None,
+                           primary_name: str = "Primary", secondary_name: str = "Secondary"):
         """
         Send detailed indicator flip notification to log bot.
         
@@ -208,22 +270,21 @@ class LoggerBot:
             setup_name: Algo setup name
             asset: Trading asset symbol
             timeframe: Candle timeframe
-            indicator_name: "perusu" or "sirusu"
+            indicator_name: Display name of the indicator that flipped
             old_signal_text: Previous signal text (e.g., "Uptrend")
             new_signal_text: Current signal text (e.g., "Downtrend")
-            perusu_signal: Current perusu signal (1 or -1)
-            sirusu_signal: Current sirusu signal (1 or -1)
+            primary_signal: Current primary signal (1 or -1)
+            secondary_signal: Current secondary signal (1 or -1)
             current_position: Current position ("long", "short", or None)
             action: Description of what the engine will do
-            perusu_value: Current perusu supertrend value
-            sirusu_value: Current sirusu supertrend value
+            primary_value: Current primary indicator value
+            secondary_value: Current secondary indicator value
             current_price: Current asset price
+            primary_name: Display name of primary indicator
+            secondary_name: Display name of secondary indicator
         """
-        ind_emoji = "🟢" if indicator_name == "perusu" else "🔴"
-        ind_label = "Perusu" if indicator_name == "perusu" else "Sirusu"
-        
-        perusu_text = "UPTREND (1)" if perusu_signal == 1 else "DOWNTREND (-1)"
-        sirusu_text = "UPTREND (1)" if sirusu_signal == 1 else "DOWNTREND (-1)"
+        primary_text = "UPTREND (1)" if primary_signal == 1 else "DOWNTREND (-1)"
+        secondary_text = "UPTREND (1)" if secondary_signal == 1 else "DOWNTREND (-1)"
         
         pos_text = current_position.upper() if current_position else "FLAT (No Position)"
         
@@ -231,36 +292,36 @@ class LoggerBot:
             f"🔄 **INDICATOR FLIP DETECTED**\n\n"
             f"**Setup:** {setup_name}\n"
             f"**Asset:** {asset} @ {timeframe}\n\n"
-            f"**Flip:** {ind_emoji} {ind_label}: {old_signal_text} → {new_signal_text}\n\n"
+            f"**Flip:** {indicator_name}: {old_signal_text} -> {new_signal_text}\n\n"
             f"**Current State:**\n"
-            f"├ 🟢 Perusu: {perusu_text}\n"
-            f"├ 🔴 Sirusu: {sirusu_text}\n"
-            f"├ 📍 Position: {pos_text}\n"
+            f"├ {primary_name}: {primary_text}\n"
+            f"├ {secondary_name}: {secondary_text}\n"
+            f"├ Position: {pos_text}\n"
         )
         
         if current_price is not None:
-            message += f"├ 💰 Price: ${current_price}\n"
-        if perusu_value is not None:
-            message += f"├ 🟢 Perusu Value: ${perusu_value:.5f}\n"
-        if sirusu_value is not None:
-            message += f"├ 🔴 Sirusu Value: ${sirusu_value:.5f}\n"
+            message += f"├ Price: ${current_price}\n"
+        if primary_value is not None:
+            message += f"├ {primary_name} Value: ${primary_value:.5f}\n"
+        if secondary_value is not None:
+            message += f"├ {secondary_name} Value: ${secondary_value:.5f}\n"
         
         message += (
-            f"└ ⚡ **Action:** {action}\n\n"
+            f"└ **Action:** {action}\n\n"
             f"_Time: {self._get_timestamp()}_"
         )
         
         await self.send_message(message)
 
     async def send_no_signal_log(self, setup_name: str, asset: str, timeframe: str,
-                                perusu_signal: int, sirusu_signal: int,
-                                current_position: str, reason: str):
+                                primary_signal: int, secondary_signal: int,
+                                current_position: str, reason: str,
+                                primary_name: str = "Primary", secondary_name: str = "Secondary"):
         """
         Send a log when indicators are calculated but no actionable signal is generated.
-        Useful for tracking post-exit sirusu flips that are intentionally ignored.
         """
-        perusu_text = "UPTREND" if perusu_signal == 1 else "DOWNTREND"
-        sirusu_text = "UPTREND" if sirusu_signal == 1 else "DOWNTREND"
+        primary_text = "UPTREND" if primary_signal == 1 else "DOWNTREND"
+        secondary_text = "UPTREND" if secondary_signal == 1 else "DOWNTREND"
         pos_text = current_position.upper() if current_position else "FLAT"
         
         message = (
@@ -268,10 +329,10 @@ class LoggerBot:
             f"**Setup:** {setup_name}\n"
             f"**Asset:** {asset} @ {timeframe}\n\n"
             f"**State:**\n"
-            f"├ 🟢 Perusu: {perusu_text}\n"
-            f"├ 🔴 Sirusu: {sirusu_text}\n"
-            f"├ 📍 Position: {pos_text}\n"
-            f"└ 💤 **Reason:** {reason}\n\n"
+            f"├ {primary_name}: {primary_text}\n"
+            f"├ {secondary_name}: {secondary_text}\n"
+            f"├ Position: {pos_text}\n"
+            f"└ **Reason:** {reason}\n\n"
             f"_Time: {self._get_timestamp()}_"
         )
         
@@ -279,11 +340,12 @@ class LoggerBot:
 
     async def send_trade_entry_detail(self, setup_name: str, asset: str, timeframe: str,
                                      direction: str, entry_price: float, lot_size: int,
-                                     perusu_signal_text: str, sirusu_signal_text: str,
-                                     perusu_value: float, sirusu_value: float,
+                                     primary_signal_text: str, secondary_signal_text: str,
+                                     primary_value: float, secondary_value: float,
                                      stop_loss_price: float = None,
                                      entry_type: str = "market",
-                                     entry_order_id=None, sl_order_id=None):
+                                     entry_order_id=None, sl_order_id=None,
+                                     primary_name: str = "Primary", secondary_name: str = "Secondary"):
         """
         Send detailed trade entry notification (for main bot user chat).
         """
@@ -291,8 +353,8 @@ class LoggerBot:
         
         # Guard against None values in formatting
         ep_str = f"${float(entry_price):.5f}" if entry_price is not None else "N/A"
-        pv_str = f"${float(perusu_value):.5f}" if perusu_value is not None else "N/A"
-        sv_str = f"${float(sirusu_value):.5f}" if sirusu_value is not None else "N/A"
+        pv_str = f"${float(primary_value):.5f}" if primary_value is not None else "N/A"
+        sv_str = f"${float(secondary_value):.5f}" if secondary_value is not None else "N/A"
         
         message = (
             f"{emoji} **TRADE ENTRY**\n\n"
@@ -303,27 +365,27 @@ class LoggerBot:
             f"**Entry Price:** {ep_str}\n"
             f"**Lot Size:** {lot_size} contracts\n\n"
             f"**Indicators at Entry:**\n"
-            f"├ 🟢 Perusu: {perusu_signal_text} ({pv_str})\n"
-            f"├ 🔴 Sirusu: {sirusu_signal_text} ({sv_str})\n"
+            f"├ {primary_name}: {primary_signal_text} ({pv_str})\n"
+            f"├ {secondary_name}: {secondary_signal_text} ({sv_str})\n"
         )
         
         if stop_loss_price is not None:
-            message += f"├ 🛡️ Stop Loss: ${float(stop_loss_price):.5f}\n"
+            message += f"├ Stop Loss: ${float(stop_loss_price):.5f}\n"
         
         if entry_order_id:
-            message += f"├ 📋 Entry Order ID: {entry_order_id}\n"
+            message += f"├ Entry Order ID: {entry_order_id}\n"
         if sl_order_id:
-            message += f"├ 🛡️ SL Order ID: {sl_order_id}\n"
+            message += f"├ SL Order ID: {sl_order_id}\n"
         
-        message += f"└ ⏰ Time: {self._get_timestamp()}"
+        message += f"└ Time: {self._get_timestamp()}"
         
         await self.send_message(message)
 
     async def send_trade_exit_detail(self, setup_name: str, asset: str, timeframe: str,
                                     direction: str, entry_price: float, exit_price: float,
                                     lot_size: int, pnl_usd: float = None, pnl_inr: float = None,
-                                    sirusu_signal_text: str = "",
-                                    exit_reason: str = "Sirusu flip",
+                                    exit_signal_text: str = "",
+                                    exit_reason: str = "Indicator flip",
                                     entry_order_id=None, sl_order_id=None, exit_order_id=None):
         """
         Send detailed trade exit notification (for main bot user chat).
@@ -344,7 +406,7 @@ class LoggerBot:
             f"├ Entry Price: {ep_str}\n"
             f"├ Exit Price: {xp_str}\n"
             f"├ Lot Size: {lot_size} contracts\n"
-            f"├ 🔴 Sirusu Signal: {sirusu_signal_text}\n"
+            f"├ Exit Signal: {exit_signal_text}\n"
         )
         
         if pnl_usd is not None:
@@ -354,13 +416,13 @@ class LoggerBot:
             message += "\n"
         
         if entry_order_id:
-            message += f"├ 📋 Entry Order ID: {entry_order_id}\n"
+            message += f"├ Entry Order ID: {entry_order_id}\n"
         if sl_order_id:
-            message += f"├ 🛡️ SL Order ID: {sl_order_id}\n"
+            message += f"├ SL Order ID: {sl_order_id}\n"
         if exit_order_id:
-            message += f"├ 📋 Exit Order ID: {exit_order_id}\n"
+            message += f"├ Exit Order ID: {exit_order_id}\n"
         
-        message += f"└ ⏰ Time: {self._get_timestamp()}"
+        message += f"└ Time: {self._get_timestamp()}"
         
         await self.send_message(message)
 

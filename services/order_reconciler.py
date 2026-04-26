@@ -62,7 +62,7 @@ async def _handle_sl_fill(order, setup, client, logger_bot=None):
         update_data = {
             "exit_time": datetime.utcnow(),
             "exit_price": exit_price,
-            "sirusu_exit_signal": "Stop-loss triggered",
+                "exit_signal": "Stop-loss triggered",
             "is_closed": True
         }
         if exit_price and entry_price:
@@ -195,7 +195,7 @@ async def reconcile_pending_orders(logger_bot=None):
                 "exit_time": datetime.utcnow(),
                 "pnl": 0.0,
                 "pnl_inr": 0.0,
-                "sirusu_exit_signal": "Setup deleted (orphan trade closed)"
+                "exit_signal": "Setup deleted (orphan trade closed)"
             })
             try:
                 from database.crud import get_db, release_position_lock
@@ -255,7 +255,7 @@ async def reconcile_pending_orders(logger_bot=None):
                             "exit_time": datetime.utcnow(),
                             "pnl": 0.0,
                             "pnl_inr": 0.0,
-                            "sirusu_exit_signal": "Position closed externally (force-synced)"
+                            "exit_signal": "Position closed externally (force-synced)"
                         })
                         from database.crud import get_db, release_position_lock
                         db = await get_db()
@@ -273,7 +273,7 @@ async def reconcile_pending_orders(logger_bot=None):
                     elif status == "filled":
                         from strategy.position_manager import PositionManager
                         pm = PositionManager()
-                        await pm.check_entry_order_filled(client, trade, None)
+                        await pm.check_entry_order_filled(client, trade, None, logger_bot=logger_bot)
                 elif not order_id:
                     # Stale pending trade with no order ID — can never fill, cancel it
                     logger.warning(f"[RECON] Stale pending trade for {symbol} has no order_id. Cancelling.")

@@ -142,12 +142,14 @@ class ScreenerEngine:
             "asset": asset,
             "timeframe": timeframe,
             "current_price": mapping["current_price"],
-            "perusu_signal": mapping["perusu_signal"],
-            "perusu_signal_text": mapping["perusu_signal_text"],
-            "perusu_value": mapping["perusu_value"],
-            "sirusu_signal": mapping["sirusu_signal"],
-            "sirusu_signal_text": mapping["sirusu_signal_text"],
-            "sirusu_value": mapping["sirusu_value"],
+            "primary_name": mapping.get("primary_name", "Primary"),
+            "primary_signal": mapping["primary_signal"],
+            "primary_signal_text": mapping["primary_signal_text"],
+            "primary_value": mapping["primary_value"],
+            "secondary_name": mapping.get("secondary_name", "Secondary"),
+            "secondary_signal": mapping["secondary_signal"],
+            "secondary_signal_text": mapping["secondary_signal_text"],
+            "secondary_value": mapping["secondary_value"],
             "strategy_state": mapping.get("strategy_state", {}),
         }
     
@@ -166,35 +168,37 @@ class ScreenerEngine:
         """
         setup_id = str(screener_setup["_id"])
         
-        # Get cached Perusu signal
-        cached_perusu = await get_screener_indicator_cache(
-            setup_id, asset, "perusu"
+        # Get cached primary signal
+        cached_primary = await get_screener_indicator_cache(
+            setup_id, asset, "primary"
         )
         
-        current_perusu_signal = indicator_result["perusu"]["signal"]
+        # Use get_cache_mapping() to extract primary signal in a strategy-agnostic way
+        mapping = strategy.get_cache_mapping(indicator_result)
+        current_primary_signal = mapping["primary_signal"]
         
-        if not cached_perusu:
+        if not cached_primary:
             # First time seeing this asset - cache and wait
             logger.info(
                 f"New asset {asset} - Caching signal "
-                f"({'Uptrend' if current_perusu_signal == 1 else 'Downtrend'}), "
+                f"({'Uptrend' if current_primary_signal == 1 else 'Downtrend'}), "
                 f"waiting for flip..."
             )
             return None
         
         # Second+ appearance - check for flip
-        last_signal = cached_perusu.get("last_signal")
+        last_signal = cached_primary.get("last_signal")
         
-        if current_perusu_signal != last_signal:
+        if current_primary_signal != last_signal:
             # Flip detected!
-            entry_side = "long" if current_perusu_signal == 1 else "short"
+            entry_side = "long" if current_primary_signal == 1 else "short"
             logger.info(
                 f"FLIP detected for {asset}: "
                 f"{'Downtrend -> Uptrend' if entry_side == 'long' else 'Uptrend -> Downtrend'}"
             )
             
             # Build previous_state from cached signal for generate_entry_signal
-            previous_state = {"perusu_signal": last_signal}
+            previous_state = {"primary_signal": last_signal}
             return strategy.generate_entry_signal(
                 setup_id,
                 previous_state,
@@ -242,18 +246,18 @@ class ScreenerEngine:
             if entry_signal:
                 side = entry_signal.side
                 cache_mapping = strategy.get_cache_mapping(indicator_result)
-                perusu_signal = cache_mapping["perusu_signal"]
-                sirusu_signal = cache_mapping["sirusu_signal"]
+                primary_signal = cache_mapping["primary_signal"]
+                secondary_signal = cache_mapping["secondary_signal"]
                 
                 # Filter 1: Primary & secondary indicators must agree on direction
                 aligned = (
-                    (side == "long"  and perusu_signal == 1  and sirusu_signal == 1) or
-                    (side == "short" and perusu_signal == -1 and sirusu_signal == -1)
+                    (side == "long"  and primary_signal == 1  and secondary_signal == 1) or
+                    (side == "short" and primary_signal == -1 and secondary_signal == -1)
                 )
                 if not aligned:
                     logger.info(
                         f"[SCREENER] Entry blocked for {asset}: "
-                        f"Primary={perusu_signal}, Secondary={sirusu_signal}, "
+                        f"Primary={primary_signal}, Secondary={secondary_signal}, "
                         f"side={side} (indicators not aligned)"
                     )
                     return
@@ -296,8 +300,8 @@ class ScreenerEngine:
                         direction=entry_signal.side,
                         entry_price=cache_mapping["current_price"],
                         lot_size=screener_setup.get("lot_size", 1),
-                        perusu_signal=cache_mapping["perusu_signal_text"],
-                        sirusu_sl=cache_mapping["sirusu_value"]
+                        signal_text=cache_mapping["primary_signal_text"],
+                        stop_loss=cache_mapping["secondary_value"]
                     )
                     
         except Exception as e:

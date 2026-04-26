@@ -59,7 +59,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 pos = await get_position_by_symbol(client, symbol)
                 pos_size = pos.get("size", 0) if pos else 0
                 if pos_size == 0:
-                    await update_trade_state(trade_id, {"status": "closed", "sirusu_exit_signal": "Closed manually on exchange"})
+                    await update_trade_state(trade_id, {"status": "closed", "exit_signal": "Closed manually on exchange"})
                     await logger_bot.send_warning(f"⚠️ Marked trade closed for {symbol} (no exchange position)")
                 else:
                     await acquire_position_lock(db, symbol, setup_id, setup["setup_name"])
@@ -71,7 +71,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                     if status in ("cancelled", "rejected", "closed"):
                         await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                     elif status == "filled":
-                        await position_manager.check_entry_order_filled(client, trade, None)
+                        await position_manager.check_entry_order_filled(client, trade, None, logger_bot=logger_bot)
         finally:
             await client.close()
 def filter_orders_by_symbol_and_product_id(

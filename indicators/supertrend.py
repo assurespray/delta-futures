@@ -238,10 +238,13 @@ class SuperTrend:
                 signal[0] = SIGNAL_DOWNTREND
             
             # ✅ Calculate subsequent values based on trend
+            # ✅ FIX: Compare close against PREVIOUS bar's bands (i-1), matching TradingView
+            #    TradingView PineScript: trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+            #    where dn1/up1 = previous bar's trailing bands
             for i in range(1, n):
                 # Previous bar was in downtrend (SuperTrend = Final UB)
                 if supertrend[i-1] == final_ub[i-1]:
-                    if close_vals[i] > final_ub[i]:
+                    if close_vals[i] > final_ub[i-1]:
                         # Flip to uptrend
                         supertrend[i] = final_lb[i]
                         signal[i] = SIGNAL_UPTREND
@@ -252,7 +255,7 @@ class SuperTrend:
                 
                 # Previous bar was in uptrend (SuperTrend = Final LB)
                 else:
-                    if close_vals[i] < final_lb[i]:
+                    if close_vals[i] < final_lb[i-1]:
                         # Flip to downtrend
                         supertrend[i] = final_ub[i]
                         signal[i] = SIGNAL_DOWNTREND

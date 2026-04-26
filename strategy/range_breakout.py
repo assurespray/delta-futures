@@ -211,11 +211,13 @@ class RangeBreakoutStrategy(BaseStrategy):
         ema = data.get("ema", 0.0)
         return {
             "current_price": indicators_data.get("current_price", 0.0),
-            "perusu_signal": signal if signal != 0 else 1,
-            "perusu_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
-            "perusu_value": ema,
-            "sirusu_signal": signal if signal != 0 else 1,
-            "sirusu_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
-            "sirusu_value": ema,
+            "primary_name": "Range Breakout",
+            "primary_signal": signal if signal != 0 else 1,
+            "primary_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
+            "primary_value": ema,
+            "secondary_name": "EMA Trend",
+            "secondary_signal": signal if signal != 0 else 1,
+            "secondary_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
+            "secondary_value": ema,
             "strategy_state": {}
         }

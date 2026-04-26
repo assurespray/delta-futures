@@ -88,7 +88,7 @@ class PaperTrader:
                     "current_position": entry_side,
                     "paper_liquidation_price": liquidation_price,
                     "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "perusu_entry_signal": "uptrend" if entry_side == "long" else "downtrend"
+                    "entry_signal": "uptrend" if entry_side == "long" else "downtrend"
                 })
                 
                 await create_trade_state(trade_data)
@@ -137,7 +137,7 @@ class PaperTrader:
                 "exit_time": datetime.utcnow(),
                 "pnl": net_pnl,
                 "pnl_inr": pnl_inr,
-                "sirusu_exit_signal": exit_reason,
+                "exit_signal": exit_reason,
                 "paper_fees": (trade_state.get("paper_fees", 0) or 0) + exit_fee
             })
             
@@ -181,7 +181,7 @@ class PaperTrader:
                     "current_position": side,
                     "paper_liquidation_price": liquidation_price,
                     "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
-                    "perusu_entry_signal": "uptrend" if side == "long" else "downtrend",
+                    "entry_signal": "uptrend" if side == "long" else "downtrend",
                     "paper_fees": (trade.get("paper_fees", 0) or 0) + entry_fee
                 })
 

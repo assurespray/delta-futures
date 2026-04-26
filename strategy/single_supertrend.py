@@ -3,7 +3,7 @@ Single SuperTrend breakout strategy.
 Conforms to BaseStrategy interface for modular engine execution.
 
 Uses one SuperTrend indicator for both entry (flip detection) and exit.
-Maps to perusu/sirusu keys for UI compatibility.
+Maps to primary/secondary keys for IndicatorCache.
 """
 
 import logging
@@ -80,7 +80,7 @@ class SingleSuperTrendStrategy(BaseStrategy):
                 return None
 
             resolution = TIMEFRAME_MAPPING[timeframe]
-            required_candles = 300
+            required_candles = 1000
             timeframe_seconds = get_timeframe_seconds(timeframe)
 
             latest_candles = await get_candles(client, symbol, timeframe, limit=2)
@@ -181,9 +181,12 @@ class SingleSuperTrendStrategy(BaseStrategy):
                 return None
 
             # Extract last signal from previous_state
-            last_perusu_signal = previous_state.get("perusu_signal") if previous_state else None
+            last_primary_signal = previous_state.get("primary_signal") if previous_state else None
+            # Backwards compat: fallback to old key name
+            if last_primary_signal is None and previous_state:
+                last_primary_signal = previous_state.get("perusu_signal")
             current_signal = st.get("signal")
-            entry_side = self._detect_signal_flip(current_signal, last_perusu_signal)
+            entry_side = self._detect_signal_flip(current_signal, last_primary_signal)
 
             if not entry_side:
                 return None
@@ -259,13 +262,15 @@ class SingleSuperTrendStrategy(BaseStrategy):
         st = indicators_data.get("single_st", {})
         return {
             "current_price": indicators_data.get("current_price", 0.0),
-            "perusu_signal": st.get("signal", 0),
-            "perusu_signal_text": st.get("signal_text", "Unknown"),
-            "perusu_value": st.get("supertrend_value", 0.0),
-            "sirusu_signal": st.get("signal", 0),
-            "sirusu_signal_text": st.get("signal_text", "Unknown"),
-            "sirusu_value": st.get("supertrend_value", 0.0),
+            "primary_name": "Single ST",
+            "primary_signal": st.get("signal", 0),
+            "primary_signal_text": st.get("signal_text", "Unknown"),
+            "primary_value": st.get("supertrend_value", 0.0),
+            "secondary_name": "Single ST",
+            "secondary_signal": st.get("signal", 0),
+            "secondary_signal_text": st.get("signal_text", "Unknown"),
+            "secondary_value": st.get("supertrend_value", 0.0),
             "strategy_state": {
-                "perusu_signal": st.get("signal", 0),
+                "primary_signal": st.get("signal", 0),
             }
         }

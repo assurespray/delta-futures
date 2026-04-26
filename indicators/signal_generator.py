@@ -13,12 +13,12 @@ class SignalGenerator:
     """Generate trade signals based on indicator values."""
     
     @staticmethod
-    def should_enter_trade(perusu_signal: int, direction: str, current_position: Optional[str]) -> Optional[str]:
+    def should_enter_trade(primary_signal: int, direction: str, current_position: Optional[str]) -> Optional[str]:
         """
-        Determine if should enter trade based on Perusu signal and direction.
+        Determine if should enter trade based on primary indicator signal and direction.
         
         Args:
-            perusu_signal: Perusu indicator signal (1 for uptrend, -1 for downtrend)
+            primary_signal: Primary indicator signal (1 for uptrend, -1 for downtrend)
             direction: Algo direction ("both", "long_only", "short_only")
             current_position: Current position ("long", "short", None)
         
@@ -30,33 +30,33 @@ class SignalGenerator:
             logger.info(f"ℹ️ Already in {current_position} position, no entry signal")
             return None
         
-        # Check Perusu uptrend signal
-        if perusu_signal == SIGNAL_UPTREND:
+        # Check primary uptrend signal
+        if primary_signal == SIGNAL_UPTREND:
             if direction in [DIRECTION_BOTH, DIRECTION_LONG_ONLY]:
-                logger.info(f"🟢 Entry signal: LONG (Perusu uptrend)")
+                logger.info(f"🟢 Entry signal: LONG (Primary uptrend)")
                 return "long"
             else:
-                logger.info(f"⏸️ Perusu uptrend but direction is {direction}, no entry")
+                logger.info(f"⏸️ Primary uptrend but direction is {direction}, no entry")
                 return None
         
-        # Check Perusu downtrend signal
-        elif perusu_signal == SIGNAL_DOWNTREND:
+        # Check primary downtrend signal
+        elif primary_signal == SIGNAL_DOWNTREND:
             if direction in [DIRECTION_BOTH, DIRECTION_SHORT_ONLY]:
-                logger.info(f"🔴 Entry signal: SHORT (Perusu downtrend)")
+                logger.info(f"🔴 Entry signal: SHORT (Primary downtrend)")
                 return "short"
             else:
-                logger.info(f"⏸️ Perusu downtrend but direction is {direction}, no entry")
+                logger.info(f"⏸️ Primary downtrend but direction is {direction}, no entry")
                 return None
         
         return None
     
     @staticmethod
-    def should_exit_trade(sirusu_signal: int, current_position: str) -> bool:
+    def should_exit_trade(secondary_signal: int, current_position: str) -> bool:
         """
-        Determine if should exit trade based on Sirusu signal.
+        Determine if should exit trade based on secondary indicator signal.
         
         Args:
-            sirusu_signal: Sirusu indicator signal (1 for uptrend, -1 for downtrend)
+            secondary_signal: Secondary indicator signal (1 for uptrend, -1 for downtrend)
             current_position: Current position ("long" or "short")
         
         Returns:
@@ -65,14 +65,14 @@ class SignalGenerator:
         if not current_position:
             return False
         
-        # Exit long position on Sirusu downtrend
-        if current_position == "long" and sirusu_signal == SIGNAL_DOWNTREND:
-            logger.info(f"🚪 Exit signal: Close LONG (Sirusu downtrend)")
+        # Exit long position on secondary downtrend
+        if current_position == "long" and secondary_signal == SIGNAL_DOWNTREND:
+            logger.info(f"🚪 Exit signal: Close LONG (Secondary downtrend)")
             return True
         
-        # Exit short position on Sirusu uptrend
-        elif current_position == "short" and sirusu_signal == SIGNAL_UPTREND:
-            logger.info(f"🚪 Exit signal: Close SHORT (Sirusu uptrend)")
+        # Exit short position on secondary uptrend
+        elif current_position == "short" and secondary_signal == SIGNAL_UPTREND:
+            logger.info(f"🚪 Exit signal: Close SHORT (Secondary uptrend)")
             return True
         
         return False

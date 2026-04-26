@@ -121,7 +121,7 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
     asset = update.message.text.strip().upper()
     
     # Get stored context
-    indicator_type = context.user_data.get('selected_indicator', 'perusu')
+    indicator_type = context.user_data.get('selected_indicator', 'dual_supertrend')
     timeframe = context.user_data.get('selected_timeframe', '15m')
     
     # Store asset for refresh
@@ -129,7 +129,7 @@ async def indicator_asset_received(update: Update, context: ContextTypes.DEFAULT
     
     # Send processing message
     processing_msg = await update.message.reply_text(
-        f"⏳ Calculating {indicator_type} for {asset} on {timeframe}...\n\n"
+        f"⏳ Calculating indicators for {asset} on {timeframe}...\n\n"
         "This may take a few seconds."
     )
     
@@ -147,13 +147,13 @@ async def indicator_refresh_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer("Refreshing indicator...")
     
     # Get stored context
-    indicator_type = context.user_data.get('selected_indicator', 'perusu')
+    indicator_type = context.user_data.get('selected_indicator', 'dual_supertrend')
     timeframe = context.user_data.get('selected_timeframe', '15m')
     asset = context.user_data.get('selected_asset', 'BTCUSD')
     
     # Update message to show loading
     await query.edit_message_text(
-        f"⏳ Refreshing {indicator_type} for {asset} on {timeframe}...\n\n"
+        f"⏳ Refreshing indicators for {asset} on {timeframe}...\n\n"
         "This may take a few seconds.",
         parse_mode="Markdown"
     )
@@ -206,7 +206,7 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
         )
         await client.close()
 
-        indicator_type = context.user_data.get('selected_indicator', 'perusu')
+        indicator_type = context.user_data.get('selected_indicator', 'dual_supertrend')
         msg = ""
 
         logger.info(f"Returned indicator result for both: {result}")
@@ -237,8 +237,8 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                     msg = (
                         info +
                         f"🟢 **Dual SuperTrend**\n"
-                        f"├ P Signal: {'📈' if p['signal']==1 else '📉'} {p['signal_text']} (${p['supertrend_value']:.4f})\n"
-                        f"└ S Signal: {'📈' if s['signal']==1 else '📉'} {s['signal_text']} (${s['supertrend_value']:.4f})\n"
+                        f"├ Perusu: {'📈' if p['signal']==1 else '📉'} {p['signal_text']} (${p['supertrend_value']:.4f})\n"
+                        f"└ Sirusu: {'📈' if s['signal']==1 else '📉'} {s['signal_text']} (${s['supertrend_value']:.4f})\n"
                     )
                 elif ptype == "single_supertrend":
                     d = result['single_st']

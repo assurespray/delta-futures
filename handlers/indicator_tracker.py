@@ -63,10 +63,12 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
             price = c.get("current_price", 0.0)
             
             # Support multiple strategies via the mapped values
-            p_sig_val = c.get("perusu_signal", 0)
-            s_sig_val = c.get("sirusu_signal", 0)
-            p_val = c.get("perusu_value", 0.0)
-            s_val = c.get("sirusu_value", 0.0)
+            p_sig_val = c.get("primary_signal", c.get("perusu_signal", 0))
+            s_sig_val = c.get("secondary_signal", c.get("sirusu_signal", 0))
+            p_val = c.get("primary_value", c.get("perusu_value", 0.0))
+            s_val = c.get("secondary_value", c.get("sirusu_value", 0.0))
+            p_name = c.get("primary_name", "Primary")
+            s_name = c.get("secondary_name", "Secondary")
             
             p_sig = "🔵 UP" if p_sig_val == 1 else ("🔴 DOWN" if p_sig_val == -1 else "⚪ NEUTRAL")
             s_sig = "🔵 UP" if s_sig_val == 1 else ("🔴 DOWN" if s_sig_val == -1 else "⚪ NEUTRAL")
@@ -81,8 +83,8 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
             if p_val == s_val and p_sig_val == s_sig_val:
                 message += f"    └ Signal: {p_sig} (${p_val:.4f})\n"
             else:
-                message += f"    ├ P: {p_sig} (${p_val:.4f})\n"
-                message += f"    └ S: {s_sig} (${s_val:.4f})\n"
+                message += f"    ├ {p_name}: {p_sig} (${p_val:.4f})\n"
+                message += f"    └ {s_name}: {s_sig} (${s_val:.4f})\n"
         message += "\n"
 
     # Truncate if too long

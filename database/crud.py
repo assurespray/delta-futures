@@ -438,11 +438,14 @@ async def save_indicator_cache(cache_data: dict) -> bool:
         logger.error(f"❌ Failed to save indicator cache: {e}")
         return False
 
-async def get_last_perusu_signal(setup_id: str, asset: str, timeframe: str) -> int | None:
-    """Fetch the previously cached perusu_signal for a setup before it gets overwritten.
+async def get_last_primary_signal(setup_id: str, asset: str, timeframe: str) -> int | None:
+    """Fetch the previously cached primary_signal for a setup before it gets overwritten.
     DEPRECATED: Use get_last_strategy_state() instead. Kept for backwards compat.
     """
     state = await get_last_strategy_state(setup_id, asset, timeframe)
+    if state and "primary_signal" in state:
+        return state["primary_signal"]
+    # Backwards compat
     if state and "perusu_signal" in state:
         return state["perusu_signal"]
     return None
@@ -451,8 +454,8 @@ async def get_last_perusu_signal(setup_id: str, asset: str, timeframe: str) -> i
 async def get_last_strategy_state(setup_id: str, asset: str, timeframe: str) -> dict | None:
     """Fetch the previously cached strategy_state dict for a setup before it gets overwritten.
     
-    This is the generic replacement for get_last_perusu_signal().
-    Each strategy stores whatever state it needs in strategy_state (e.g., {"perusu_signal": 1}).
+    This is the generic replacement for get_last_primary_signal().
+    Each strategy stores whatever state it needs in strategy_state (e.g., {"primary_signal": 1}).
     The engine fetches this before saving new cache, then passes it to generate_entry_signal().
     """
     try:
@@ -464,9 +467,11 @@ async def get_last_strategy_state(setup_id: str, asset: str, timeframe: str) -> 
         })
         if cache and "strategy_state" in cache:
             return cache["strategy_state"]
-        # Backwards compat: if no strategy_state but has perusu_signal, synthesize one
+        # Backwards compat: if no strategy_state but has primary_signal or perusu_signal, synthesize one
+        if cache and "primary_signal" in cache:
+            return {"primary_signal": cache["primary_signal"]}
         if cache and "perusu_signal" in cache:
-            return {"perusu_signal": cache["perusu_signal"]}
+            return {"primary_signal": cache["perusu_signal"]}
         return None
     except Exception as e:
         logger.error(f"❌ Failed to get last strategy state: {e}")

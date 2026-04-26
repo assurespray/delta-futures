@@ -134,12 +134,14 @@ class AlgoEngine:
             "asset": asset,
             "timeframe": timeframe,
             "current_price": mapping["current_price"],
-            "perusu_signal": mapping["perusu_signal"],
-            "perusu_signal_text": mapping["perusu_signal_text"],
-            "perusu_value": mapping["perusu_value"],
-            "sirusu_signal": mapping["sirusu_signal"],
-            "sirusu_signal_text": mapping["sirusu_signal_text"],
-            "sirusu_value": mapping["sirusu_value"],
+            "primary_name": mapping.get("primary_name", "Primary"),
+            "primary_signal": mapping["primary_signal"],
+            "primary_signal_text": mapping["primary_signal_text"],
+            "primary_value": mapping["primary_value"],
+            "secondary_name": mapping.get("secondary_name", "Secondary"),
+            "secondary_signal": mapping["secondary_signal"],
+            "secondary_signal_text": mapping["secondary_signal_text"],
+            "secondary_value": mapping["secondary_value"],
             "strategy_state": mapping.get("strategy_state", {}),
         }
 
@@ -172,6 +174,13 @@ class AlgoEngine:
                 # Fetch previous strategy state BEFORE overwriting cache
                 previous_state = await get_last_strategy_state(setup_id, asset, timeframe)
                 
+                # Fetch previous full cache for flip detection (need both primary + secondary signals)
+                from database.mongodb import mongodb
+                _db = mongodb.get_db()
+                prev_cache = await _db.indicator_cache.find_one({
+                    "setup_id": setup_id, "asset": asset, "timeframe": timeframe
+                })
+                
                 # Save to Indicator Cache for Dashboard (strategy-agnostic)
                 cache_data = self._build_cache_data(
                     strategy, indicator_result, setup_id, "algo", setup_name,
@@ -183,6 +192,46 @@ class AlgoEngine:
                     return
             finally:
                 await client.close()
+                
+            # --- Universal Flip Detection (Telegram alert) ---
+            # Compare previous vs current signals and notify on change.
+            # Works for every strategy because it reads the generic primary/secondary fields.
+            if prev_cache:
+                p_name = cache_data.get("primary_name", "Primary")
+                s_name = cache_data.get("secondary_name", "Secondary")
+                
+                for signal_key, name_key, text_key in [
+                    ("primary_signal", "primary_name", "primary_signal_text"),
+                    ("secondary_signal", "secondary_name", "secondary_signal_text"),
+                ]:
+                    # Skip secondary if it mirrors primary (e.g. Single ST)
+                    if signal_key == "secondary_signal" and p_name == s_name:
+                        continue
+                    
+                    old_sig = prev_cache.get(signal_key)
+                    new_sig = cache_data[signal_key]
+                    if old_sig is not None and old_sig != new_sig:
+                        old_text = "Uptrend" if old_sig == 1 else "Downtrend"
+                        new_text = cache_data.get(text_key, "Uptrend" if new_sig == 1 else "Downtrend")
+                        flipped_name = cache_data.get(name_key, "Indicator")
+                        try:
+                            await self.logger_bot.send_indicator_flip(
+                                setup_name=setup_name,
+                                asset=asset,
+                                timeframe=timeframe,
+                                indicator_name=flipped_name,
+                                old_signal_text=old_text,
+                                new_signal_text=new_text,
+                                primary_name=p_name,
+                                primary_signal=cache_data["primary_signal"],
+                                primary_value=cache_data.get("primary_value"),
+                                secondary_name=s_name,
+                                secondary_signal=cache_data["secondary_signal"],
+                                secondary_value=cache_data.get("secondary_value"),
+                                current_price=cache_data.get("current_price")
+                            )
+                        except Exception as e:
+                            logger.error(f"Error sending flip notification for {flipped_name}: {e}")
                 
             # Generate entry signal using the strategy (strategy-agnostic)
             strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
@@ -396,7 +445,7 @@ class AlgoEngine:
                     
                     client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                     try:
-                        await self.position_manager.check_entry_order_filled(client, trade, None)
+                        await self.position_manager.check_entry_order_filled(client, trade, None, logger_bot=self.logger_bot)
                     finally:
                         await client.close()
                         

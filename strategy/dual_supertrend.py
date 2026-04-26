@@ -116,11 +116,11 @@ class DualSuperTrendStrategy(BaseStrategy):
 
             resolution = TIMEFRAME_MAPPING[timeframe]
             timeframe_requirements = {
-                "1m": 200, "2m": 300, "3m": 400, "4m": 300, "5m": 300, "10m": 300, "15m": 300,
-                "20m": 300, "30m": 300, "45m": 300, "1h": 300, "2h": 300, "3h": 300, "4h": 300,
-                "6h": 300, "8h": 300, "12h": 300, "1d": 600, "2d": 300, "3d": 300, "7d": 300, "1w": 300,
+                "1m": 1000, "2m": 1000, "3m": 1000, "4m": 1000, "5m": 1000, "10m": 1000, "15m": 1000,
+                "20m": 1000, "30m": 1000, "45m": 1000, "1h": 1000, "2h": 1000, "3h": 1000, "4h": 1000,
+                "6h": 1000, "8h": 1000, "12h": 1000, "1d": 1000, "2d": 1000, "3d": 1000, "7d": 1000, "1w": 1000,
             }
-            required_candles = timeframe_requirements.get(timeframe, 150)
+            required_candles = timeframe_requirements.get(timeframe, 1000)
             timeframe_seconds = get_timeframe_seconds(timeframe)
 
             # Efficient Step 1: Only fetch TWO latest candles to check last candle status
@@ -263,10 +263,13 @@ class DualSuperTrendStrategy(BaseStrategy):
                 logger.error("Missing latest candle high/low")
                 return None
 
-            # Extract last perusu signal from previous_state
-            last_perusu_signal = previous_state.get("perusu_signal") if previous_state else None
+            # Extract last primary signal from previous_state
+            last_primary_signal = previous_state.get("primary_signal") if previous_state else None
+            # Backwards compat: fallback to old key name
+            if last_primary_signal is None and previous_state:
+                last_primary_signal = previous_state.get("perusu_signal")
             current_signal = perusu.get("signal")
-            entry_side = self._detect_signal_flip(current_signal, last_perusu_signal)
+            entry_side = self._detect_signal_flip(current_signal, last_primary_signal)
 
             if not entry_side:
                 return None
@@ -362,13 +365,15 @@ class DualSuperTrendStrategy(BaseStrategy):
         sirusu = indicators_data.get("sirusu", {})
         return {
             "current_price": indicators_data.get("current_price", 0.0),
-            "perusu_signal": perusu.get("signal", 0),
-            "perusu_signal_text": perusu.get("signal_text", "Unknown"),
-            "perusu_value": perusu.get("supertrend_value", 0.0),
-            "sirusu_signal": sirusu.get("signal", 0),
-            "sirusu_signal_text": sirusu.get("signal_text", "Unknown"),
-            "sirusu_value": sirusu.get("supertrend_value", 0.0),
+            "primary_name": "Perusu",
+            "primary_signal": perusu.get("signal", 0),
+            "primary_signal_text": perusu.get("signal_text", "Unknown"),
+            "primary_value": perusu.get("supertrend_value", 0.0),
+            "secondary_name": "Sirusu",
+            "secondary_signal": sirusu.get("signal", 0),
+            "secondary_signal_text": sirusu.get("signal_text", "Unknown"),
+            "secondary_value": sirusu.get("supertrend_value", 0.0),
             "strategy_state": {
-                "perusu_signal": perusu.get("signal", 0),
+                "primary_signal": perusu.get("signal", 0),
             }
         }
