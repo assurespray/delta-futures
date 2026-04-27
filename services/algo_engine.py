@@ -243,6 +243,15 @@ class AlgoEngine:
             
             # If signal exists and there's no open trade for this setup+asset, place order
             if entry_signal:
+                # Direction constraint (long_only / short_only)
+                setup_direction = algo_setup.get("direction", "both")
+                if setup_direction == "long_only" and entry_signal.side != "long":
+                    logger.info(f"SKIP entry for {setup_name} - setup is long_only but signal is {entry_signal.side.upper()}")
+                    return
+                elif setup_direction == "short_only" and entry_signal.side != "short":
+                    logger.info(f"SKIP entry for {setup_name} - setup is short_only but signal is {entry_signal.side.upper()}")
+                    return
+                
                 from database.crud import get_open_trade_by_setup, get_pending_trade_by_setup
                 # To prevent double entries
                 open_trade = await get_open_trade_by_setup(setup_id)

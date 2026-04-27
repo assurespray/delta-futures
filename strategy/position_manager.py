@@ -139,11 +139,17 @@ class PositionManager:
                 
                 if algo_setup.get("additional_protection", False):
                     sl_price = stop_loss_price
-                    sl_order_id = await self._place_stop_loss_protection(
-                        client, product_id, lot_size, entry_side, sl_price,
-                        setup_id, symbol, algo_setup.get("user_id")
-                    )
-                    await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
+                    if sl_price:
+                        sl_order_id = await self._place_stop_loss_protection(
+                            client, product_id, lot_size, entry_side, sl_price,
+                            setup_id, symbol, algo_setup.get("user_id")
+                        )
+                        await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
+                    else:
+                        logger.warning(
+                            f"⚠️ additional_protection is enabled for {symbol} but no valid SL price found "
+                            f"(sl_price={sl_price}). Stop-loss NOT placed."
+                        )
                 
                 return True
 
@@ -272,6 +278,11 @@ class PositionManager:
                         setup_id, symbol, trade_state.get("user_id")
                     )
                     await update_trade_state(trade_id, {"stop_loss_order_id": sl_order_id})
+                elif has_protection:
+                    logger.warning(
+                        f"⚠️ additional_protection is enabled for {symbol} but no valid SL price found "
+                        f"(sl_price={sl_price}). Stop-loss NOT placed."
+                    )
                     
                 # Send Telegram entry notification
                 if logger_bot:
@@ -373,9 +384,46 @@ class PositionManager:
             actual_position = await get_position_by_symbol(client, symbol)
             actual_size = actual_position.get("size", 0) if actual_position else 0
             
-            if actual_size == 0:
-                logger.info(f"✅ Position for {symbol} already closed on exchange (likely SL hit). Syncing DB.")
-                exit_price = trade_state.get("pending_sl_price") or trade_state.get("entry_price", 0.0)
+            # Detect direction mismatch: exchange position flipped vs what bot expects
+            actual_direction = "long" if actual_size > 0 else "short" if actual_size < 0 else None
+            position_flipped = actual_size != 0 and actual_direction != current_position
+            
+            if actual_size == 0 or position_flipped:
+                if position_flipped:
+                    logger.warning(
+                        f"⚠️ Direction mismatch for {symbol}: bot expects {current_position.upper()} "
+                        f"but exchange has {actual_direction.upper()} (size={actual_size}). "
+                        f"Our position was closed externally. Syncing DB without placing exit order."
+                    )
+                else:
+                    logger.info(f"✅ Position for {symbol} already closed on exchange (likely SL hit). Syncing DB.")
+                
+                # Cancel any lingering SL orders from our closed position
+                if stop_loss_order_id:
+                    await self._cancel_stop_loss_orders(client, product_id, symbol, stop_loss_order_id)
+                
+                # Try to get actual SL fill price from exchange order history
+                exit_price = None
+                if stop_loss_order_id and product_id:
+                    try:
+                        from api.orders import get_order_history
+                        history = await get_order_history(client, product_id)
+                        if history:
+                            sl_order = next(
+                                (o for o in history if str(o.get("id")) == str(stop_loss_order_id)),
+                                None
+                            )
+                            if sl_order and sl_order.get("average_fill_price") is not None:
+                                exit_price = float(sl_order["average_fill_price"])
+                                logger.info(f"✅ Got actual SL fill price from order history: ${exit_price}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not fetch SL fill price from history: {e}")
+                
+                # Fallback if we couldn't get the real fill price
+                if exit_price is None:
+                    exit_price = trade_state.get("pending_sl_price") or trade_state.get("entry_price", 0.0)
+                    logger.info(f"Using fallback exit price: ${exit_price}")
+                
                 exit_size = lot_size
             else:
                 exit_size = abs(actual_size)

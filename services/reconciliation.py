@@ -58,9 +58,23 @@ async def startup_reconciliation(logger_bot: LoggerBot):
             if trade["status"] == "open":
                 pos = await get_position_by_symbol(client, symbol)
                 pos_size = pos.get("size", 0) if pos else 0
-                if pos_size == 0:
-                    await update_trade_state(trade_id, {"status": "closed", "exit_signal": "Closed manually on exchange"})
-                    await logger_bot.send_warning(f"⚠️ Marked trade closed for {symbol} (no exchange position)")
+                
+                # Detect direction flip: exchange has opposite position to what bot expects
+                current_position = trade.get("current_position") or trade.get("direction")
+                actual_direction = "long" if pos_size > 0 else "short" if pos_size < 0 else None
+                position_flipped = pos_size != 0 and actual_direction != current_position
+                
+                if pos_size == 0 or position_flipped:
+                    if position_flipped:
+                        reason = f"Position direction flipped externally ({current_position} -> {actual_direction})"
+                        await logger_bot.send_warning(
+                            f"⚠️ Direction mismatch for {symbol}: bot expects {current_position.upper()} "
+                            f"but exchange has {actual_direction.upper()} (size={pos_size}). Closing trade in DB."
+                        )
+                    else:
+                        reason = "Closed manually on exchange"
+                        await logger_bot.send_warning(f"⚠️ Marked trade closed for {symbol} (no exchange position)")
+                    await update_trade_state(trade_id, {"status": "closed", "exit_signal": reason})
                 else:
                     await acquire_position_lock(db, symbol, setup_id, setup["setup_name"])
             

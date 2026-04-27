@@ -239,11 +239,23 @@ async def reconcile_pending_orders(logger_bot=None):
                 actual_position = await get_position_by_symbol(client, symbol)
                 actual_size = actual_position.get("size", 0) if actual_position else 0
                 
-                if actual_size == 0:
-                    logger.info(f"[RECON] Position {symbol} is closed on exchange but DB says open. Syncing...")
+                # Detect direction flip: exchange has opposite position to what bot expects
+                current_position = trade.get("current_position") or trade.get("direction")
+                actual_direction = "long" if actual_size > 0 else "short" if actual_size < 0 else None
+                position_flipped = actual_size != 0 and actual_direction != current_position
+                
+                if actual_size == 0 or position_flipped:
+                    if position_flipped:
+                        logger.warning(
+                            f"[RECON] Direction mismatch for {symbol}: bot expects {current_position.upper()} "
+                            f"but exchange has {actual_direction.upper()} (size={actual_size}). Syncing..."
+                        )
+                    else:
+                        logger.info(f"[RECON] Position {symbol} is closed on exchange but DB says open. Syncing...")
                     from strategy.position_manager import PositionManager
                     pm = PositionManager()
-                    success, _, _ = await pm.execute_exit(client, trade, "Position closed externally")
+                    exit_reason = "Position direction flipped externally" if position_flipped else "Position closed externally"
+                    success, _, _ = await pm.execute_exit(client, trade, exit_reason)
                     
                     # Safety net: if execute_exit failed (e.g. missing fields), force-close in DB
                     if not success:
