@@ -1,7 +1,8 @@
 import logging
 import asyncio
 import time
-from typing import Dict, Any, Optional
+import json
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from database.crud import (
     get_all_active_screener_setups,
@@ -37,6 +38,7 @@ class AlgoEngine:
         self.position_manager = PositionManager()
         self.logger_bot = logger_bot
         self.running_tasks = {}
+        self._strategy_cache: Dict[str, Tuple[str, str, Any]] = {}  # setup_id -> (type, params_hash, instance)
         self.signal_counts = {
             "total_checks": 0,
             "boundary_hits": 0,
@@ -69,6 +71,22 @@ class AlgoEngine:
         sleep_seconds = timeframe_map.get(timeframe, 60)
         logger.debug(f"Sleep time for timeframe '{timeframe}': {sleep_seconds}s ({sleep_seconds/60:.1f} minutes)")
         return sleep_seconds
+
+    def _get_strategy(self, setup_id: str, strategy_type: str, params: dict = None):
+        """Return a cached strategy instance for this setup, or create one.
+        
+        Keyed by setup_id so each setup gets its own instance with persistent
+        dedup caches (_last_processed_candle_time, etc.). If strategy_type or
+        params change (user edited the setup), the instance is recreated.
+        """
+        params = params or {}
+        params_hash = json.dumps(params, sort_keys=True, default=str)
+        cached = self._strategy_cache.get(setup_id)
+        if cached and cached[0] == strategy_type and cached[1] == params_hash:
+            return cached[2]
+        instance = StrategyFactory.get_strategy(strategy_type, params)
+        self._strategy_cache[setup_id] = (strategy_type, params_hash, instance)
+        return instance
 
 
     async def run_continuous_monitoring(self):
@@ -164,7 +182,7 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
+                strategy = self._get_strategy(setup_id, algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
                 indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )
@@ -234,7 +252,7 @@ class AlgoEngine:
                             logger.error(f"Error sending flip notification for {flipped_name}: {e}")
                 
             # Generate entry signal using the strategy (strategy-agnostic)
-            strategy = StrategyFactory.get_strategy(algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
+            # Reuse the same cached strategy instance from above — no need to recreate
             entry_signal = strategy.generate_entry_signal(
                 setup_id,
                 previous_state,
@@ -303,7 +321,7 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+                strategy = self._get_strategy(setup_id, setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
                 indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )
@@ -337,9 +355,49 @@ class AlgoEngine:
             )
             
             if exit_signal:
-                await self.position_manager.execute_exit(
+                logger.info(
+                    f"EXIT SIGNAL for {asset}: {exit_signal.reason} "
+                    f"(final indicator value: {exit_signal.stop_loss})"
+                )
+                
+                # Persist final indicator value before closing the trade
+                await update_trade_state(trade_id, {
+                    "pending_sl_price": exit_signal.stop_loss
+                })
+                
+                success, exit_price, _ = await self.position_manager.execute_exit(
                     client, trade_state, exit_signal.reason
                 )
+                
+                if success:
+                    try:
+                        entry_price = trade_state.get("entry_price")
+                        lot_size = trade_state.get("lot_size", 0)
+                        pnl = None
+                        pnl_inr = None
+                        if entry_price and exit_price:
+                            if current_position == "long":
+                                pnl = (exit_price - entry_price) * lot_size
+                            else:
+                                pnl = (entry_price - exit_price) * lot_size
+                            from config.settings import settings as app_settings
+                            pnl_inr = pnl * app_settings.usd_to_inr_rate
+                        
+                        await self.logger_bot.send_trade_exit_detail(
+                            setup_name=trade_state.get("setup_name", "Unknown"),
+                            asset=asset,
+                            timeframe=timeframe,
+                            direction=current_position,
+                            entry_price=entry_price,
+                            exit_price=exit_price,
+                            lot_size=lot_size,
+                            pnl_usd=pnl,
+                            pnl_inr=pnl_inr,
+                            exit_signal_text=exit_signal.reason,
+                            exit_reason=exit_signal.reason
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send exit notification for {asset}: {e}")
                 
             await client.close()
             
@@ -374,7 +432,7 @@ class AlgoEngine:
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
             try:
-                strategy = StrategyFactory.get_strategy(setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
+                strategy = self._get_strategy(setup_id, setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
                 indicator_result = await strategy.calculate_indicators(
                     client, asset, timeframe
                 )

@@ -462,6 +462,16 @@ class PositionManager:
             })
 
             db = await get_db()
+            
+            # Close position records (prevents orphan "open" records in positions collection)
+            try:
+                await db.positions.update_many(
+                    {"algo_setup_id": setup_id, "status": "open"},
+                    {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+                )
+            except Exception as e:
+                logger.error(f"❌ Error closing position records for {symbol}: {e}")
+            
             await release_position_lock(db, symbol, setup_id)
             
             return True, exit_price, exit_reason

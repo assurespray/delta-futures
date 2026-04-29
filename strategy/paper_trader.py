@@ -141,6 +141,18 @@ class PaperTrader:
                 "paper_fees": (trade_state.get("paper_fees", 0) or 0) + exit_fee
             })
             
+            # Close position records (prevents orphan "open" records in positions collection)
+            setup_id = trade_state.get("setup_id")
+            if setup_id:
+                try:
+                    db = await get_db()
+                    await db.positions.update_many(
+                        {"algo_setup_id": setup_id, "status": "open"},
+                        {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+                    )
+                except Exception as e:
+                    logger.error(f"[PAPER] Error closing position records for {symbol}: {e}")
+            
             return True, exit_price, exit_reason
         except Exception as e:
             logger.error(f"[PAPER] Error in execute_virtual_exit: {e}")
