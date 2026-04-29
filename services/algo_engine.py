@@ -19,7 +19,7 @@ from api.orders import is_order_gone, cancel_order
 from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
 from strategy.paper_trader import paper_trader, is_paper_trade
-from api.positions import get_ticker_mark_price
+from api.positions import get_ticker_mark_price, get_position_by_symbol
 from services.logger_bot import LoggerBot
 from utils.timeframe import (
     is_at_candle_boundary,
@@ -163,6 +163,37 @@ class AlgoEngine:
             "strategy_state": mapping.get("strategy_state", {}),
         }
 
+    async def _find_external_close_price(self, client: DeltaExchangeClient, trade_state: dict) -> Optional[float]:
+        """Try to find actual exit price when position was closed externally.
+        
+        Queries order history for the most recent filled order that would
+        close this position (reduce_only or matching exit side).
+        """
+        try:
+            product_id = trade_state.get("product_id")
+            if not product_id:
+                return None
+            
+            from api.orders import get_order_history
+            history = await get_order_history(client, product_id)
+            if not history:
+                return None
+            
+            current_position = trade_state.get("current_position") or trade_state.get("direction")
+            exit_side = "sell" if current_position == "long" else "buy"
+            
+            # Find the most recent filled order that would close this position
+            for order in history:
+                if (order.get("state") == "filled" and 
+                    order.get("side") == exit_side and
+                    order.get("average_fill_price") is not None):
+                    return float(order["average_fill_price"])
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Could not find external close price: {e}")
+            return None
+
     async def process_algo_setup(self, algo_setup: Dict[str, Any]):
         start_time = time.time()
         setup_id = str(algo_setup['_id'])
@@ -181,165 +212,78 @@ class AlgoEngine:
             
             client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
             
-            try:
-                strategy = self._get_strategy(setup_id, algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
-                indicator_result = await strategy.calculate_indicators(
-                    client, asset, timeframe, force_recalc=True
-                )
-                if not indicator_result:
-                    return
-                
-                # Fetch previous strategy state BEFORE overwriting cache
-                previous_state = await get_last_strategy_state(setup_id, asset, timeframe)
-                
-                # Fetch previous full cache for flip detection (need both primary + secondary signals)
-                from database.mongodb import mongodb
-                _db = mongodb.get_db()
-                prev_cache = await _db.indicator_cache.find_one({
-                    "setup_id": setup_id, "asset": asset, "timeframe": timeframe
-                })
-                
-                # Save to Indicator Cache for Dashboard (strategy-agnostic)
-                # IMPORTANT: Save dashboard fields (prices, signals) immediately,
-                # but DEFER strategy_state update until entry outcome is known.
-                # This prevents "consuming" a flip when entry fails or creates a ghost.
-                cache_data = self._build_cache_data(
-                    strategy, indicator_result, setup_id, "algo", setup_name,
-                    algo_setup.get("is_paper_trade", False), asset, timeframe
-                )
-                new_strategy_state = cache_data.get("strategy_state", {})
-                # Preserve old strategy_state for now — will update after entry processing
-                if previous_state is not None:
-                    cache_data["strategy_state"] = previous_state
-                await save_indicator_cache(cache_data)
-                
-                if indicator_result.get("cached"):
-                    return
-            finally:
-                await client.close()
-                
-            # --- Universal Flip Detection (Telegram alert) ---
-            # Compare previous vs current signals and notify on change.
-            # Works for every strategy because it reads the generic primary/secondary fields.
-            if prev_cache:
-                p_name = cache_data.get("primary_name", "Primary")
-                s_name = cache_data.get("secondary_name", "Secondary")
-                
-                for signal_key, name_key, text_key in [
-                    ("primary_signal", "primary_name", "primary_signal_text"),
-                    ("secondary_signal", "secondary_name", "secondary_signal_text"),
-                ]:
-                    # Skip secondary if it mirrors primary (e.g. Single ST)
-                    if signal_key == "secondary_signal" and p_name == s_name:
-                        continue
-                    
-                    old_sig = prev_cache.get(signal_key)
-                    new_sig = cache_data[signal_key]
-                    if old_sig is not None and old_sig != new_sig:
-                        old_text = "Uptrend" if old_sig == 1 else "Downtrend"
-                        new_text = cache_data.get(text_key, "Uptrend" if new_sig == 1 else "Downtrend")
-                        flipped_name = cache_data.get(name_key, "Indicator")
-                        try:
-                            await self.logger_bot.send_indicator_flip(
-                                setup_name=setup_name,
-                                asset=asset,
-                                timeframe=timeframe,
-                                indicator_name=flipped_name,
-                                old_signal_text=old_text,
-                                new_signal_text=new_text,
-                                primary_name=p_name,
-                                primary_signal=cache_data["primary_signal"],
-                                primary_value=cache_data.get("primary_value"),
-                                secondary_name=s_name,
-                                secondary_signal=cache_data["secondary_signal"],
-                                secondary_value=cache_data.get("secondary_value"),
-                                current_price=cache_data.get("current_price")
-                            )
-                        except Exception as e:
-                            logger.error(f"Error sending flip notification for {flipped_name}: {e}")
-                
-            # Generate entry signal using the strategy (strategy-agnostic)
-            # Reuse the same cached strategy instance from above — no need to recreate
-            entry_signal = strategy.generate_entry_signal(
-                setup_id,
-                previous_state,
-                indicator_result
-            )
-            
-            # If signal exists and there's no open trade for this setup+asset, place order
-            if entry_signal:
-                # Direction constraint (long_only / short_only)
-                setup_direction = algo_setup.get("direction", "both")
-                if setup_direction == "long_only" and entry_signal.side != "long":
-                    logger.info(f"SKIP entry for {setup_name} - setup is long_only but signal is {entry_signal.side.upper()}")
-                    # Still commit state — the flip happened, just not the direction we want
-                    await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
-                    return
-                elif setup_direction == "short_only" and entry_signal.side != "short":
-                    logger.info(f"SKIP entry for {setup_name} - setup is short_only but signal is {entry_signal.side.upper()}")
-                    await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
-                    return
-                
-                from database.crud import get_open_trade_by_setup, get_pending_trade_by_setup
-                # To prevent double entries
-                open_trade = await get_open_trade_by_setup(setup_id)
-                pending_trade = await get_pending_trade_by_setup(setup_id)
-                
-                if open_trade or pending_trade:
-                    logger.info(f"SKIP entry for {setup_name} - already active trade exists.")
-                    # Don't commit state — the flip is valid but blocked by existing trade.
-                    # When the trade closes, the flip should be re-detected.
-                    return
-                    
-                # Ensure client is connected for order placement
-                client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
-                try:
-                    success = await self.position_manager.place_breakout_entry_order(
-                        client, algo_setup, 
-                        entry_side=entry_signal.side,
-                        breakout_price=entry_signal.trigger_price,
-                        stop_loss_price=entry_signal.stop_loss,
-                        immediate=entry_signal.immediate
-                    )
-                    if success:
-                        # Entry placed — commit the new strategy_state
-                        await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
-                    else:
-                        # Entry failed — keep old state so flip can be retried next cycle
-                        logger.warning(f"Entry placement failed for {setup_name} - keeping old strategy_state for retry")
-                finally:
-                    await client.close()
-            else:
-                # No entry signal — commit state (no flip, or first cycle initialization)
-                await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
-                    
-        except Exception as e:
-            logger.error(f"Error processing algo setup {setup_name}: {e}")
+            # Early exit: verify position still exists on exchange before running indicators.
+            # Catches manual closes, liquidations, and external interference immediately
+            # instead of waiting for the 60s reconciler cycle.
+            if not trade_state.get("is_paper_trade"):
+                actual_pos = await get_position_by_symbol(client, asset, retry_count=1)
+                actual_size = float(actual_pos.get("size", 0)) if actual_pos else 0
+                if actual_size == 0:
+                    logger.warning(f"⚠️ Position {asset} no longer exists on exchange. Syncing DB.")
+                    # Try to find actual exit price from recent order history
+                    exit_price = await self._find_external_close_price(client, trade_state)
+                    entry_price = trade_state.get("entry_price", 0)
+                    lot_size = trade_state.get("lot_size", 0)
+                    pnl = None
+                    pnl_inr = None
+                    if entry_price and exit_price:
+                        if current_position == "long":
+                            pnl = (exit_price - entry_price) * lot_size
+                        else:
+                            pnl = (entry_price - exit_price) * lot_size
+                        from config.settings import settings as app_settings
+                        pnl_inr = pnl * app_settings.usd_to_inr_rate
 
-    async def process_open_trade(self, trade_state: Dict[str, Any]):
-        trade_id = str(trade_state['_id'])
-        setup_id = trade_state['setup_id']
-        asset = trade_state['asset']
-        timeframe = trade_state['timeframe']
-        current_position = trade_state.get('current_position')
-        
-        now = datetime.utcnow()
-        if not is_at_candle_boundary(timeframe, now):
-            return
-            
-        try:
-            # We need the parent config for api keys and rules
-            from database.crud import get_algo_setup_by_id, get_screener_setup_by_id
-            setup = await get_algo_setup_by_id(setup_id)
-            if not setup:
-                setup = await get_screener_setup_by_id(setup_id)
-            if not setup: return
-            
-            api_id = setup['api_id']
-            cred = await get_api_credential_by_id(api_id, decrypt=True)
-            if not cred: return
-            
-            client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+                    # Cancel any lingering SL orders
+                    sl_order_id = trade_state.get("stop_loss_order_id")
+                    product_id = trade_state.get("product_id")
+                    if sl_order_id and product_id:
+                        await self.position_manager._cancel_stop_loss_orders(
+                            client, product_id, asset, sl_order_id
+                        )
+
+                    await update_trade_state(trade_id, {
+                        "status": "closed",
+                        "exit_price": exit_price or entry_price,
+                        "exit_time": datetime.utcnow(),
+                        "pnl": pnl or 0.0,
+                        "pnl_inr": pnl_inr or 0.0,
+                        "exit_signal": "Position closed externally (detected at candle boundary)"
+                    })
+
+                    from database.crud import get_db, release_position_lock
+                    db = await get_db()
+                    await release_position_lock(db, asset, setup_id)
+                    
+                    # Close position records
+                    try:
+                        await db.positions.update_many(
+                            {"algo_setup_id": setup_id, "status": "open"},
+                            {"$set": {"closed_at": datetime.utcnow(), "status": "closed"}}
+                        )
+                    except Exception:
+                        pass
+
+                    # Telegram notification
+                    try:
+                        setup_name = trade_state.get("setup_name", "Unknown")
+                        pnl_text = f"${pnl:.2f}" if pnl is not None else "unknown"
+                        exit_text = f"${exit_price:.2f}" if exit_price else "unknown"
+                        await self.logger_bot.send_warning(
+                            f"⚠️ Position closed externally!\n\n"
+                            f"Setup: {setup_name}\n"
+                            f"Asset: {asset}\n"
+                            f"Direction: {current_position.upper() if current_position else 'N/A'}\n"
+                            f"Entry: ${entry_price}\n"
+                            f"Exit: {exit_text}\n"
+                            f"PnL: {pnl_text}\n"
+                            f"Reason: Manual close / liquidation"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending external close notification: {e}")
+                    
+                    await client.close()
+                    return
             
             try:
                 strategy = self._get_strategy(setup_id, setup.get('indicator', 'dual_supertrend'), setup.get('indicator_params', {}))
@@ -530,7 +474,6 @@ class AlgoEngine:
                     api_id = setup['api_id']
                     cred = await get_api_credential_by_id(api_id, decrypt=True)
                     if not cred: continue
-                    
                     client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                     try:
                         await self.position_manager.check_entry_order_filled(client, trade, None, logger_bot=self.logger_bot)

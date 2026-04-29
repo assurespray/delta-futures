@@ -74,6 +74,17 @@ class PositionManager:
                 logger.error(f"❌ Failed to acquire lock for {symbol} by {setup_name}")
                 return False
 
+            # Collision guard: verify no position already exists on exchange.
+            # Catches edge cases where DB is out of sync (race condition, manual entry, etc.)
+            existing_pos = await get_position_by_symbol(client, symbol, retry_count=1)
+            if existing_pos and abs(float(existing_pos.get("size", 0))) > 0:
+                logger.warning(
+                    f"⚠️ ENTRY BLOCKED: {symbol} already has an open position on exchange "
+                    f"(size={existing_pos.get('size')}). Releasing lock."
+                )
+                await release_position_lock(db, symbol, setup_id)
+                return False
+
             if not product_id:
                 product = await get_product_by_symbol(client, symbol)
                 if product:

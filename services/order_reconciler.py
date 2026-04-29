@@ -94,7 +94,7 @@ async def reconcile_pending_orders(logger_bot=None):
                     from strategy.position_manager import PositionManager
                     pm = PositionManager()
                     exit_reason = "Position direction flipped externally" if position_flipped else "Position closed externally"
-                    success, _, _ = await pm.execute_exit(client, trade, exit_reason)
+                    success, exit_price, _ = await pm.execute_exit(client, trade, exit_reason)
                     
                     # Safety net: if execute_exit failed (e.g. missing fields), force-close in DB
                     if not success:
@@ -111,6 +111,24 @@ async def reconcile_pending_orders(logger_bot=None):
                         from database.crud import get_db, release_position_lock
                         db = await get_db()
                         await release_position_lock(db, symbol, trade["setup_id"])
+                    
+                    # Telegram notification for external close
+                    if logger_bot:
+                        try:
+                            setup_name = trade.get("setup_name", setup.get("setup_name", "Unknown"))
+                            entry_price = trade.get("entry_price", 0)
+                            exit_price_display = f"${exit_price:.2f}" if exit_price else "unknown"
+                            await logger_bot.send_warning(
+                                f"⚠️ [RECON] Position closed externally!\n\n"
+                                f"Setup: {setup_name}\n"
+                                f"Asset: {symbol}\n"
+                                f"Direction: {current_position.upper() if current_position else 'N/A'}\n"
+                                f"Entry: ${entry_price}\n"
+                                f"Exit: {exit_price_display}\n"
+                                f"Reason: {exit_reason}"
+                            )
+                        except Exception as e:
+                            logger.error(f"[RECON] Error sending external close notification: {e}")
             
             elif trade["status"] == "pending_entry":
                 order_id = trade.get("pending_entry_order_id")
