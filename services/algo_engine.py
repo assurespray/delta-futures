@@ -184,7 +184,7 @@ class AlgoEngine:
             try:
                 strategy = self._get_strategy(setup_id, algo_setup.get('indicator', 'dual_supertrend'), algo_setup.get('indicator_params', {}))
                 indicator_result = await strategy.calculate_indicators(
-                    client, asset, timeframe
+                    client, asset, timeframe, force_recalc=True
                 )
                 if not indicator_result:
                     return
@@ -200,10 +200,17 @@ class AlgoEngine:
                 })
                 
                 # Save to Indicator Cache for Dashboard (strategy-agnostic)
+                # IMPORTANT: Save dashboard fields (prices, signals) immediately,
+                # but DEFER strategy_state update until entry outcome is known.
+                # This prevents "consuming" a flip when entry fails or creates a ghost.
                 cache_data = self._build_cache_data(
                     strategy, indicator_result, setup_id, "algo", setup_name,
                     algo_setup.get("is_paper_trade", False), asset, timeframe
                 )
+                new_strategy_state = cache_data.get("strategy_state", {})
+                # Preserve old strategy_state for now — will update after entry processing
+                if previous_state is not None:
+                    cache_data["strategy_state"] = previous_state
                 await save_indicator_cache(cache_data)
                 
                 if indicator_result.get("cached"):
@@ -265,9 +272,12 @@ class AlgoEngine:
                 setup_direction = algo_setup.get("direction", "both")
                 if setup_direction == "long_only" and entry_signal.side != "long":
                     logger.info(f"SKIP entry for {setup_name} - setup is long_only but signal is {entry_signal.side.upper()}")
+                    # Still commit state — the flip happened, just not the direction we want
+                    await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
                     return
                 elif setup_direction == "short_only" and entry_signal.side != "short":
                     logger.info(f"SKIP entry for {setup_name} - setup is short_only but signal is {entry_signal.side.upper()}")
+                    await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
                     return
                 
                 from database.crud import get_open_trade_by_setup, get_pending_trade_by_setup
@@ -277,20 +287,31 @@ class AlgoEngine:
                 
                 if open_trade or pending_trade:
                     logger.info(f"SKIP entry for {setup_name} - already active trade exists.")
+                    # Don't commit state — the flip is valid but blocked by existing trade.
+                    # When the trade closes, the flip should be re-detected.
                     return
                     
                 # Ensure client is connected for order placement
                 client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
                 try:
-                    await self.position_manager.place_breakout_entry_order(
+                    success = await self.position_manager.place_breakout_entry_order(
                         client, algo_setup, 
                         entry_side=entry_signal.side,
                         breakout_price=entry_signal.trigger_price,
                         stop_loss_price=entry_signal.stop_loss,
                         immediate=entry_signal.immediate
                     )
+                    if success:
+                        # Entry placed — commit the new strategy_state
+                        await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
+                    else:
+                        # Entry failed — keep old state so flip can be retried next cycle
+                        logger.warning(f"Entry placement failed for {setup_name} - keeping old strategy_state for retry")
                 finally:
                     await client.close()
+            else:
+                # No entry signal — commit state (no flip, or first cycle initialization)
+                await save_indicator_cache({**cache_data, "strategy_state": new_strategy_state})
                     
         except Exception as e:
             logger.error(f"Error processing algo setup {setup_name}: {e}")

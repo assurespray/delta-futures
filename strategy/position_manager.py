@@ -218,7 +218,40 @@ class PositionManager:
                     
                 entry_side = trade_state.get("pending_entry_side", "long")
                 position = await get_position_by_symbol(client, symbol)
-                entry_price = float(position["entry_price"]) if position else float(trade_state.get("entry_trigger_price", 0))
+                
+                if not position:
+                    # Order is terminal but no position exists on exchange.
+                    # This happens when Delta returns "closed" for an order that
+                    # never actually filled (e.g. auto-cancelled, margin insufficient).
+                    # Abort — do NOT create a ghost trade.
+                    logger.warning(
+                        f"⚠️ [FILL-MONITOR] Order {pending_order_id} is '{order_status}' but no position "
+                        f"found on exchange for {symbol}. Treating as failed entry."
+                    )
+                    await update_trade_state(trade_id, {
+                        "status": "cancelled",
+                        "pending_entry_order_id": None,
+                        "exit_signal": f"Entry order {order_status} but no position on exchange"
+                    })
+                    db = await get_db()
+                    await release_position_lock(db, symbol, setup_id)
+                    
+                    # Revert strategy_state so the flip can be re-detected next cycle
+                    try:
+                        from database.mongodb import mongodb
+                        _db = mongodb.get_db()
+                        prev_signal = -1 if entry_side == "long" else 1  # opposite of what triggered entry
+                        await _db.indicator_cache.update_one(
+                            {"setup_id": setup_id, "asset": symbol},
+                            {"$set": {"strategy_state.primary_signal": prev_signal}}
+                        )
+                        logger.info(f"✅ Reverted strategy_state.primary_signal to {prev_signal} for retry")
+                    except Exception as revert_err:
+                        logger.error(f"❌ Failed to revert strategy_state: {revert_err}")
+                    
+                    return False
+                
+                entry_price = float(position["entry_price"])
 
                 update_data = {
                     "current_position": entry_side,
