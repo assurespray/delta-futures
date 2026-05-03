@@ -504,14 +504,14 @@ class AlgoEngine:
                         lot_size = trade_state.get("lot_size", 0)
                         pnl = None
                         pnl_inr = None
-                            if entry_price and exit_price:
-                                contract_multiplier = get_contract_multiplier(asset)
-                                if current_position == "long":
-                                    pnl = (exit_price - entry_price) * lot_size * contract_multiplier
-                                else:
-                                    pnl = (entry_price - exit_price) * lot_size * contract_multiplier
-                                    
-                                from config.settings import settings as app_settings
+                        if entry_price and exit_price:
+                            contract_multiplier = get_contract_multiplier(asset)
+                            if current_position == "long":
+                                pnl = (exit_price - entry_price) * lot_size * contract_multiplier
+                            else:
+                                pnl = (entry_price - exit_price) * lot_size * contract_multiplier
+                                
+                            from config.settings import settings as app_settings
                             pnl_inr = pnl * app_settings.usd_to_inr_rate
                         
                         await self.logger_bot.send_trade_exit_detail(
