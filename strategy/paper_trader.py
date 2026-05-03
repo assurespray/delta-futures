@@ -118,7 +118,7 @@ class PaperTrader:
                 if not exit_price:
                     return False, 0.0, ""
                     
-            pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position)
+            pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position, symbol=symbol)
             exit_fee = exit_price * lot_size * PAPER_TRADE_TAKER_FEE
             net_pnl = pnl - exit_fee
             pnl_inr = net_pnl * settings.usd_to_inr_rate
@@ -267,9 +267,11 @@ class PaperTrader:
     def get_active_positions_count(self) -> int: return 1
     def get_pending_entries_count(self) -> int: return 1
 
-    def _calculate_pnl(self, ep, xp, ls, side):
+    def _calculate_pnl(self, ep, xp, ls, side, symbol=""):
         ep, xp = float(ep or 0), float(xp or 0)
         if ep == 0 or xp == 0: return 0.0
-        return (xp - ep) * ls if side == "long" else (ep - xp) * ls
+        from utils.market_utils import get_contract_multiplier
+        multiplier = get_contract_multiplier(symbol)
+        return (xp - ep) * ls * multiplier if side == "long" else (ep - xp) * ls * multiplier
 
 paper_trader = PaperTrader()

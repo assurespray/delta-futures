@@ -86,13 +86,8 @@ async def format_positions_display(positions: List[Dict[str, Any]], client: Delt
             if not mark_price:
                 mark_price = entry_price
 
-            # Lot size logic (adapt as needed for other contracts)
-            if "ETH" in symbol:
-                lot_size = 0.01
-            elif "BTC" in symbol:
-                lot_size = 0.001
-            else:
-                lot_size = 1.0
+            from utils.market_utils import get_contract_multiplier
+            lot_size = get_contract_multiplier(symbol)
 
             # Manual PnL calculation
             if size < 0:
@@ -193,7 +188,7 @@ async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, retry
                 if attempt < retry_count - 1:
                     await asyncio.sleep(0.5)
                     continue
-                return None
+                raise Exception(f"Failed to fetch position for {symbol} after {retry_count} attempts: {response}")
 
             positions = response.get("result", [])
             logger.info(f"Positions returned for {underlying_asset}: {positions}")
@@ -219,6 +214,7 @@ async def get_position_by_symbol(client: DeltaExchangeClient, symbol: str, retry
             if attempt < retry_count - 1:
                 await asyncio.sleep(0.5)
                 continue
-            return None
+            raise Exception(f"Exception fetching position for {symbol} after {retry_count} attempts: {e}")
+    
     logger.info(f"Finished all retries; no open position found for {symbol}")
     return None

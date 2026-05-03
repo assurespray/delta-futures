@@ -275,6 +275,20 @@ async def perf_paper_csv_callback(update: Update, context: ContextTypes.DEFAULT_
 
 # ==================== HELPER FUNCTIONS ====================
 
+from utils.market_utils import get_contract_multiplier
+
+def get_actual_pnl(trade: Dict[str, Any]) -> float:
+    entry = trade.get('entry_price', 0)
+    exit_p = trade.get('exit_price', 0)
+    if not entry or not exit_p:
+        return 0.0
+    mult = get_contract_multiplier(trade.get('asset', ''))
+    lot = trade.get('lot_size', 0)
+    if trade.get('current_position', trade.get('direction', '')) == 'long':
+        return (exit_p - entry) * lot * mult
+    else:
+        return (entry - exit_p) * lot * mult
+
 def _build_performance_message(
     title: str,
     activities: List[Dict[str, Any]],
@@ -283,17 +297,17 @@ def _build_performance_message(
     """Build performance summary message."""
     
     total_trades = len(activities)
-    winning = sum(1 for a in activities if (a.get("pnl") or 0) > 0)
-    losing = sum(1 for a in activities if (a.get("pnl") or 0) < 0)
-    breakeven = sum(1 for a in activities if (a.get("pnl") or 0) == 0)
+    winning = sum(1 for a in activities if get_actual_pnl(a) > 0)
+    losing = sum(1 for a in activities if get_actual_pnl(a) < 0)
+    breakeven = sum(1 for a in activities if get_actual_pnl(a) == 0)
     win_rate = (winning / total_trades * 100) if total_trades > 0 else 0
     
-    total_pnl = sum(a.get("pnl", 0) or 0 for a in activities)
+    total_pnl = sum(get_actual_pnl(a) for a in activities)
     total_pnl_inr = total_pnl * settings.usd_to_inr_rate
     total_fees = sum(a.get("paper_fees", 0) or 0 for a in activities)
     
     # Best and worst trades
-    pnls = [a.get("pnl", 0) or 0 for a in activities]
+    pnls = [get_actual_pnl(a) for a in activities]
     best_trade = max(pnls) if pnls else 0
     worst_trade = min(pnls) if pnls else 0
     avg_pnl = (total_pnl / total_trades) if total_trades > 0 else 0
@@ -344,7 +358,7 @@ def _build_performance_message(
         if asset not in assets:
             assets[asset] = {"trades": 0, "pnl": 0.0}
         assets[asset]["trades"] += 1
-        assets[asset]["pnl"] += a.get("pnl", 0) or 0
+        assets[asset]["pnl"] += get_actual_pnl(a)
     
     if len(assets) > 1:
         message += f"\n{'=' * 28}\n**Per Asset:**\n"
@@ -388,8 +402,18 @@ def _generate_equity_chart(
         equity = []
         current_bal = starting_balance if starting_balance else 0
         
+        from utils.market_utils import get_contract_multiplier
         for act in sorted_acts:
-            pnl = act.get("pnl", 0) or 0
+            entry = act.get('entry_price', 0)
+            exit_p = act.get('exit_price', 0)
+            pnl = 0.0
+            if entry and exit_p:
+                mult = get_contract_multiplier(act.get('asset', ''))
+                lot = act.get('lot_size', 0)
+                if act.get('current_position', act.get('direction', '')) == 'long':
+                    pnl = (exit_p - entry) * lot * mult
+                else:
+                    pnl = (entry - exit_p) * lot * mult
             current_bal += pnl
             
             exit_time = act.get("exit_time")
@@ -460,7 +484,7 @@ def _generate_pnl_bar_chart(
         if not sorted_acts:
             return None
         
-        pnls = [a.get("pnl", 0) or 0 for a in sorted_acts]
+        pnls = [get_actual_pnl(a) for a in sorted_acts]
         labels = [
             f"{a.get('asset', '?')}\n{(a.get('direction') or '?')[0].upper()}"
             for a in sorted_acts
@@ -538,8 +562,8 @@ def _generate_csv(
                 act.get("entry_price", ""),
                 exit_time,
                 act.get("exit_price", ""),
-                round(act.get("pnl", 0) or 0, 4),
-                round(act.get("pnl_inr", 0) or 0, 2),
+                round(get_actual_pnl(act), 4),
+                round(get_actual_pnl(act) * settings.usd_to_inr_rate, 2),
                 "Closed" if act.get("status") == "closed" else "Open",
                 act.get("entry_signal", act.get("perusu_entry_signal", "")),
                 act.get("exit_signal", act.get("sirusu_exit_signal", "")),

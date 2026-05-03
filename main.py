@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
         await mongodb.connect_db()
         logger.info("✅ MongoDB connected")
         
+        # Load contract multipliers
+        from utils.market_utils import refresh_contract_multipliers
+        logger.info("📡 Fetching contract multipliers from Delta Exchange...")
+        await refresh_contract_multipliers()
+        logger.info("✅ Contract multipliers cached")
+        
         # Setup position lock system
         logger.info("🔐 Setting up position lock system...")
         await mongodb.setup_position_lock_indexes()

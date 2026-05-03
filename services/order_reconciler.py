@@ -108,6 +108,17 @@ async def reconcile_pending_orders(logger_bot=None):
                             "pnl_inr": 0.0,
                             "exit_signal": "Position closed externally (force-synced)"
                         })
+                        
+                        try:
+                            import asyncio
+                            from services.journal_service import journal_service
+                            trade["trade_id"] = trade_id
+                            trade["exit_price"] = entry_price
+                            trade["exit_time"] = datetime.utcnow()
+                            asyncio.create_task(journal_service.record_exit(client, trade, None, "Position closed externally (force-synced)"))
+                        except Exception as e:
+                            pass
+                            
                         from database.crud import get_db, release_position_lock
                         db = await get_db()
                         await release_position_lock(db, symbol, trade["setup_id"])
@@ -150,5 +161,7 @@ async def reconcile_pending_orders(logger_bot=None):
                     from database.crud import get_db, release_position_lock
                     db = await get_db()
                     await release_position_lock(db, symbol, trade["setup_id"])
+        except Exception as e:
+            logger.error(f"[RECON] Error processing trade {trade_id} ({symbol}): {e}")
         finally:
             await client.close()

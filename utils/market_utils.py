@@ -87,6 +87,46 @@ async def get_top_gainers(client: DeltaExchangeClient, limit: int = 10) -> List[
         return []
 
 
+_contract_multipliers_cache: Dict[str, float] = {}
+
+async def refresh_contract_multipliers() -> None:
+    """Fetch and cache contract values for all products from Delta Exchange."""
+    try:
+        from api.market_data import get_products
+        # Public endpoints don't need real API keys
+        client = DeltaExchangeClient("", "")
+        products = await get_products(client, force_refresh=True)
+        if products:
+            for p in products:
+                sym = p.get("symbol", "").upper()
+                cval = p.get("contract_value")
+                if sym and cval is not None:
+                    _contract_multipliers_cache[sym] = float(cval)
+            logger.info(f"✅ Cached {len(_contract_multipliers_cache)} contract multipliers")
+        else:
+            logger.warning("⚠️ Failed to fetch products for contract multiplier cache")
+    except Exception as e:
+        logger.error(f"❌ Error refreshing contract multipliers: {e}")
+    finally:
+        await client.close()
+
+def get_contract_multiplier(symbol: str) -> float:
+    """
+    Get the contract multiplier (lot size) for a given symbol from cache.
+    Falls back to hardcoded defaults if not found in cache.
+    """
+    symbol = symbol.upper()
+    if symbol in _contract_multipliers_cache:
+        return _contract_multipliers_cache[symbol]
+        
+    # Fallback to defaults if cache lookup fails
+    if "ETH" in symbol:
+        return 0.01
+    elif "BTC" in symbol:
+        return 0.001
+    else:
+        return 1.0
+
 async def get_top_losers(client: DeltaExchangeClient, limit: int = 10) -> List[str]:
     """
     Get top losing assets in the last 24 hours.

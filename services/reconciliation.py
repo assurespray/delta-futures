@@ -86,6 +86,9 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                         await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                     elif status == "filled":
                         await position_manager.check_entry_order_filled(client, trade, None, logger_bot=logger_bot)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"[STARTUP-RECON] Error processing trade {trade_id} ({symbol}): {e}")
         finally:
             await client.close()
 def filter_orders_by_symbol_and_product_id(

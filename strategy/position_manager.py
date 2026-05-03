@@ -134,6 +134,15 @@ class PositionManager:
                 
                 trade_id = await create_trade_state(trade_data)
                 
+                # ---> JOURNAL ENTRY HOOK <---
+                try:
+                    import asyncio
+                    from services.journal_service import journal_service
+                    trade_data["trade_id"] = trade_id
+                    asyncio.create_task(journal_service.record_entry(client, trade_data, entry_order))
+                except Exception as e:
+                    logger.warning(f"Journal record_entry skipped: {e}")
+                
                 await create_position_record({
                     "algo_setup_id": setup_id,
                     "user_id": algo_setup.get("user_id"),
@@ -276,6 +285,19 @@ class PositionManager:
                 }
                 
                 await update_trade_state(trade_id, update_data)
+                
+                # ---> JOURNAL ENTRY HOOK (Pending Fill) <---
+                try:
+                    import asyncio
+                    from services.journal_service import journal_service
+                    # Merge update_data so journal sees entry_time, entry_price, etc.
+                    j_trade = dict(trade_state, **update_data)
+                    j_trade["trade_id"] = trade_id
+                    # We pass a minimal order_response since it was filled asynchronously
+                    mock_order_resp = {"id": pending_order_id, "average_fill_price": entry_price}
+                    asyncio.create_task(journal_service.record_entry(client, j_trade, mock_order_resp))
+                except Exception as e:
+                    logger.warning(f"Journal record_entry (pending) skipped: {e}")
                 
                 await create_position_record({
                     "algo_setup_id": setup_id,
@@ -488,10 +510,12 @@ class PositionManager:
             entry_price = trade_state.get("entry_price", 0)
             pnl = 0.0
             if entry_price and exit_price:
+                from utils.market_utils import get_contract_multiplier
+                contract_multiplier = get_contract_multiplier(symbol)
                 if current_position == "long":
-                    pnl = (exit_price - entry_price) * exit_size
+                    pnl = (exit_price - entry_price) * exit_size * contract_multiplier
                 else:
-                    pnl = (entry_price - exit_price) * exit_size
+                    pnl = (entry_price - exit_price) * exit_size * contract_multiplier
                     
             pnl_inr = pnl * settings.usd_to_inr_rate
             
@@ -504,6 +528,20 @@ class PositionManager:
                 "pnl_inr": pnl_inr,
                 "exit_signal": exit_reason
             })
+            
+            # ---> JOURNAL EXIT HOOK <---
+            try:
+                import asyncio
+                from services.journal_service import journal_service
+                trade_state["trade_id"] = trade_id
+                trade_state["exit_price"] = exit_price
+                trade_state["exit_time"] = datetime.utcnow()
+                mock_exit_resp = exit_order if 'exit_order' in locals() else None
+                if not mock_exit_resp and stop_loss_order_id:
+                    mock_exit_resp = {"id": stop_loss_order_id, "average_fill_price": exit_price}
+                asyncio.create_task(journal_service.record_exit(client, trade_state, mock_exit_resp, exit_reason))
+            except Exception as e:
+                logger.warning(f"Journal record_exit skipped: {e}")
 
             db = await get_db()
             

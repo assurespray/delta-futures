@@ -6,9 +6,15 @@ from database.crud import get_trades_by_user, get_algo_setup_by_id, get_api_cred
 from api.delta_client import DeltaExchangeClient
 from api.positions import get_ticker_mark_price
 from config.settings import settings
-from datetime import datetime
+from datetime import datetime, timedelta
+from utils.market_utils import get_contract_multiplier
 
 logger = logging.getLogger(__name__)
+
+def to_ist_str(dt: datetime) -> str:
+    if not dt: return "N/A"
+    ist = dt + timedelta(hours=5, minutes=30)
+    return ist.strftime('%m/%d %H:%M')
 
 
 async def _get_mark_price_for_open_trade(activity: dict) -> float:
@@ -88,7 +94,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             entry_time = activity.get('entry_time')
             
             entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
-            entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
+            entry_time_str = to_ist_str(entry_time)
             
             mark_price = await _get_mark_price_for_open_trade(activity)
             sl_price = activity.get('pending_sl_price')
@@ -99,10 +105,11 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             upnl_str = "N/A"
             if entry_price and mark_price:
                 pos_dir = activity.get('current_position') or activity.get('direction', '')
+                contract_multiplier = get_contract_multiplier(asset)
                 if pos_dir == "long":
-                    upnl = (mark_price - entry_price) * lot_size
+                    upnl = (mark_price - entry_price) * lot_size * contract_multiplier
                 elif pos_dir == "short":
-                    upnl = (entry_price - mark_price) * lot_size
+                    upnl = (entry_price - mark_price) * lot_size * contract_multiplier
                 upnl_inr = upnl * settings.usd_to_inr_rate
                 upnl_emoji = "🟢" if upnl >= 0 else "🔴"
                 upnl_str = f"{upnl_emoji} ${upnl:.2f} (₹{upnl_inr:.2f})"
@@ -132,13 +139,23 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             entry_time = activity.get('entry_time')
             
             entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
-            entry_time_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
+            entry_time_str = to_ist_str(entry_time)
             
             exit_price = activity.get('exit_price', 0)
             exit_time = activity.get('exit_time')
-            pnl = activity.get('pnl', 0) or 0
-            pnl_inr = activity.get('pnl_inr', 0) or 0
             
+            # Dynamically calculate PnL to correct DB recording errors
+            pnl = 0.0
+            pnl_inr = 0.0
+            if entry_price and exit_price:
+                contract_multiplier = get_contract_multiplier(asset)
+                pos_dir = activity.get('current_position') or activity.get('direction', '')
+                if pos_dir == "long":
+                    pnl = (exit_price - entry_price) * lot_size * contract_multiplier
+                elif pos_dir == "short":
+                    pnl = (entry_price - exit_price) * lot_size * contract_multiplier
+                pnl_inr = pnl * settings.usd_to_inr_rate
+
             if pnl >= 0:
                 pnl_emoji = "🟢"
                 winning_trades += 1
@@ -150,7 +167,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             total_pnl_inr += pnl_inr
             
             exit_price_str = f"${exit_price:.4f}" if exit_price else "N/A"
-            exit_time_str = exit_time.strftime('%m/%d %H:%M') if exit_time else "N/A"
+            exit_time_str = to_ist_str(exit_time)
             
             message += f"\n📊 **{setup_name}** - {asset}\n"
             message += f"Direction: {direction} | Size: {lot_size}\n"

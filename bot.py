@@ -429,6 +429,13 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(perf_paper_csv_callback, pattern="^perf_paper_csv$"))
     application.add_handler(CallbackQueryHandler(perf_paper_callback, pattern="^perf_paper$"))
     
+    # ===== JOURNAL HANDLERS =====
+    from handlers.journal_ui import journal_dashboard_callback, journal_recent_callback, journal_export_callback
+    application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
+    application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_filter_"))
+    application.add_handler(CallbackQueryHandler(journal_recent_callback, pattern="^journal_recent_15$"))
+    application.add_handler(CallbackQueryHandler(journal_export_callback, pattern="^journal_export_csv$"))
+    
     # Indicator Tracker
     application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))
     application.add_handler(CallbackQueryHandler(tracker_view_callback, pattern="^tracker_"))

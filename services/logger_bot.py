@@ -171,9 +171,10 @@ class LoggerBot:
         await self.send_message(message)
     
     def _get_timestamp(self) -> str:
-        """Get formatted timestamp."""
-        from datetime import datetime
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        """Get formatted timestamp in IST."""
+        from datetime import datetime, timedelta
+        ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        return ist.strftime("%Y-%m-%d %H:%M:%S IST")
 
     async def send_order_cancelled(self, setup_name: str, old_signal: str, new_signal: str):
         """
