@@ -122,6 +122,8 @@ class TradeState(BaseModel):
     
     # Entry Info
     entry_trigger_price: Optional[float] = None
+    pending_entry_side: Optional[str] = None
+    pending_entry_direction_signal: Optional[int] = None
     pending_entry_order_id: Optional[int] = None
     last_entry_order_id: Optional[int] = None
     entry_price: Optional[float] = None
