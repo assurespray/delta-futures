@@ -366,9 +366,15 @@ class ScreenerEngine:
                 await client.close()
                 return
             
-            # Process each allowed asset (strategy passed as parameter)
-            for asset in allowed_assets:
-                await self.process_screener_asset(asset, screener_setup, strategy, client)
+            # Process allowed assets in fixed chunks of 10 for speed + rate-limit safety
+            chunk_size = 10
+            total_chunks = (len(allowed_assets) + chunk_size - 1) // chunk_size
+            for i in range(0, len(allowed_assets), chunk_size):
+                chunk = allowed_assets[i:i + chunk_size]
+                chunk_num = (i // chunk_size) + 1
+                logger.info(f"   Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} assets)")
+                tasks = [self.process_screener_asset(asset, screener_setup, strategy, client) for asset in chunk]
+                await asyncio.gather(*tasks, return_exceptions=True)
             
             await client.close()
             

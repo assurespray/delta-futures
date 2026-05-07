@@ -87,6 +87,11 @@ class RangeBreakoutStrategy(BaseStrategy):
 
             candle_status = self._is_candle_closed(latest_candles, timeframe)
 
+            # ENFORCE: Do not calculate on incomplete candle data
+            if not skip_boundary_check and not candle_status['is_closed']:
+                logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
+                return None
+
             end_time = int(current_time.timestamp())
             start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
             candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)

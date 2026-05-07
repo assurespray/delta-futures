@@ -109,6 +109,11 @@ class SingleSuperTrendStrategy(BaseStrategy):
 
             candle_status = self._is_candle_closed(candles, timeframe)
 
+            # ENFORCE: Do not calculate on incomplete candle data
+            if not skip_boundary_check and not candle_status['is_closed']:
+                logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
+                return None
+
             min_required = self.atr_length + 10
             if actual_count < min_required:
                 logger.error(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")

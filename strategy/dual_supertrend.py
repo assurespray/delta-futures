@@ -133,12 +133,13 @@ class DualSuperTrendStrategy(BaseStrategy):
 
             candle_status = self._is_candle_closed(latest_candles, timeframe)
             if not candle_status["is_closed"]:
-                wait_time = candle_status["seconds_until_ready"]
-                logger.warning(
-                    f"Candle for {symbol} {timeframe} not fully closed "
-                    f"(~{wait_time}s remaining). Forcing indicator calculation "
-                    "using last closed candle."
-                )
+                if not skip_boundary_check:
+                    wait_time = candle_status["seconds_until_ready"]
+                    logger.debug(
+                        f"Candle for {symbol} {timeframe} not fully closed "
+                        f"(~{wait_time}s remaining). Skipping calculation."
+                    )
+                    return None
 
             # Efficient Step 2: Fetch ALL candles
             logger.info(f"FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
@@ -172,9 +173,10 @@ class DualSuperTrendStrategy(BaseStrategy):
             candle_status = self._is_candle_closed(candles, timeframe)
             if not candle_status["is_closed"]:
                 if skip_boundary_check:
-                    logger.info(f"Secondary candle check: {symbol} {timeframe} not fully closed; continuing.")
+                    logger.info(f"Secondary candle check: {symbol} {timeframe} not fully closed; continuing (boundary check skipped).")
                 else:
-                    logger.warning(f"Secondary candle check: {symbol} {timeframe} not fully closed; forcing calculation.")
+                    logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
+                    return None
 
             # Sufficient data?
             min_required = max(self.perusu_atr, self.sirusu_atr) + 10
