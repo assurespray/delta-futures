@@ -135,8 +135,8 @@ class AlgoEngine:
                 now = datetime.utcnow()
                 next_boundary = get_next_boundary_time(shortest_tf, now)
                 
-                sleep_seconds = (next_boundary - now).total_seconds() + 2.0
-                logger.info(f"Algo Engine sleeping for {sleep_seconds:.1f} seconds (until next {shortest_tf} boundary)")
+                sleep_seconds = (next_boundary - now).total_seconds() + 6.0  # Must exceed CANDLE_CLOSE_BUFFER_SECONDS (5s)
+                logger.info(f"Algo Engine sleeping for {sleep_seconds:.1f} seconds (until next {shortest_tf} boundary + buffer)")
                 await asyncio.sleep(sleep_seconds)
                 
             except Exception as e:

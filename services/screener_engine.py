@@ -415,7 +415,7 @@ class ScreenerEngine:
                 now = datetime.utcnow()
                 next_boundary = get_next_boundary_time(shortest_tf, now)
                 time_until_boundary = (next_boundary - now).total_seconds()
-                sleep_time = max(1, time_until_boundary + 0.5)
+                sleep_time = max(1, time_until_boundary + 6.0)  # Must exceed CANDLE_CLOSE_BUFFER_SECONDS (5s)
                 
                 logger.info(
                     f"Screener next check at {next_boundary.strftime('%H:%M:%S')} UTC "
