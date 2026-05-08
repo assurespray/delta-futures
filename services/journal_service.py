@@ -18,28 +18,35 @@ class JournalService:
             trade_id = str(trade_data.get("_id") or trade_data.get("trade_id"))
             order_id = str(order_response.get("id"))
             product_id = trade_data.get("product_id")
+            is_paper = trade_data.get("is_paper_trade", False)
             
-            # 1. Try to get exact fill
-            fill_data = await get_exact_fill_details(client, order_id, product_id)
-            
-            if fill_data and fill_data.get("state") in ["closed", "filled"]:
-                entry_price = fill_data["fill_price"]
-                entry_fee = fill_data["fee"]
+            if is_paper:
+                # Paper trade — use simulated prices directly (no exchange API)
+                entry_price = float(order_response.get("average_fill_price", 0))
+                entry_fee = float(order_response.get("fee", 0))
             else:
-                # Fallback to immediate response or trigger price
-                entry_price = float(order_response.get("average_fill_price") or trade_data.get("entry_trigger_price", 0))
-                entry_fee = None # Will be calculated theoretically later
+                # Live trade — poll Delta Exchange for exact fill
+                fill_data = await get_exact_fill_details(client, order_id, product_id)
+                
+                if fill_data and fill_data.get("state") in ["closed", "filled"]:
+                    entry_price = fill_data["fill_price"]
+                    entry_fee = fill_data["fee"]
+                else:
+                    # Fallback to immediate response or trigger price
+                    entry_price = float(order_response.get("average_fill_price") or trade_data.get("entry_trigger_price", 0))
+                    entry_fee = None  # Will be calculated theoretically later
             
-            # 2. Build pristine ledger record
+            # Build pristine ledger record
             journal_entry = {
                 "trade_id": trade_id,
                 "user_id": trade_data.get("user_id"),
-                "api_name": "DeltaExchange", # Could be fetched from creds if available
+                "api_name": "PaperTrade" if is_paper else "DeltaExchange",
                 "strategy_name": trade_data.get("setup_name"),
                 "asset": trade_data.get("asset"),
                 "direction": trade_data.get("direction", trade_data.get("current_position")),
                 "quantity": trade_data.get("lot_size"),
                 "status": "open",
+                "is_paper_trade": is_paper,
                 
                 "entry_price": entry_price,
                 "entry_time": trade_data.get("entry_time", datetime.utcnow()),
@@ -63,16 +70,19 @@ class JournalService:
             direction = trade_data.get("direction", trade_data.get("current_position"))
             quantity = trade_data.get("lot_size")
             entry_price = trade_data.get("entry_price", 0)
+            is_paper = trade_data.get("is_paper_trade", False)
             
-            # Reconstruct exact entry fee if we didn't store it during record_entry
-            # (e.g. if the bot restarted). We can rely on theoretical fallback if needed.
-            
-            # 1. Resolve exact exit fill
+            # 1. Resolve exit fill
             exit_price = 0.0
             exit_fee = None
             exit_order_id = str(exit_order_response.get("id")) if exit_order_response else None
             
-            if exit_order_id:
+            if is_paper:
+                # Paper trade — use simulated prices directly (no exchange API)
+                exit_price = float(exit_order_response.get("average_fill_price", 0))
+                exit_fee = float(exit_order_response.get("fee", 0))
+            elif exit_order_id:
+                # Live trade — poll Delta Exchange for exact fill
                 fill_data = await get_exact_fill_details(client, exit_order_id, product_id)
                 if fill_data and fill_data.get("state") in ["closed", "filled"]:
                     exit_price = fill_data["fill_price"]
@@ -80,18 +90,25 @@ class JournalService:
                 else:
                     exit_price = float(exit_order_response.get("average_fill_price", 0))
             else:
-                # If we don't have an exit order response (e.g. external liquidation),
-                # we rely on the trade_data's fallback exit_price
+                # No exit order response (e.g. external liquidation)
                 exit_price = trade_data.get("exit_price", 0)
 
             # 2. Calculate PnL accurately
+            # For paper trades, use actual simulated fees; for live, fallback to theoretical if missing
+            actual_entry_fee = None
+            if is_paper:
+                # Try to get stored entry fee from the journal ledger
+                existing = await journal_ops.get_trade_by_id(trade_id)
+                if existing:
+                    actual_entry_fee = existing.get("entry_fee")
+            
             gross_pnl, total_fees, net_pnl = pnl_engine.calculate_trade_pnl(
                 entry_price=entry_price,
                 exit_price=exit_price,
                 quantity=quantity,
                 asset=asset,
                 direction=direction,
-                actual_entry_fee=None, # Fallback to theoretical if missing in ledger
+                actual_entry_fee=actual_entry_fee,
                 actual_exit_fee=exit_fee
             )
             
@@ -106,11 +123,10 @@ class JournalService:
                 "gross_pnl": gross_pnl,
                 "total_fees": total_fees,
                 "net_pnl": net_pnl,
-                "net_pnl_inr": net_pnl * settings.usd_to_inr_rate
+                "net_pnl_inr": net_pnl * settings.usd_to_inr_rate,
+                "is_paper_trade": is_paper
             }
             
-            # Fetch existing to preserve entry fee if possible
-            # But update_one with $set merges fields nicely
             await journal_ops.log_trade_event(trade_id, exit_update)
             
         except Exception as e:

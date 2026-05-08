@@ -26,6 +26,14 @@ class JournalOperations:
             logger.error(f"Failed to log trade event to journal: {e}")
             return False
 
+    async def get_trade_by_id(self, trade_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single journal entry by trade_id."""
+        try:
+            return await self.collection.find_one({"trade_id": trade_id})
+        except Exception as e:
+            logger.error(f"Failed to get journal trade by id: {e}")
+            return None
+
     async def append_scaling_event(self, trade_id: str, scaling_event: Dict[str, Any]) -> bool:
         """Appends a scaling event (partial exit, re-entry) to the trade."""
         try:
@@ -39,10 +47,10 @@ class JournalOperations:
             logger.error(f"Failed to append scaling event: {e}")
             return False
 
-    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch closed trades for a user, optionally filtered by asset."""
+    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None, is_paper_trade: bool = False) -> List[Dict[str, Any]]:
+        """Fetch closed trades for a user, optionally filtered by asset and trade type."""
         try:
-            query = {"user_id": user_id, "status": "closed"}
+            query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
             if asset and asset != "ALL":
                 query["asset"] = asset
             cursor = self.collection.find(query).sort("exit_time", -1)
@@ -51,20 +59,20 @@ class JournalOperations:
             logger.error(f"Failed to get journal trades: {e}")
             return []
 
-    async def get_recent_trades(self, user_id: str, limit: int = 15) -> List[Dict[str, Any]]:
+    async def get_recent_trades(self, user_id: str, limit: int = 15, is_paper_trade: bool = False) -> List[Dict[str, Any]]:
         """Fetch the most recent closed trades for the user."""
         try:
-            query = {"user_id": user_id, "status": "closed"}
+            query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
             cursor = self.collection.find(query).sort("exit_time", -1).limit(limit)
             return await cursor.to_list(limit)
         except Exception as e:
             logger.error(f"Failed to get recent trades: {e}")
             return []
 
-    async def get_traded_assets(self, user_id: str) -> List[str]:
+    async def get_traded_assets(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
         """Get distinct list of assets traded by the user."""
         try:
-            return await self.collection.distinct("asset", {"user_id": user_id})
+            return await self.collection.distinct("asset", {"user_id": user_id, "is_paper_trade": is_paper_trade})
         except Exception as e:
             logger.error(f"Failed to get traded assets: {e}")
             return []

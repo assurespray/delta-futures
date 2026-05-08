@@ -44,13 +44,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity"),
-            InlineKeyboardButton("📒 Trade Journal", callback_data="journal_dashboard")
+            InlineKeyboardButton("📒 Live Journal", callback_data="journal_dashboard")
         ],
         [
-            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
+            InlineKeyboardButton("📄 Paper Journal", callback_data="paper_journal_dashboard"),
             InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
         ],
         [
+            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
             InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
         ],
         [
@@ -93,13 +94,14 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ],
         [
             InlineKeyboardButton("📜 Algo Activity", callback_data="menu_algo_activity"),
-            InlineKeyboardButton("📒 Trade Journal", callback_data="journal_dashboard")
+            InlineKeyboardButton("📒 Live Journal", callback_data="journal_dashboard")
         ],
         [
-            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
+            InlineKeyboardButton("📄 Paper Journal", callback_data="paper_journal_dashboard"),
             InlineKeyboardButton("📈 Performance", callback_data="menu_performance")
         ],
         [
+            InlineKeyboardButton("🎮 Paper Trading", callback_data="menu_paper_trading"),
             InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
         ],
         [

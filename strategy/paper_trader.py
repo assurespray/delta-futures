@@ -1,5 +1,6 @@
 import logging
 import time
+import asyncio
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
@@ -16,6 +17,7 @@ from config.constants import (
     PAPER_TRADE_DEFAULT_BALANCE,
     ENABLE_DEMO_MODE,
 )
+from utils.market_utils import get_contract_multiplier
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,10 @@ class PaperTrader:
             live_price = await get_latest_price(client, symbol)
             if not live_price: return False
             
-            margin_required = (live_price * lot_size) / leverage
-            entry_fee = live_price * lot_size * PAPER_TRADE_TAKER_FEE
+            multiplier = get_contract_multiplier(symbol)
+            notional = live_price * lot_size * multiplier
+            margin_required = notional / leverage
+            entry_fee = notional * PAPER_TRADE_TAKER_FEE
             total_cost = margin_required + entry_fee
             
             paper_bal = await get_paper_balance(user_id)
@@ -92,6 +96,15 @@ class PaperTrader:
                 })
                 
                 await create_trade_state(trade_data)
+                
+                # Journal hook — record paper entry
+                try:
+                    from services.journal_service import journal_service
+                    mock_resp = {"id": "paper_entry", "average_fill_price": live_price, "fee": entry_fee}
+                    asyncio.create_task(journal_service.record_entry(client, trade_data, mock_resp))
+                except Exception as e:
+                    logger.warning(f"Journal record_entry (paper immediate) skipped: {e}")
+                
                 return True
             else:
                 new_locked = paper_bal.get("locked_margin", 0) + margin_required
@@ -119,7 +132,8 @@ class PaperTrader:
                     return False, 0.0, ""
                     
             pnl = self._calculate_pnl(entry_price, exit_price, lot_size, current_position, symbol=symbol)
-            exit_fee = exit_price * lot_size * PAPER_TRADE_TAKER_FEE
+            multiplier = get_contract_multiplier(symbol)
+            exit_fee = exit_price * lot_size * multiplier * PAPER_TRADE_TAKER_FEE
             net_pnl = pnl - exit_fee
             pnl_inr = net_pnl * settings.usd_to_inr_rate
             
@@ -153,6 +167,14 @@ class PaperTrader:
                 except Exception as e:
                     logger.error(f"[PAPER] Error closing position records for {symbol}: {e}")
             
+            # Journal hook — record paper exit
+            try:
+                from services.journal_service import journal_service
+                mock_exit_resp = {"id": "paper_exit", "average_fill_price": exit_price, "fee": exit_fee}
+                asyncio.create_task(journal_service.record_exit(client, trade_state, mock_exit_resp, exit_reason))
+            except Exception as e:
+                logger.warning(f"Journal record_exit (paper) skipped: {e}")
+            
             return True, exit_price, exit_reason
         except Exception as e:
             logger.error(f"[PAPER] Error in execute_virtual_exit: {e}")
@@ -177,7 +199,8 @@ class PaperTrader:
             if (side == "long" and live_price >= trigger) or (side == "short" and live_price <= trigger):
                 leverage = trade.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
                 lot_size = trade.get("lot_size", 1)
-                entry_fee = live_price * lot_size * PAPER_TRADE_TAKER_FEE
+                multiplier = get_contract_multiplier(symbol)
+                entry_fee = live_price * lot_size * multiplier * PAPER_TRADE_TAKER_FEE
                 liquidation_price = live_price * (1 - 1/leverage) if side == "long" else live_price * (1 + 1/leverage)
                 
                 user_id = trade.get("user_id", "")
@@ -196,6 +219,16 @@ class PaperTrader:
                     "entry_signal": "uptrend" if side == "long" else "downtrend",
                     "paper_fees": (trade.get("paper_fees", 0) or 0) + entry_fee
                 })
+                
+                # Journal hook — record paper pending entry fill
+                try:
+                    from services.journal_service import journal_service
+                    trade["entry_price"] = live_price
+                    trade["entry_time"] = datetime.utcnow()
+                    mock_resp = {"id": "paper_pending_fill", "average_fill_price": live_price, "fee": entry_fee}
+                    asyncio.create_task(journal_service.record_entry(client, trade, mock_resp))
+                except Exception as e:
+                    logger.warning(f"Journal record_entry (paper pending) skipped: {e}")
 
     async def check_stop_losses(self, client) -> None:
         open_trades = await get_open_trade_states()
