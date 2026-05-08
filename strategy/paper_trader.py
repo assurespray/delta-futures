@@ -43,7 +43,8 @@ class PaperTrader:
             symbol = algo_setup["asset"]
             lot_size = algo_setup["lot_size"]
             user_id = algo_setup.get("user_id", "")
-            leverage = algo_setup.get("paper_leverage") or PAPER_TRADE_DEFAULT_LEVERAGE
+            raw_leverage = algo_setup.get("paper_leverage") or PAPER_TRADE_DEFAULT_LEVERAGE
+            leverage = clamp_leverage(symbol, raw_leverage)
             setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
             
             live_price = await get_latest_price(client, symbol)
@@ -197,7 +198,8 @@ class PaperTrader:
             if not side or not trigger: continue
             
             if (side == "long" and live_price >= trigger) or (side == "short" and live_price <= trigger):
-                leverage = trade.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
+                raw_leverage = trade.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
+                leverage = clamp_leverage(symbol, raw_leverage)
                 lot_size = trade.get("lot_size", 1)
                 multiplier = get_contract_multiplier(symbol)
                 entry_fee = live_price * lot_size * multiplier * PAPER_TRADE_TAKER_FEE

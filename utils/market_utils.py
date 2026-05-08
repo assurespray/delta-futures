@@ -88,9 +88,10 @@ async def get_top_gainers(client: DeltaExchangeClient, limit: int = 10) -> List[
 
 
 _contract_multipliers_cache: Dict[str, float] = {}
+_max_leverage_cache: Dict[str, float] = {}
 
 async def refresh_contract_multipliers() -> None:
-    """Fetch and cache contract values for all products from Delta Exchange."""
+    """Fetch and cache contract values and max leverage for all products from Delta Exchange."""
     try:
         from api.market_data import get_products
         # Public endpoints don't need real API keys
@@ -102,7 +103,17 @@ async def refresh_contract_multipliers() -> None:
                 cval = p.get("contract_value")
                 if sym and cval is not None:
                     _contract_multipliers_cache[sym] = float(cval)
-            logger.info(f"✅ Cached {len(_contract_multipliers_cache)} contract multipliers")
+                # Cache max leverage from initial_margin
+                # initial_margin is a percentage string, e.g. "0.5" means 0.5% → max leverage = 100/0.5 = 200x
+                initial_margin = p.get("initial_margin")
+                if sym and initial_margin is not None:
+                    try:
+                        margin_pct = float(initial_margin)
+                        if margin_pct > 0:
+                            _max_leverage_cache[sym] = 100.0 / margin_pct
+                    except (ValueError, ZeroDivisionError):
+                        pass
+            logger.info(f"✅ Cached {len(_contract_multipliers_cache)} contract multipliers, {len(_max_leverage_cache)} max leverage values")
         else:
             logger.warning("⚠️ Failed to fetch products for contract multiplier cache")
     except Exception as e:
@@ -126,6 +137,28 @@ def get_contract_multiplier(symbol: str) -> float:
         return 0.001
     else:
         return 1.0
+
+def get_max_leverage(symbol: str) -> float:
+    """
+    Get the max allowed leverage for a symbol from cache.
+    Falls back to conservative default (10x) if not found.
+    """
+    symbol = symbol.upper()
+    if symbol in _max_leverage_cache:
+        return _max_leverage_cache[symbol]
+    # Conservative fallback — never blow up on unknown assets
+    return 10.0
+
+def clamp_leverage(symbol: str, requested_leverage: float) -> float:
+    """
+    Clamp requested leverage to the max allowed for this symbol.
+    Returns the lower of requested vs max allowed.
+    """
+    max_lev = get_max_leverage(symbol)
+    clamped = min(requested_leverage, max_lev)
+    if clamped < requested_leverage:
+        logger.info(f"Leverage clamped for {symbol}: {requested_leverage}x → {clamped}x (max {max_lev}x)")
+    return clamped
 
 async def get_top_losers(client: DeltaExchangeClient, limit: int = 10) -> List[str]:
     """
