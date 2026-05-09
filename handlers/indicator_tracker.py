@@ -115,14 +115,14 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
     base_data = f"tracker_{'paper' if is_paper else 'real'}_{setup_type}"
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{base_data}_p{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{base_data}:p{page - 1}"))
     if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{base_data}_p{page + 1}"))
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{base_data}:p{page + 1}"))
 
     keyboard = []
     if nav_buttons:
         keyboard.append(nav_buttons)
-    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"{base_data}_p{page}")])
+    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"{base_data}:p{page}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Tracker Menu", callback_data="menu_indicator_tracker")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -146,10 +146,10 @@ async def tracker_view_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     data = query.data
 
-    # Parse page from callback_data: e.g. "tracker_paper_screener_p3"
+    # Parse page from callback_data: e.g. "tracker_paper_screener:p3"
     page = 0
-    if "_p" in data:
-        parts = data.rsplit("_p", 1)
+    if ":p" in data:
+        parts = data.rsplit(":p", 1)
         base = parts[0]
         try:
             page = int(parts[1])
