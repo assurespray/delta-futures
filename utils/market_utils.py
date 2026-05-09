@@ -152,9 +152,14 @@ def get_max_leverage(symbol: str) -> float:
 def clamp_leverage(symbol: str, requested_leverage: float) -> float:
     """
     Clamp requested leverage to the max allowed for this symbol.
+    If requested_leverage is 0, use the max allowed (the 'Max' option).
     Returns the lower of requested vs max allowed.
     """
     max_lev = get_max_leverage(symbol)
+    if requested_leverage == 0:
+        # 0 = "Max" sentinel from Telegram UI — use full max allowed
+        logger.info(f"Max leverage selected for {symbol}: {max_lev}x")
+        return max_lev
     clamped = min(requested_leverage, max_lev)
     if clamped < requested_leverage:
         logger.info(f"Leverage clamped for {symbol}: {requested_leverage}x → {clamped}x (max {max_lev}x)")

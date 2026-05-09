@@ -34,6 +34,12 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _lev_display(lev) -> str:
+    """Format leverage for display. 0 = Max (per asset)."""
+    lev = int(lev or 10)
+    return "Max" if lev == 0 else f"{lev}x"
+
 # Conversation states for paper INDIVIDUAL setup creation
 PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION = range(100, 104)
 PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE, PAPER_PROTECTION, PAPER_CONFIRM = range(104, 110)
@@ -317,13 +323,15 @@ async def paper_lot_size_received(update: Update, context: ContextTypes.DEFAULT_
             [
                 InlineKeyboardButton("50x", callback_data="paper_lev_50"),
                 InlineKeyboardButton("100x", callback_data="paper_lev_100"),
+                InlineKeyboardButton("Max", callback_data="paper_lev_0"),
             ]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             f"Lot Size: {lot_size}\n\n"
-            "Step 8/9: Select Leverage:",
+            "Step 8/9: Select Leverage:\n"
+            "(Max = highest allowed by the exchange for this asset)",
             reply_markup=reply_markup
         )
         return PAPER_LEVERAGE
@@ -340,6 +348,7 @@ async def paper_leverage_selected(update: Update, context: ContextTypes.DEFAULT_
     
     leverage = int(query.data.replace("paper_lev_", ""))
     context.user_data['paper_leverage'] = leverage
+    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
     
     keyboard = [
         [InlineKeyboardButton("Yes (Enable SL)", callback_data="paper_prot_yes")],
@@ -348,7 +357,7 @@ async def paper_leverage_selected(update: Update, context: ContextTypes.DEFAULT_
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        f"Leverage: {leverage}x\n\n"
+        f"Leverage: {lev_display}\n\n"
         "Step 9/9: Additional Protection (Stop-Loss)?",
         reply_markup=reply_markup
     )
@@ -375,7 +384,7 @@ async def paper_protection_selected(update: Update, context: ContextTypes.DEFAUL
         f"**Timeframe:** {ud['paper_timeframe']}\n"
         f"**Asset:** {ud['paper_asset']}\n"
         f"**Lot Size:** {ud['paper_lot_size']}\n"
-        f"**Leverage:** {ud['paper_leverage']}x\n"
+        f"**Leverage:** {_lev_display(ud['paper_leverage'])}\n"
         f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
         f"**Mode:** PAPER TRADE (Virtual)\n\n"
         "Confirm to save and activate?"
@@ -445,7 +454,7 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**Paper Setup Created!**\n\n"
             f"**Name:** {ud['paper_setup_name']}\n"
             f"**Asset:** {ud['paper_asset']} @ {ud['paper_timeframe']}\n"
-            f"**Leverage:** {ud['paper_leverage']}x\n"
+            f"**Leverage:** {_lev_display(ud['paper_leverage'])}\n"
             f"**Mode:** PAPER TRADE\n\n"
             f"The setup is now active and monitoring for signals.\n"
             f"Virtual trades will be executed automatically.",
@@ -683,13 +692,15 @@ async def pscr_lot_size_received(update: Update, context: ContextTypes.DEFAULT_T
             [
                 InlineKeyboardButton("50x", callback_data="pscr_lev_50"),
                 InlineKeyboardButton("100x", callback_data="pscr_lev_100"),
+                InlineKeyboardButton("Max", callback_data="pscr_lev_0"),
             ]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
             f"Lot Size: {lot_size}\n\n"
-            "Step 8/10: Select Leverage:",
+            "Step 8/10: Select Leverage:\n"
+            "(Max = highest allowed by the exchange per asset)",
             reply_markup=reply_markup
         )
         return PSCR_LEVERAGE
@@ -706,6 +717,7 @@ async def pscr_leverage_selected(update: Update, context: ContextTypes.DEFAULT_T
     
     leverage = int(query.data.replace("pscr_lev_", ""))
     context.user_data['pscr_leverage'] = leverage
+    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
     
     keyboard = [
         [InlineKeyboardButton("Yes (Enable SL)", callback_data="pscr_prot_yes")],
@@ -714,7 +726,7 @@ async def pscr_leverage_selected(update: Update, context: ContextTypes.DEFAULT_T
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        f"Leverage: {leverage}x\n\n"
+        f"Leverage: {lev_display}\n\n"
         "Step 9/10: Additional Protection (Stop-Loss)?",
         reply_markup=reply_markup
     )
@@ -743,7 +755,7 @@ async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT
         f"**Direction:** {ud['pscr_direction'].replace('_', ' ').title()}\n"
         f"**Timeframe:** {ud['pscr_timeframe']}\n"
         f"**Lot Size:** {ud['pscr_lot_size']}\n"
-        f"**Leverage:** {ud['pscr_leverage']}x\n"
+        f"**Leverage:** {_lev_display(ud['pscr_leverage'])}\n"
         f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
         f"**Mode:** PAPER SCREENER (Virtual)\n\n"
         "Confirm to save and activate?"
@@ -803,7 +815,7 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**Name:** {ud['pscr_name']}\n"
             f"**Assets:** {asset_type_text}\n"
             f"**Timeframe:** {ud['pscr_timeframe']}\n"
-            f"**Leverage:** {ud['pscr_leverage']}x\n"
+            f"**Leverage:** {_lev_display(ud['pscr_leverage'])}\n"
             f"**Mode:** PAPER SCREENER\n\n"
             f"The screener is now active and scanning for signals.\n"
             f"Virtual trades will be executed automatically.",
@@ -846,7 +858,7 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
         message += (
             f"[Single] **{setup['setup_name']}**\n"
             f"  {setup['asset']} @ {setup['timeframe']} | "
-            f"{setup.get('paper_leverage', 10)}x | {status}{pos_text}\n\n"
+            f"{_lev_display(setup.get('paper_leverage', 10))} | {status}{pos_text}\n\n"
         )
         
         keyboard.append([InlineKeyboardButton(
@@ -861,7 +873,7 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
         message += (
             f"[Screener] **{setup['setup_name']}**\n"
             f"  {atype} @ {setup.get('timeframe', '?')} | "
-            f"{setup.get('paper_leverage', 10)}x | {status}\n\n"
+            f"{_lev_display(setup.get('paper_leverage', 10))} | {status}\n\n"
         )
         
         keyboard.append([InlineKeyboardButton(
@@ -914,7 +926,7 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"**Timeframe:** {setup['timeframe']}\n"
             f"**Direction:** {setup.get('direction', 'both').replace('_', ' ').title()}\n"
             f"**Lot Size:** {setup['lot_size']}\n"
-            f"**Leverage:** {setup.get('paper_leverage', 10)}x\n"
+            f"**Leverage:** {_lev_display(setup.get('paper_leverage', 10))}\n"
             f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
             f"**Status:** {status}\n\n"
             f"**Current Position:** {position.upper()}\n"
@@ -933,7 +945,7 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"**Timeframe:** {setup.get('timeframe', '?')}\n"
             f"**Direction:** {setup.get('direction', 'both').replace('_', ' ').title()}\n"
             f"**Lot Size:** {setup.get('lot_size', 1)}\n"
-            f"**Leverage:** {setup.get('paper_leverage', 10)}x\n"
+            f"**Leverage:** {_lev_display(setup.get('paper_leverage', 10))}\n"
             f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
             f"**Status:** {status}\n"
         )

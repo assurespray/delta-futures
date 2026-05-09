@@ -43,7 +43,9 @@ class PaperTrader:
             symbol = algo_setup["asset"]
             lot_size = algo_setup["lot_size"]
             user_id = algo_setup.get("user_id", "")
-            raw_leverage = algo_setup.get("paper_leverage") or PAPER_TRADE_DEFAULT_LEVERAGE
+            raw_leverage = algo_setup.get("paper_leverage")
+            if raw_leverage is None:
+                raw_leverage = PAPER_TRADE_DEFAULT_LEVERAGE
             leverage = clamp_leverage(symbol, raw_leverage)
             setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
             
