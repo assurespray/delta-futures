@@ -6,7 +6,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-ASSETS_PER_PAGE = 25  # ~25 assets fit comfortably in 4096 chars
+ASSETS_PER_PAGE = 15  # ~15 assets safe for dual-indicator/Donchian (3 lines each)
 
 
 async def tracker_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,12 +126,18 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
     keyboard.append([InlineKeyboardButton("🔙 Back to Tracker Menu", callback_data="menu_indicator_tracker")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # Hard truncation failsafe — Telegram rejects messages > 4096 chars
+    if len(message) > 4000:
+        message = message[:3997] + "…"
+        logger.warning(f"Tracker message truncated: {len(message)} chars (page {page+1})")
+
     try:
         await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
     except Exception as e:
         if "Message is not modified" in str(e):
             pass
         else:
+            logger.error(f"Tracker edit_message_text failed: {e}")
             raise
 
 
