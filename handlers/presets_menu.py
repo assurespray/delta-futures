@@ -50,6 +50,7 @@ async def preset_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("📈 Single SuperTrend", callback_data="preset_type_single_supertrend")],
         [InlineKeyboardButton("📊 Dual SuperTrend", callback_data="preset_type_dual_supertrend")],
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
+        [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await update.message.reply_text("Select base strategy:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -69,6 +70,9 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
         return PRESET_P1
     elif ptype == "range_breakout_lazybear":
         await query.edit_message_text("Enter EMA Length, SL Type (middle/opposite), Min Range Candles (e.g., 34,middle,2):")
+        return PRESET_P1
+    elif ptype == "donchian":
+        await query.edit_message_text("Enter Donchian Channel Period (e.g., 20):")
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,6 +97,9 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
                 "ema_length": int(parts[0]), "sl_type": parts[1].strip().lower(),
                 "min_range_candles": int(parts[2])
             }
+        elif ptype == "donchian":
+            if len(parts) != 1: raise ValueError("Need 1 value (period)")
+            params = {"period": int(parts[0])}
             
         await create_strategy_preset({
             "user_id": str(update.effective_user.id),
@@ -199,6 +206,9 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += f"• SL Type: {params.get('sl_type', '?')}\n"
         message += f"• Min Range Candles: {params.get('min_range_candles', '?')}\n\n"
         message += "Enter new EMA Length, SL Type (middle/opposite), Min Range Candles (e.g., 34,middle,2):"
+    elif ptype == "donchian":
+        message += f"• Period: {params.get('period', '?')}\n\n"
+        message += "Enter new Donchian Channel Period (e.g., 20):"
     
     message += "\n\nSend /cancel to abort."
     
@@ -235,6 +245,9 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
                 "ema_length": int(parts[0]), "sl_type": parts[1].strip().lower(),
                 "min_range_candles": int(parts[2])
             }
+        elif ptype == "donchian":
+            if len(parts) != 1: raise ValueError("Need 1 value (period)")
+            params = {"period": int(parts[0])}
         
         await update_strategy_preset(pid, {"parameters": params})
         
@@ -275,6 +288,7 @@ async def preset_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("📈 Single SuperTrend", callback_data="preset_type_single_supertrend")],
         [InlineKeyboardButton("📊 Dual SuperTrend", callback_data="preset_type_dual_supertrend")],
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
+        [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await query.edit_message_text(

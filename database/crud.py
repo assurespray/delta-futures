@@ -205,6 +205,15 @@ async def ensure_default_presets(user_id: str) -> None:
             },
             "is_default": True
         })
+        await create_strategy_preset({
+            "user_id": user_id,
+            "preset_name": "[S] Donchian Breakout (20)",
+            "strategy_type": "donchian",
+            "parameters": {
+                "period": 20
+            },
+            "is_default": True
+        })
 
 # ==================== Algo Setups CRUD ====================
 

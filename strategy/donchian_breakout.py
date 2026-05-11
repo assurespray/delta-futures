@@ -2,18 +2,24 @@
 Donchian Channels Breakout strategy — Turtle Trader Universal Rule.
 Conforms to BaseStrategy interface for modular engine execution.
 
-Entry Logic (Universal Turtle Rule):
+Entry Logic:
 - LONG when latest closed candle closes ABOVE the 20-period Upper Channel
 - SHORT when latest closed candle closes BELOW the 20-period Lower Channel
-- Uses immediate market order (breakout already confirmed on close)
+- Trigger price = breakout candle high/low +/- 1 pip offset
+- If current price already crossed trigger → immediate MARKET order
+- Otherwise → pending STOP LIMIT order at trigger price
 
 Exit Logic:
-- LONG exit: price closes below the Middle Band
-- SHORT exit: price closes above the Middle Band
+- LONG exit: candle closes below the Middle Band → go FLAT (no reversal)
+- SHORT exit: candle closes above the Middle Band → go FLAT (no reversal)
+- Bot waits for next Donchian breakout/breakdown to re-enter
 
-Stop-Loss:
-- LONG SL = Lower Channel (maximum adverse excursion protection)
-- SHORT SL = Upper Channel
+Stop-Loss (additional protection):
+- Initial SL = Middle Band of the Donchian Channel
+
+Pending Order Invalidation:
+- Cancel pending LONG if candle closes below Middle Band
+- Cancel pending SHORT if candle closes above Middle Band
 """
 
 import logging
@@ -26,7 +32,8 @@ from api.market_data import get_candles
 from config.constants import (
     TIMEFRAME_MAPPING,
     TIMEFRAME_SECONDS,
-    CANDLE_CLOSE_BUFFER_SECONDS
+    CANDLE_CLOSE_BUFFER_SECONDS,
+    BREAKOUT_PIP_OFFSET,
 )
 from utils.timeframe import get_timeframe_seconds
 from strategy.base import BaseStrategy, EntrySignal, ExitSignal
@@ -215,17 +222,26 @@ class DonchianBreakoutStrategy(BaseStrategy):
         indicators_data: Dict[str, Any]
     ) -> Optional[EntrySignal]:
         """
-        Turtle Trader Universal Entry Rule:
-        - LONG: close > Upper Channel (breakout confirmed on candle close)
-        - SHORT: close < Lower Channel
-        - SL: opposite channel boundary
+        Donchian Breakout Entry Rule:
+        - LONG: candle closes above Upper Channel → trigger = breakout candle high + 1 pip
+        - SHORT: candle closes below Lower Channel → trigger = breakout candle low - 1 pip
+        - If price already crossed trigger → MARKET order (immediate)
+        - Otherwise → STOP LIMIT order (pending)
+        - SL = Middle Band
         """
         try:
             dc = indicators_data.get("donchian")
+            previous_candle = indicators_data.get("latest_closed_candle", {})
             current_price = indicators_data.get("current_price")
 
-            if not dc or not current_price:
-                logger.error("Missing Donchian data for entry signal")
+            if not dc or not previous_candle or not current_price:
+                logger.error("Missing Donchian data or candle data for entry signal")
+                return None
+
+            prev_high = previous_candle.get("high")
+            prev_low = previous_candle.get("low")
+            if not prev_high or not prev_low:
+                logger.error("Missing latest candle high/low for Donchian")
                 return None
 
             # Extract last signal from previous_state
@@ -236,30 +252,33 @@ class DonchianBreakoutStrategy(BaseStrategy):
             if not entry_side:
                 return None
 
-            upper = dc['upper']
-            lower = dc['lower']
             middle = dc['middle']
 
             if entry_side == "long":
-                # Entry at market, SL at lower channel
-                logger.info(f"Donchian LONG entry @ ${current_price:.5f} (SL: ${lower:.5f})")
-                return EntrySignal(
-                    side='long',
-                    trigger_price=current_price,
-                    stop_loss=lower,
-                    immediate=True,
-                    reason=f'Donchian Upper Breakout (close > {upper:.5f})'
-                )
+                trigger_price = prev_high + BREAKOUT_PIP_OFFSET
+                # If price already above trigger → immediate market order
+                if current_price >= trigger_price:
+                    logger.info(f"Donchian LONG: Price ${current_price:.5f} >= trigger ${trigger_price:.5f} → MARKET order (SL: ${middle:.5f})")
+                    return EntrySignal(
+                        side='long', trigger_price=current_price, stop_loss=middle,
+                        immediate=True, reason=f'Donchian Upper Breakout (immediate)'
+                    )
             else:
-                # Entry at market, SL at upper channel
-                logger.info(f"Donchian SHORT entry @ ${current_price:.5f} (SL: ${upper:.5f})")
-                return EntrySignal(
-                    side='short',
-                    trigger_price=current_price,
-                    stop_loss=upper,
-                    immediate=True,
-                    reason=f'Donchian Lower Breakout (close < {lower:.5f})'
-                )
+                trigger_price = prev_low - BREAKOUT_PIP_OFFSET
+                # If price already below trigger → immediate market order
+                if current_price <= trigger_price:
+                    logger.info(f"Donchian SHORT: Price ${current_price:.5f} <= trigger ${trigger_price:.5f} → MARKET order (SL: ${middle:.5f})")
+                    return EntrySignal(
+                        side='short', trigger_price=current_price, stop_loss=middle,
+                        immediate=True, reason=f'Donchian Lower Breakout (immediate)'
+                    )
+
+            # Price hasn't crossed trigger yet → pending STOP LIMIT order
+            logger.info(f"Donchian {entry_side.upper()} pending: trigger ${trigger_price:.5f}, current ${current_price:.5f} (SL: ${middle:.5f})")
+            return EntrySignal(
+                side=entry_side, trigger_price=trigger_price, stop_loss=middle,
+                immediate=False, reason=f"Donchian {'Upper' if entry_side == 'long' else 'Lower'} Breakout (pending)"
+            )
 
         except Exception as e:
             logger.error(f"Exception generating Donchian entry signal: {e}")
@@ -307,9 +326,23 @@ class DonchianBreakoutStrategy(BaseStrategy):
 
     def should_invalidate_pending_entry(self, pending_side: str, indicators_data: Dict[str, Any]) -> bool:
         """
-        Donchian always uses immediate market orders (breakout confirmed on close),
-        so pending invalidation is not applicable. Return False.
+        Cancel pending Donchian entry if price retreats past the Middle Band.
+        - Pending LONG invalidated if candle closes below Middle Band
+        - Pending SHORT invalidated if candle closes above Middle Band
         """
+        dc = indicators_data.get("donchian")
+        if not dc:
+            return False
+
+        close = dc.get('latest_close', 0)
+        middle = dc.get('middle', 0)
+
+        if pending_side == "long" and close < middle:
+            logger.info(f"Donchian INVALIDATE pending LONG: close ${close:.5f} < middle ${middle:.5f}")
+            return True
+        if pending_side == "short" and close > middle:
+            logger.info(f"Donchian INVALIDATE pending SHORT: close ${close:.5f} > middle ${middle:.5f}")
+            return True
         return False
 
     def get_cache_mapping(self, indicators_data: Dict[str, Any]) -> Dict[str, Any]:
