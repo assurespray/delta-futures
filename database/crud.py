@@ -170,50 +170,43 @@ async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
 
 async def ensure_default_presets(user_id: str) -> None:
     presets = await get_strategy_presets_by_user(user_id)
-    has_defaults = any(p.get("is_default") for p in presets)
-    if not has_defaults:
-        await create_strategy_preset({
-            "user_id": user_id,
-            "preset_name": "[S] Dual ST (P:20,20 / S:10,10)",
+    existing_types = {p.get("strategy_type") for p in presets if p.get("is_default")}
+
+    defaults = [
+        {
             "strategy_type": "dual_supertrend",
+            "preset_name": "[S] Dual ST (P:20,20 / S:10,10)",
             "parameters": {
-                "perusu_atr": 20,
-                "perusu_factor": 20.0,
-                "sirusu_atr": 10,
-                "sirusu_factor": 10.0
+                "perusu_atr": 20, "perusu_factor": 20.0,
+                "sirusu_atr": 10, "sirusu_factor": 10.0
             },
-            "is_default": True
-        })
-        await create_strategy_preset({
-            "user_id": user_id,
-            "preset_name": "[S] Single ST (20, 20)",
+        },
+        {
             "strategy_type": "single_supertrend",
-            "parameters": {
-                "atr_length": 20,
-                "factor": 20.0
-            },
-            "is_default": True
-        })
-        await create_strategy_preset({
-            "user_id": user_id,
-            "preset_name": "[S] Range Breakout LB (EMA:34)",
+            "preset_name": "[S] Single ST (20, 20)",
+            "parameters": {"atr_length": 20, "factor": 20.0},
+        },
+        {
             "strategy_type": "range_breakout_lazybear",
-            "parameters": {
-                "ema_length": 34,
-                "sl_type": "middle",
-                "min_range_candles": 2
-            },
-            "is_default": True
-        })
-        await create_strategy_preset({
-            "user_id": user_id,
-            "preset_name": "[S] Donchian Breakout (20)",
+            "preset_name": "[S] Range Breakout LB (EMA:34)",
+            "parameters": {"ema_length": 34, "sl_type": "middle", "min_range_candles": 2},
+        },
+        {
             "strategy_type": "donchian",
-            "parameters": {
-                "period": 20
-            },
-            "is_default": True
-        })
+            "preset_name": "[S] Donchian Breakout (20)",
+            "parameters": {"period": 20},
+        },
+    ]
+
+    for d in defaults:
+        if d["strategy_type"] not in existing_types:
+            await create_strategy_preset({
+                "user_id": user_id,
+                "preset_name": d["preset_name"],
+                "strategy_type": d["strategy_type"],
+                "parameters": d["parameters"],
+                "is_default": True,
+            })
 
 # ==================== Algo Setups CRUD ====================
 
