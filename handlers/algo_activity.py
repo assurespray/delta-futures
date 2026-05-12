@@ -2,7 +2,7 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database.crud import get_trades_by_user, get_algo_setup_by_id, get_api_credential_by_id
+from database.crud import get_trades_by_user, get_algo_setup_by_id, get_api_credential_by_id, get_screener_setup_by_id
 from api.delta_client import DeltaExchangeClient
 from api.positions import get_ticker_mark_price
 from config.settings import settings
@@ -17,21 +17,32 @@ def to_ist_str(dt: datetime) -> str:
     return ist.strftime('%m/%d %H:%M')
 
 
-async def _get_mark_price_for_open_trade(activity: dict) -> float:
+async def _get_mark_price_for_open_trade(activity: dict, is_paper: bool = False) -> float:
     """Fetch current mark price from exchange for an open trade."""
     try:
         setup_id = activity.get("setup_id")
         if not setup_id:
             return 0.0
+            
+        # For paper trades, we can just use the public unauthenticated get_latest_price
+        # if we don't have API keys, but DeltaExchange allows public ticker fetching
+        # even without auth. However, we'll try to get the setup anyway.
+        
         setup = await get_algo_setup_by_id(setup_id)
         if not setup:
+            setup = await get_screener_setup_by_id(setup_id)
+            
+        if not setup:
             return 0.0
+            
         api_id = setup.get("api_id")
         if not api_id:
             return 0.0
+            
         cred = await get_api_credential_by_id(api_id, decrypt=True)
         if not cred:
             return 0.0
+            
         client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
         try:
             mark_price = await get_ticker_mark_price(client, activity['asset'])
@@ -44,12 +55,16 @@ async def _get_mark_price_for_open_trade(activity: dict) -> float:
 
 
 async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Algo Activity button click."""
+    await _render_activity(update, context, is_paper=False)
+
+async def paper_activity_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Paper Activity button click."""
+    await _render_activity(update, context, is_paper=True)
+
+async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, is_paper: bool):
     """
-    Display last 3 days of algo trading activity.
-    
-    Args:
-        update: Telegram update
-        context: Callback context
+    Display last 3 days of trading activity (Real or Paper).
     """
     query = update.callback_query
     await query.answer("Fetching activity...")
@@ -57,14 +72,17 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     user_id = str(query.from_user.id)
     
     # Get last 3 days of activity
-    activities = await get_trades_by_user(user_id, days=3)
+    activities = await get_trades_by_user(user_id, days=3, is_paper=is_paper)
+    
+    back_button_data = "menu_paper_trading" if is_paper else "main_menu"
     
     if not activities:
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_button_data)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        mode_text = "paper" if is_paper else "algo"
         await query.edit_message_text(
-            "ℹ️ No trading activity in the last 3 days.",
+            f"ℹ️ No {mode_text} trading activity in the last 3 days.",
             reply_markup=reply_markup
         )
         return
@@ -73,7 +91,8 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     open_trades = [a for a in activities if a.get('status') != 'closed']
     closed_trades = [a for a in activities if a.get('status') == 'closed']
     
-    message = "📜 **Algo Trading Activity (Last 3 Days)**\n\n"
+    title_text = "Paper" if is_paper else "Algo"
+    message = f"📜 **{title_text} Trading Activity (Last 3 Days)**\n\n"
     
     total_pnl_usd = 0.0
     total_pnl_inr = 0.0
@@ -96,7 +115,7 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
             entry_price_str = f"${entry_price:.4f}" if entry_price else "N/A"
             entry_time_str = to_ist_str(entry_time)
             
-            mark_price = await _get_mark_price_for_open_trade(activity)
+            mark_price = await _get_mark_price_for_open_trade(activity, is_paper)
             sl_price = activity.get('pending_sl_price')
             
             # Calculate unrealized PnL
@@ -195,8 +214,12 @@ async def algo_activity_callback(update: Update, context: ContextTypes.DEFAULT_T
     total_pnl_emoji = "🟢" if total_pnl_usd >= 0 else "🔴"
     message += f"\n{total_pnl_emoji} **Realized PnL: ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})**"
     
-    keyboard = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]]
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_button_data)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Hard truncation failsafe
+    if len(message) > 4000:
+        message = message[:3997] + "…"
     
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
   

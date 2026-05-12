@@ -18,8 +18,15 @@ from config.constants import (
     ENABLE_DEMO_MODE,
 )
 from utils.market_utils import get_contract_multiplier
+from services.logger_bot import logger_bot
 
 logger = logging.getLogger(__name__)
+
+def to_ist_str(dt: datetime) -> str:
+    if not dt: return "N/A"
+    from datetime import timedelta
+    ist = dt + timedelta(hours=5, minutes=30)
+    return ist.strftime('%Y-%m-%d %H:%M:%S IST')
 
 
 def is_paper_trade(setup: Dict[str, Any]) -> bool:
@@ -108,12 +115,57 @@ class PaperTrader:
                 except Exception as e:
                     logger.warning(f"Journal record_entry (paper immediate) skipped: {e}")
                 
+                # Send [PAPER] Entry Notification
+                try:
+                    emoji = "🟢" if entry_side == "long" else "🔴"
+                    msg = (
+                        f"{emoji} **[PAPER] TRADE ENTRY**\n\n"
+                        f"**Setup:** {setup_name}\n"
+                        f"**Asset:** {symbol} @ {algo_setup.get('timeframe', '1m')}\n"
+                        f"**Direction:** {entry_side.upper()}\n"
+                        f"**Type:** MARKET\n"
+                        f"**Entry Price:** ${float(live_price):.5f}\n"
+                        f"**Lot Size:** {lot_size}\n"
+                    )
+                    if stop_loss_price:
+                        msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
+                    msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
+                    
+                    asyncio.create_task(logger_bot.send_message(msg))
+                    if user_id:
+                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                except Exception as e:
+                    logger.error(f"[PAPER] Notification error: {e}")
+                
                 return True
             else:
                 new_locked = paper_bal.get("locked_margin", 0) + margin_required
                 await update_paper_balance(user_id, {"locked_margin": new_locked})
                 
                 await create_trade_state(trade_data)
+                
+                # Send [PAPER] Pending Order Notification
+                try:
+                    emoji = "🟢" if entry_side == "long" else "🔴"
+                    msg = (
+                        f"⏳ **[PAPER] PENDING ENTRY**\n\n"
+                        f"**Setup:** {setup_name}\n"
+                        f"**Asset:** {symbol} @ {algo_setup.get('timeframe', '1m')}\n"
+                        f"**Direction:** {entry_side.upper()}\n"
+                        f"**Type:** STOP-LIMIT\n"
+                        f"**Trigger Price:** ${float(breakout_price):.5f}\n"
+                        f"**Lot Size:** {lot_size}\n"
+                    )
+                    if stop_loss_price:
+                        msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
+                    msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
+                    
+                    asyncio.create_task(logger_bot.send_message(msg))
+                    if user_id:
+                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                except Exception as e:
+                    logger.error(f"[PAPER] Pending Notification error: {e}")
+                
                 return True
                 
         except Exception as e:
@@ -177,6 +229,27 @@ class PaperTrader:
                 asyncio.create_task(journal_service.record_exit(client, trade_state, mock_exit_resp, exit_reason))
             except Exception as e:
                 logger.warning(f"Journal record_exit (paper) skipped: {e}")
+                
+            # Send [PAPER] Exit Notification
+            try:
+                pnl_emoji = "💰" if net_pnl >= 0 else "📉"
+                msg = (
+                    f"🚪 **[PAPER] TRADE EXIT**\n\n"
+                    f"**Setup:** {trade_state.get('setup_name', 'Unknown')}\n"
+                    f"**Asset:** {symbol} @ {trade_state.get('timeframe', '1m')}\n"
+                    f"**Direction:** {current_position.upper()}\n"
+                    f"**Exit Reason:** {exit_reason}\n\n"
+                    f"**Entry Price:** ${float(entry_price):.5f}\n"
+                    f"**Exit Price:** ${float(exit_price):.5f}\n"
+                    f"**Lot Size:** {lot_size}\n"
+                    f"**{pnl_emoji} Net PnL:** ${net_pnl:.2f} (₹{pnl_inr:.2f})\n"
+                    f"\n_Time: {to_ist_str(datetime.utcnow())}_"
+                )
+                asyncio.create_task(logger_bot.send_message(msg))
+                if user_id:
+                    asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+            except Exception as e:
+                logger.error(f"[PAPER] Exit Notification error: {e}")
             
             return True, exit_price, exit_reason
         except Exception as e:
@@ -233,6 +306,30 @@ class PaperTrader:
                     asyncio.create_task(journal_service.record_entry(client, trade, mock_resp))
                 except Exception as e:
                     logger.warning(f"Journal record_entry (paper pending) skipped: {e}")
+                    
+                # Send [PAPER] Entry Fill Notification
+                try:
+                    setup_name = trade.get("setup_name", "Unknown")
+                    emoji = "🟢" if side == "long" else "🔴"
+                    msg = (
+                        f"{emoji} **[PAPER] TRADE ENTRY**\n\n"
+                        f"**Setup:** {setup_name}\n"
+                        f"**Asset:** {symbol} @ {trade.get('timeframe', '1m')}\n"
+                        f"**Direction:** {side.upper()}\n"
+                        f"**Type:** PENDING ORDER FILLED\n"
+                        f"**Entry Price:** ${float(live_price):.5f}\n"
+                        f"**Lot Size:** {lot_size}\n"
+                    )
+                    sl_price = trade.get("pending_sl_price")
+                    if sl_price:
+                        msg += f"**Stop Loss:** ${float(sl_price):.5f}\n"
+                    msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
+                    
+                    asyncio.create_task(logger_bot.send_message(msg))
+                    if user_id:
+                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                except Exception as e:
+                    logger.error(f"[PAPER] Pending Fill Notification error: {e}")
 
     async def check_stop_losses(self, client) -> None:
         open_trades = await get_open_trade_states()
@@ -285,6 +382,26 @@ class PaperTrader:
                 await update_paper_balance(user_id, {"locked_margin": new_locked})
                 
             await update_trade_state(trade_id, {"status": "cancelled"})
+            
+            # Send [PAPER] Order Cancelled Notification
+            try:
+                setup_name = trade.get("setup_name", "Unknown")
+                symbol = trade.get("asset", "Unknown")
+                side = trade.get("pending_entry_side", "").upper()
+                msg = (
+                    f"⚠️ **[PAPER] PENDING ORDER CANCELLED**\n\n"
+                    f"**Setup:** {setup_name}\n"
+                    f"**Asset:** {symbol} @ {trade.get('timeframe', '1m')}\n"
+                    f"**Direction:** {side}\n"
+                    f"**Reason:** Setup invalidated (e.g. price reversed before entry hit)\n"
+                    f"\n_Time: {to_ist_str(datetime.utcnow())}_"
+                )
+                asyncio.create_task(logger_bot.send_message(msg))
+                if user_id:
+                    asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+            except Exception as e:
+                logger.error(f"[PAPER] Cancel Notification error: {e}")
+                
             return True
         return False
 

@@ -61,7 +61,7 @@ from handlers.screener_setup import (
     SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_INDICATOR, SCREENER_ASSET_TYPE,
     SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
 )
-from handlers.algo_activity import algo_activity_callback
+from handlers.algo_activity import algo_activity_callback, paper_activity_callback
 from handlers.paper_trading import (
     paper_trading_menu_callback, paper_add_start, paper_name_received,
     paper_desc_received, paper_api_selected, paper_indicator_selected,
@@ -69,7 +69,7 @@ from handlers.paper_trading import (
     paper_timeframe_selected, paper_asset_received, paper_lot_size_received,
     paper_leverage_selected, paper_protection_selected, paper_confirmed,
     cancel_paper_setup, paper_view_list_callback, paper_detail_callback,
-    paper_toggle_callback, paper_open_positions_callback,
+    paper_toggle_callback,
     paper_delete_list_callback, paper_delete_confirm_callback,
     paper_set_balance_callback, paper_set_balance_amount_received,
     pscr_add_start, pscr_name_received, pscr_desc_received,
@@ -412,7 +412,7 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(paper_view_list_callback, pattern="^paper_view_list$"))
     application.add_handler(CallbackQueryHandler(paper_detail_callback, pattern="^paper_detail_"))
     application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
-    application.add_handler(CallbackQueryHandler(paper_open_positions_callback, pattern="^paper_open_positions$"))
+    application.add_handler(CallbackQueryHandler(paper_activity_callback, pattern="^paper_activity$"))
     application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
     application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))
     

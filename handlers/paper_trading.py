@@ -99,7 +99,7 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
             InlineKeyboardButton("+ Paper Screener", callback_data="pscr_add_start"),
         ],
         [InlineKeyboardButton("View Paper Setups", callback_data="paper_view_list")],
-        [InlineKeyboardButton("Open Positions", callback_data="paper_open_positions")],
+        [InlineKeyboardButton("📄 Paper Activity", callback_data="paper_activity")],
         [InlineKeyboardButton("Delete Paper Setup", callback_data="paper_delete_list")],
         [InlineKeyboardButton("Set Virtual Balance", callback_data="paper_set_balance")],
         [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")]
@@ -1001,53 +1001,6 @@ async def paper_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
     except Exception as e:
         logger.warning(f"Toggle edit message failed (probably already modified): {e}")
-
-
-# ==================== OPEN PAPER POSITIONS ====================
-
-async def paper_open_positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View open paper trading positions."""
-    query = update.callback_query
-    await query.answer("Fetching positions...")
-    
-    user_id = str(query.from_user.id)
-    positions = await get_open_paper_positions(user_id)
-    
-    if not positions:
-        keyboard = [[InlineKeyboardButton("Back", callback_data="menu_paper_trading")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "No open paper positions.",
-            reply_markup=reply_markup
-        )
-        return
-    
-    message = "**Open Paper Positions**\n\n"
-    
-    for pos in positions:
-        direction = (pos.get("direction") or "").upper()
-        asset = pos.get("asset", "")
-        entry = pos.get("entry_price") or 0
-        lot = pos.get("lot_size") or 0
-        entry_time = pos.get("entry_time")
-        liq_price = pos.get("paper_liquidation_price")
-        
-        message += (
-            f"**{asset}** - {direction}\n"
-            f"  Entry: ${entry:.5f} | Lots: {lot}\n"
-        )
-        if liq_price:
-            message += f"  Liquidation: ${liq_price:.5f}\n"
-        if entry_time:
-            if isinstance(entry_time, str):
-                from datetime import datetime as dt
-                entry_time = dt.fromisoformat(entry_time)
-            message += f"  Since: {entry_time.strftime('%m/%d %H:%M')}\n"
-        message += "\n"
-    
-    keyboard = [[InlineKeyboardButton("Back", callback_data="menu_paper_trading")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
 
 # ==================== DELETE PAPER SETUP (UNIFIED) ====================
