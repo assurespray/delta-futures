@@ -79,15 +79,17 @@ class DonchianChannels:
             # Exclude the current (potentially open) candle
             closed_candles = candles[:-1]
 
-            # Lookback window = last `period` CLOSED candles
-            window = closed_candles[-self.period:]
+            # Latest CLOSED candle's close price (the one we are testing for breakout)
+            latest_close = float(closed_candles[-1]['close'])
+
+            # Lookback window = `period` candles BEFORE the latest closed candle
+            # This is critical: if we include the latest candle in the window,
+            # latest_close > upper is mathematically impossible (close cannot > high)
+            window = closed_candles[-(self.period + 1):-1]
 
             upper = max(float(c['high']) for c in window)
             lower = min(float(c['low']) for c in window)
             middle = (upper + lower) / 2.0
-
-            # Latest CLOSED candle's close price (the one we just confirmed)
-            latest_close = float(closed_candles[-1]['close'])
 
             # Determine signal
             if latest_close > upper:
