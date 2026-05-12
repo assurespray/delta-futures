@@ -260,6 +260,17 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                         f"├ EMA (34): ${d['ema']:.4f}\n"
                         f"└ Breakout Signal: {d['signal_text']}\n"
                     )
+                elif ptype == "donchian":
+                    d = result['donchian']
+                    msg = (
+                        info +
+                        f"🐢 **Donchian Channels**\n"
+                        f"├ Upper Band: ${d['upper']:.5f}\n"
+                        f"├ Middle Band: ${d['middle']:.5f}\n"
+                        f"├ Lower Band: ${d['lower']:.5f}\n"
+                        f"├ Current Close: ${d['latest_close']:.5f}\n"
+                        f"└ Status: {d['signal_text']}\n"
+                    )
             else:
                 msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
                 msg += "**Possible reasons:**\n"
