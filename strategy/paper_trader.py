@@ -17,7 +17,7 @@ from config.constants import (
     PAPER_TRADE_DEFAULT_BALANCE,
     ENABLE_DEMO_MODE,
 )
-from utils.market_utils import get_contract_multiplier
+from utils.market_utils import get_contract_multiplier, clamp_leverage
 from services.logger_bot import logger_bot
 
 logger = logging.getLogger(__name__)
