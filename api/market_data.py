@@ -94,9 +94,9 @@ async def get_ticker(client: DeltaExchangeClient, symbol: str) -> Optional[Dict[
         
         if response and response.get("success"):
             tickers = response.get("result", [])
-            if tickers:
-                ticker = tickers[0]
-                return ticker
+            for t in tickers:
+                if t.get("symbol") == symbol:
+                    return t
         
         logger.error(f"❌ Failed to get ticker for {symbol}")
         return None
