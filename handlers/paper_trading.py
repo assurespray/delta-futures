@@ -829,6 +829,32 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+from handlers.algo_activity import paper_activity_callback
+
+# ==================== CANCEL PAPER PENDING ENTRY ====================
+
+async def paper_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel a pending paper entry order."""
+    query = update.callback_query
+    await query.answer("Cancelling order...")
+    
+    trade_id = query.data.replace("paper_cancel_", "")
+    
+    from strategy.paper_trader import paper_trader
+    success = await paper_trader.cancel_pending_entry(trade_id)
+    
+    if success:
+        await query.edit_message_text(
+            "✅ Pending paper order cancelled successfully.\n\n"
+            "Use /start to return to main menu.",
+            parse_mode="Markdown"
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Failed to cancel order. It may have already been filled or cancelled.",
+            parse_mode="Markdown"
+        )
+
 # ==================== VIEW PAPER SETUPS (UNIFIED: Individual + Screener) ====================
 
 async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

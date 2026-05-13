@@ -87,9 +87,10 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         )
         return
     
-    # Separate into open and closed trades
-    open_trades = [a for a in activities if a.get('status') != 'closed']
-    closed_trades = [a for a in activities if a.get('status') == 'closed']
+    # Separate into categories
+    open_trades = [a for a in activities if a.get('status') == 'open']
+    pending_trades = [a for a in activities if a.get('status') == 'pending_entry']
+    closed_trades = [a for a in activities if a.get('status') in ('closed', 'cancelled')]
     
     title_text = "Paper" if is_paper else "Algo"
     message = f"📜 **{title_text} Trading Activity (Last 3 Days)**\n\n"
@@ -98,6 +99,35 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     total_pnl_inr = 0.0
     winning_trades = 0
     losing_trades = 0
+    
+    keyboard = []
+    
+    # ── PENDING ORDERS SECTION ──
+    if pending_trades:
+        message += f"⏳ **PENDING ORDERS** ({len(pending_trades)})\n"
+        message += f"{'━' * 30}\n"
+        
+        for activity in pending_trades:
+            setup_name = activity['setup_name']
+            asset = activity['asset']
+            direction = activity.get('pending_entry_side', activity.get('direction', '')).upper()
+            lot_size = activity['lot_size']
+            trigger_price = activity.get('entry_trigger_price')
+            
+            trigger_str = f"${trigger_price:.5f}" if trigger_price else "N/A"
+            sl_price = activity.get('pending_sl_price')
+            
+            message += f"\n📊 **{setup_name}** - {asset}\n"
+            message += f"Direction: {direction} | Size: {lot_size}\n"
+            message += f"🎯 Trigger: {trigger_str}\n"
+            if sl_price:
+                message += f"🛡️ SL: ${sl_price:.4f}\n"
+                
+            if is_paper:
+                trade_id = str(activity['_id'])
+                keyboard.append([InlineKeyboardButton(f"❌ Cancel {asset} Pending", callback_data=f"paper_cancel_{trade_id}")])
+                
+        message += "\n"
     
     # ── OPEN POSITIONS SECTION ──
     if open_trades:
@@ -196,7 +226,7 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         
         message += "\n"
     
-    if not open_trades and not closed_trades:
+    if not open_trades and not pending_trades and not closed_trades:
         message += "No trades found.\n\n"
     
     # ── SUMMARY ──
@@ -204,7 +234,9 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     message += f"**Summary:**\n"
     if open_trades:
         message += f"Open: {len(open_trades)}\n"
-    message += f"Closed: {winning_trades + losing_trades}\n"
+    if pending_trades:
+        message += f"Pending: {len(pending_trades)}\n"
+    message += f"Closed/Cancelled: {len(closed_trades)}\n"
     message += f"Winning: {winning_trades} | Losing: {losing_trades}\n"
     
     if winning_trades + losing_trades > 0:
@@ -214,7 +246,8 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     total_pnl_emoji = "🟢" if total_pnl_usd >= 0 else "🔴"
     message += f"\n{total_pnl_emoji} **Realized PnL: ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})**"
     
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_button_data)]]
+    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="paper_activity" if is_paper else "menu_algo_activity")])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=back_button_data)])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Hard truncation failsafe
