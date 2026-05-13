@@ -573,14 +573,21 @@ class PositionManager:
             open_orders = await get_open_orders(client)
             if open_orders:
                 orders_for_symbol = filter_orders_by_symbol_and_product_id(open_orders, symbol, product_id)
-                stop_orders = [o for o in orders_for_symbol if o.get("order_type") == "stop_order"]
                 
+                # 1. Try to cancel exact matched ID first (bypassing any strict order_type filters)
                 if stop_loss_order_id:
-                    for order in stop_orders:
+                    for order in orders_for_symbol:
                         if str(order.get("id")) == str(stop_loss_order_id):
                             await cancel_order(client, product_id, order["id"])
                             logger.info(f"✅ Cancelled specific SL order {stop_loss_order_id} for {symbol}")
                             return
+                
+                # 2. Fallback: Cancel any reduce_only or stop_price orders for this symbol.
+                # Delta uses "market_order" or "limit_order" with stop_order_type flags.
+                stop_orders = [
+                    o for o in orders_for_symbol 
+                    if o.get("stop_price") is not None or o.get("reduce_only") == True
+                ]
                 
                 for order in stop_orders:
                     await cancel_order(client, product_id, order["id"])
