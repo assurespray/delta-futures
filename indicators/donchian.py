@@ -60,8 +60,8 @@ class DonchianChannels:
         Calculate Donchian Channels from candle data.
 
         Requires at least (period + 1) candles:
-          - The last candle is treated as the CURRENT (open/unfinished) candle
-          - The preceding `period` candles form the lookback window
+          - The last candle (candles[-1]) is the LATEST CLOSED candle.
+          - The preceding `period` candles form the lookback window to define the channel.
 
         Returns:
             Dict with upper, lower, middle, signal, latest_close, etc.
@@ -76,16 +76,15 @@ class DonchianChannels:
                 )
                 return None
 
-            # Exclude the current (potentially open) candle
-            closed_candles = candles[:-1]
-
-            # Latest CLOSED candle's close price (the one we are testing for breakout)
-            latest_close = float(closed_candles[-1]['close'])
+            # The engine already ensures candles[-1] is fully closed.
+            # We use it directly as our latest close.
+            latest_candle = candles[-1]
+            latest_close = float(latest_candle['close'])
 
             # Lookback window = `period` candles BEFORE the latest closed candle
             # This is critical: if we include the latest candle in the window,
             # latest_close > upper is mathematically impossible (close cannot > high)
-            window = closed_candles[-(self.period + 1):-1]
+            window = candles[-(self.period + 1):-1]
 
             upper = max(float(c['high']) for c in window)
             lower = min(float(c['low']) for c in window)
