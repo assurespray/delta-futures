@@ -405,19 +405,32 @@ async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: 
         query = {"user_id": user_id, "is_paper_trade": is_paper}
         if closed_only:
             query["status"] = "closed"
+            
         if days:
-            cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-            query["trade_date"] = {"$gte": cutoff}
-        
-        cursor = mongodb.get_db().trade_states.find(query).sort("created_at", -1)
-        trades = await cursor.to_list(length=5000)
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query["entry_time"] = {"$gte": cutoff}
+            
+        cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
+        trades = await cursor.to_list(length=100)
         for t in trades:
             t["_id"] = str(t["_id"])
         return trades
     except Exception as e:
-        logger.error(f"❌ Failed to get trades by user: {e}")
+        logger.error(f"❌ Failed to get user trades: {e}")
         return []
 
+async def delete_closed_paper_trades(user_id: str) -> bool:
+    """Deletes all closed and cancelled paper trades for a user from trade_states."""
+    try:
+        await mongodb.get_db().trade_states.delete_many({
+            "user_id": user_id,
+            "is_paper_trade": True,
+            "status": {"$in": ["closed", "cancelled"]}
+        })
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to delete closed paper trades: {e}")
+        return False
 
 # ==================== Indicator Cache CRUD ====================
 

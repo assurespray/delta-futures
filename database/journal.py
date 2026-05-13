@@ -70,11 +70,26 @@ class JournalOperations:
             return []
 
     async def get_traded_assets(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
-        """Get distinct list of assets traded by the user."""
+        """Get unique list of assets traded by a user."""
         try:
-            return await self.collection.distinct("asset", {"user_id": user_id, "is_paper_trade": is_paper_trade})
+            return await self.collection.distinct("asset", {
+                "user_id": user_id,
+                "is_paper_trade": is_paper_trade
+            })
         except Exception as e:
-            logger.error(f"Failed to get traded assets: {e}")
+            logger.error(f"Failed to fetch traded assets: {e}")
             return []
+
+    async def clear_paper_journal(self, user_id: str) -> bool:
+        """Deletes all paper trades from the journal for a specific user."""
+        try:
+            await self.collection.delete_many({
+                "user_id": user_id,
+                "is_paper_trade": True
+            })
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear paper journal: {e}")
+            return False
 
 journal_ops = JournalOperations()

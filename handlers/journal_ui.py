@@ -205,10 +205,47 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         InlineKeyboardButton("📋 Recent 15 Trades", callback_data="pjournal_recent_15"),
         InlineKeyboardButton("📄 Export CSV", callback_data="pjournal_export_csv")
     ])
+    keyboard.append([InlineKeyboardButton("🗑️ Reset Journal", callback_data="pjournal_reset_start")])
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")])
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+async def pjournal_reset_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt for confirmation before resetting the paper journal."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("⚠️ YES, DELETE EVERYTHING", callback_data="pjournal_reset_execute")],
+        [InlineKeyboardButton("NO, CANCEL", callback_data="paper_journal_dashboard")]
+    ]
+    await query.edit_message_text(
+        "⚠️ **WARNING: Reset Paper Journal**\n\n"
+        "This will permanently delete all your **closed and cancelled** paper trades.\n"
+        "Your active open positions and pending orders will remain intact, but your historical Win Rate, P&L, and trade list will be completely wiped to start fresh.\n\n"
+        "Are you absolutely sure you want to proceed?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
+async def pjournal_reset_execute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute the paper journal reset."""
+    query = update.callback_query
+    await query.answer("Wiping journal...")
+    user_id = str(query.from_user.id)
+    
+    from database.crud import delete_closed_paper_trades
+    
+    success_j = await journal_ops.clear_paper_journal(user_id)
+    success_c = await delete_closed_paper_trades(user_id)
+    
+    keyboard = [[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="paper_journal_dashboard")]]
+    if success_j and success_c:
+        msg = "✅ **Paper Journal Reset Successful**\n\nAll historical paper trades have been wiped. Your paper P&L is now $0.00."
+    else:
+        msg = "❌ **Error during reset.**\n\nSome records may not have been fully deleted."
+        
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def paper_journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the 15 most recent paper trades."""
