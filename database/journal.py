@@ -47,12 +47,14 @@ class JournalOperations:
             logger.error(f"Failed to append scaling event: {e}")
             return False
 
-    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None, is_paper_trade: bool = False) -> List[Dict[str, Any]]:
-        """Fetch closed trades for a user, optionally filtered by asset and trade type."""
+    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None, is_paper_trade: bool = False, strategy: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch closed trades for a user, optionally filtered by asset, strategy, and trade type."""
         try:
             query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
             if asset and asset != "ALL":
                 query["asset"] = asset
+            if strategy and strategy != "ALL":
+                query["strategy_name"] = strategy
             cursor = self.collection.find(query).sort("exit_time", -1)
             return await cursor.to_list(1000)
         except Exception as e:
@@ -67,6 +69,31 @@ class JournalOperations:
             return await cursor.to_list(limit)
         except Exception as e:
             logger.error(f"Failed to get recent trades: {e}")
+            return []
+
+    async def get_traded_strategies(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
+        """Get unique list of strategies traded by a user."""
+        try:
+            return await self.collection.distinct("strategy_name", {
+                "user_id": user_id,
+                "is_paper_trade": is_paper_trade,
+                "status": "closed"
+            })
+        except Exception as e:
+            logger.error(f"Failed to fetch traded strategies: {e}")
+            return []
+
+    async def get_traded_assets_by_strategy(self, user_id: str, strategy: str, is_paper_trade: bool = False) -> List[str]:
+        """Get unique list of assets traded by a user under a specific strategy."""
+        try:
+            return await self.collection.distinct("asset", {
+                "user_id": user_id,
+                "strategy_name": strategy,
+                "is_paper_trade": is_paper_trade,
+                "status": "closed"
+            })
+        except Exception as e:
+            logger.error(f"Failed to fetch traded assets for strategy {strategy}: {e}")
             return []
 
     async def get_traded_assets(self, user_id: str, is_paper_trade: bool = False) -> List[str]:

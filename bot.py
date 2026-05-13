@@ -442,12 +442,32 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(journal_recent_callback, pattern="^journal_recent_15$"))
     application.add_handler(CallbackQueryHandler(journal_export_callback, pattern="^journal_export_csv$"))
     # Paper Journal
+    from handlers.journal_ui import (
+        pjournal_strategy_callback, pjournal_asset_callback,
+        pjournal_search_start_callback, pjournal_search_receive_callback
+    )
     application.add_handler(CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^paper_journal_dashboard$"))
-    application.add_handler(CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^pjournal_filter_"))
+    application.add_handler(CallbackQueryHandler(pjournal_strategy_callback, pattern="^pj_strat_"))
+    application.add_handler(CallbackQueryHandler(pjournal_asset_callback, pattern="^pj_asset_"))
     application.add_handler(CallbackQueryHandler(paper_journal_recent_callback, pattern="^pjournal_recent_15$"))
     application.add_handler(CallbackQueryHandler(paper_journal_export_callback, pattern="^pjournal_export_csv$"))
     application.add_handler(CallbackQueryHandler(pjournal_reset_start_callback, pattern="^pjournal_reset_start$"))
     application.add_handler(CallbackQueryHandler(pjournal_reset_execute_callback, pattern="^pjournal_reset_execute$"))
+
+    # Paper Journal Search Conversation
+    pjournal_search_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(pjournal_search_start_callback, pattern="^pj_search_start_")],
+        states={
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, pjournal_search_receive_callback)]
+        },
+        fallbacks=[
+            CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^paper_journal_dashboard$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(pjournal_search_conv)
     
     # Indicator Tracker
     application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))
