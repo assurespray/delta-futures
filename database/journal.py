@@ -61,10 +61,14 @@ class JournalOperations:
             logger.error(f"Failed to get journal trades: {e}")
             return []
 
-    async def get_recent_trades(self, user_id: str, limit: int = 15, is_paper_trade: bool = False) -> List[Dict[str, Any]]:
+    async def get_recent_trades(self, user_id: str, limit: int = 15, is_paper_trade: bool = False, strategy: Optional[str] = None, asset: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch the most recent closed trades for the user."""
         try:
             query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
+            if strategy and strategy != "ALL":
+                query["strategy_name"] = strategy
+            if asset and asset != "ALL":
+                query["asset"] = asset
             cursor = self.collection.find(query).sort("exit_time", -1).limit(limit)
             return await cursor.to_list(limit)
         except Exception as e:

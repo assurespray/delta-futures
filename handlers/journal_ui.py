@@ -2,6 +2,16 @@
 import io
 import csv
 import logging
+
+def to_ist_str(dt) -> str:
+    if not dt: return "N/A"
+    if isinstance(dt, str):
+        from datetime import datetime
+        try: dt = datetime.fromisoformat(dt)
+        except: return dt
+    from datetime import timedelta
+    ist = dt + timedelta(hours=5, minutes=30)
+    return ist.strftime('%m/%d %H:%M')
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -79,6 +89,9 @@ async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     user_id = str(query.from_user.id)
     
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
+    
     trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=False)
     if not trades:
         await query.edit_message_text("No recent live trades found.", 
@@ -105,6 +118,9 @@ async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer("Generating CSV...")
     user_id = str(query.from_user.id)
+    
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
     
     trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False)
     if not trades:
@@ -158,6 +174,9 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
+    
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
     
     trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     
@@ -214,6 +233,8 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
             page = 0
     else:
         strategy = data
+    context.user_data['pj_current_strategy'] = strategy
+    context.user_data.pop('pj_current_asset', None)
 
     trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, strategy=strategy)
     
@@ -261,6 +282,7 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     if nav_buttons:
         keyboard.append(nav_buttons)
         
+    keyboard.append([InlineKeyboardButton(f"📋 Recent Trades ({strategy})", callback_data="pjournal_recent_15")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Strategies", callback_data="paper_journal_dashboard")])
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -277,6 +299,8 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("Error parsing asset.")
         return
     strategy, asset = parts[0], parts[1]
+    context.user_data['pj_current_strategy'] = strategy
+    context.user_data['pj_current_asset'] = asset
     
     trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy)
     
@@ -300,7 +324,10 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
-    keyboard = [[InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]]
+    keyboard = [
+        [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
+        [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]
+    ]
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def pjournal_search_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -367,7 +394,10 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
-        keyboard = [[InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]]
+        keyboard = [
+        [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
+        [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]
+    ]
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return ConversationHandler.END
         
@@ -429,6 +459,9 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
     await query.answer()
     user_id = str(query.from_user.id)
     
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
+    
     trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=True)
     if not trades:
         await query.edit_message_text("No recent paper trades found.", 
@@ -455,6 +488,9 @@ async def paper_journal_export_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     await query.answer("Generating CSV...")
     user_id = str(query.from_user.id)
+    
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
     
     trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     if not trades:
