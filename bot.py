@@ -338,7 +338,7 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(screener_delete_confirm_callback, pattern="^screener_delete_confirm_"))
     
     # Algo Activity handler
-    application.add_handler(CallbackQueryHandler(algo_activity_callback, pattern="^menu_algo_activity$"))
+    application.add_handler(CallbackQueryHandler(algo_activity_callback, pattern="^menu_algo_activity"))
     
     # ===== PAPER TRADING HANDLERS =====
     
@@ -413,7 +413,7 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(paper_detail_callback, pattern="^paper_detail_"))
     application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
     application.add_handler(CallbackQueryHandler(paper_cancel_callback, pattern="^paper_cancel_"))
-    application.add_handler(CallbackQueryHandler(paper_activity_callback, pattern="^paper_activity$"))
+    application.add_handler(CallbackQueryHandler(paper_activity_callback, pattern="^paper_activity"))
     application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
     application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))
     
