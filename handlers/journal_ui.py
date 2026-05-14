@@ -105,13 +105,15 @@ async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_
         pnl = t.get('net_pnl', 0)
         emoji = "🟢" if pnl > 0 else "🔴"
         
+        entry_time = to_ist_str(t.get('entry_time'))
+        exit_time = to_ist_str(t.get('exit_time'))
+        
         msg += f"{emoji} **{asset}** ({direction}) | ${pnl:.2f}\n"
-        msg += f"   Entry: ${t.get('entry_price', 0):.4f} | Exit: ${t.get('exit_price', 0):.4f}\n"
+        msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
         msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
         
     keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
 
 async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and sends a CSV of all live trades."""
@@ -459,29 +461,49 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
     await query.answer()
     user_id = str(query.from_user.id)
     
-    context.user_data.pop('pj_current_strategy', None)
-    context.user_data.pop('pj_current_asset', None)
+    strategy = context.user_data.get('pj_current_strategy')
+    asset = context.user_data.get('pj_current_asset')
     
-    trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=True)
+    trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=True, strategy=strategy, asset=asset)
+    
+    if strategy and asset:
+        back_btn = f"pj_asset_{strategy}_{asset}"
+    elif strategy:
+        back_btn = f"pj_strat_{strategy}"
+    else:
+        back_btn = "paper_journal_dashboard"
+        
     if not trades:
         await query.edit_message_text("No recent paper trades found.", 
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")]]))
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=back_btn)]]))
         return
         
-    msg = "📋 **Last 15 Paper Journal Entries**\n\n"
+    if strategy and asset:
+        msg = f"📋 **Last 15 Paper Trades ({asset})**\n\n"
+    elif strategy:
+        msg = f"📋 **Last 15 Paper Trades ({strategy})**\n\n"
+    else:
+        msg = "📋 **Last 15 Paper Journal Entries**\n\n"
+        
     for t in trades:
-        asset = t.get('asset', '?')
+        t_asset = t.get('asset', '?')
         direction = t.get('direction', '?').upper()
         pnl = t.get('net_pnl', 0)
         emoji = "🟢" if pnl > 0 else "🔴"
         
-        msg += f"{emoji} **{asset}** ({direction}) | ${pnl:.2f}\n"
-        msg += f"   Entry: ${t.get('entry_price', 0):.4f} | Exit: ${t.get('exit_price', 0):.4f}\n"
+        entry_time = to_ist_str(t.get('entry_time'))
+        exit_time = to_ist_str(t.get('exit_time'))
+        
+        msg += f"{emoji} **{t_asset}** ({direction}) | ${pnl:.2f}\n"
+        msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
         msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
         
-    keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="paper_journal_dashboard")]]
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_btn)]]
+    
+    if len(msg) > 4000:
+        msg = msg[:3997] + "..."
+        
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
 
 async def paper_journal_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and sends a CSV of all paper trades."""
