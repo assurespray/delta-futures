@@ -208,3 +208,88 @@ async def get_top_volume(
     except Exception as e:
         logger.error(f"❌ Error fetching top volume: {e}")
         return []
+
+
+async def get_top_oi(
+    client: DeltaExchangeClient,
+    timeframe: str,
+    top_n: int = 10
+) -> List[str]:
+    """Get top N assets by open interest (oi_value_usd)."""
+    try:
+        tickers = await get_all_perpetual_tickers(client)
+        
+        asset_oi = []
+        for ticker in tickers:
+            symbol = ticker.get("symbol")
+            if not symbol:
+                continue
+            
+            oi_usd = ticker.get("oi_value_usd")
+            if oi_usd is not None:
+                asset_oi.append({
+                    "symbol": symbol,
+                    "oi_usd": float(oi_usd)
+                })
+        
+        # Sort descending (highest OI first)
+        asset_oi.sort(key=lambda x: x["oi_usd"], reverse=True)
+        
+        top_oi = [a["symbol"] for a in asset_oi[:top_n]]
+        
+        logger.info(f"🔝 Top {top_n} OI: {top_oi}")
+        if asset_oi[:top_n]:
+            for a in asset_oi[:top_n]:
+                logger.debug(f"   {a['symbol']}: ${a['oi_usd']:,.0f}")
+        return top_oi
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching top OI: {e}")
+        return []
+
+
+async def get_assets_by_tag(
+    client: DeltaExchangeClient,
+    tag: str,
+    top_n: int = 0
+) -> List[str]:
+    """
+    Get perpetual futures assets that have a specific tag.
+    
+    Delta Exchange tags include: meme, sol_ecosystem, new, ai, defi,
+    layer_1, layer_2, gaming, nft, smart_contracts, metal, xStock.
+    
+    Assets are sorted by 24h volume (most active first).
+    If top_n > 0, returns only the top N; otherwise returns all matches.
+    """
+    try:
+        tickers = await get_all_perpetual_tickers(client)
+        
+        matched = []
+        for ticker in tickers:
+            symbol = ticker.get("symbol")
+            if not symbol:
+                continue
+            
+            tags = ticker.get("tags", [])
+            if isinstance(tags, list) and tag in tags:
+                turnover = float(ticker.get("turnover_usd", 0) or 0)
+                matched.append({
+                    "symbol": symbol,
+                    "volume_usd": turnover
+                })
+        
+        # Sort by volume descending (most active first)
+        matched.sort(key=lambda x: x["volume_usd"], reverse=True)
+        
+        if top_n > 0:
+            result = [a["symbol"] for a in matched[:top_n]]
+        else:
+            result = [a["symbol"] for a in matched]
+        
+        logger.info(f"🏷️ Tag '{tag}': {len(result)} assets found")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching assets by tag '{tag}': {e}")
+        return []

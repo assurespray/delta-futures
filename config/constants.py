@@ -171,6 +171,15 @@ ASSET_TYPE_TEXT = {
     "losers": "Top 10 Losers",
     "mixed": "Top 10 Gainers + Losers",
     "volume": "Top 10 Highest Volume",
+    "top_oi": "Top 10 Open Interest",
+    "meme": "Meme Coins",
+    "solana": "Solana Ecosystem",
+    "new": "Newly Listed",
+    "ai": "AI Tokens",
+    "defi": "DeFi Tokens",
+    "layer1": "Layer 1 Chains",
+    "layer2": "Layer 2 Chains",
+    "gaming": "Gaming Tokens",
 }
 
 # Short labels for compact list views
@@ -180,4 +189,13 @@ ASSET_TYPE_TEXT_SHORT = {
     "losers": "Losers",
     "mixed": "G+L",
     "volume": "Volume",
+    "top_oi": "Top OI",
+    "meme": "Meme",
+    "solana": "Solana",
+    "new": "New",
+    "ai": "AI",
+    "defi": "DeFi",
+    "layer1": "L1",
+    "layer2": "L2",
+    "gaming": "Gaming",
 }

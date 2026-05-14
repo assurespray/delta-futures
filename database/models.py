@@ -215,7 +215,7 @@ class ScreenerSetup(BaseModel):
     indicator: str  # "dual_supertrend", "single_supertrend"
     preset_id: Optional[str] = None
     indicator_params: dict = Field(default_factory=dict)
-    asset_selection_type: str  # "every", "gainers", "losers", "mixed"
+    asset_selection_type: str  # "every", "gainers", "losers", "mixed", "volume", "top_oi", "meme", "solana", "new", "ai", "defi", "layer1", "layer2", "gaming"
     timeframe: str
     direction: str  # "both", "long_only", "short_only"
     lot_size: int

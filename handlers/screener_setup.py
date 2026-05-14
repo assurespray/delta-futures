@@ -179,10 +179,29 @@ async def screener_indicator_selected(update: Update, context: ContextTypes.DEFA
     
     keyboard = [
         [InlineKeyboardButton("📊 Every Available Asset", callback_data="screener_atype_every")],
-        [InlineKeyboardButton("📈 Top 10 Gainers Only", callback_data="screener_atype_gainers")],
-        [InlineKeyboardButton("📉 Top 10 Losers Only", callback_data="screener_atype_losers")],
-        [InlineKeyboardButton("📊 Top 10 Gainers + Losers", callback_data="screener_atype_mixed")],
-        [InlineKeyboardButton("🔊 Top 10 Highest Volume", callback_data="screener_atype_volume")]
+        [
+            InlineKeyboardButton("📈 Top Gainers", callback_data="screener_atype_gainers"),
+            InlineKeyboardButton("📉 Top Losers", callback_data="screener_atype_losers")
+        ],
+        [
+            InlineKeyboardButton("📊 Gainers + Losers", callback_data="screener_atype_mixed"),
+            InlineKeyboardButton("🔊 Top Volume", callback_data="screener_atype_volume")
+        ],
+        [InlineKeyboardButton("🔝 Top Open Interest", callback_data="screener_atype_top_oi")],
+        [
+            InlineKeyboardButton("🐕 Meme", callback_data="screener_atype_meme"),
+            InlineKeyboardButton("☀️ Solana", callback_data="screener_atype_solana"),
+            InlineKeyboardButton("✨ New", callback_data="screener_atype_new")
+        ],
+        [
+            InlineKeyboardButton("🤖 AI", callback_data="screener_atype_ai"),
+            InlineKeyboardButton("🏦 DeFi", callback_data="screener_atype_defi"),
+            InlineKeyboardButton("🎮 Gaming", callback_data="screener_atype_gaming")
+        ],
+        [
+            InlineKeyboardButton("🔗 Layer 1", callback_data="screener_atype_layer1"),
+            InlineKeyboardButton("⚡ Layer 2", callback_data="screener_atype_layer2")
+        ]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)

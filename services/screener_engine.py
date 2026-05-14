@@ -21,7 +21,9 @@ from api.market_screener import (
     get_top_gainers,
     get_top_losers,
     get_all_perpetual_symbols,
-    get_top_volume
+    get_top_volume,
+    get_top_oi,
+    get_assets_by_tag
 )
 from strategy.factory import StrategyFactory
 from strategy.position_manager import PositionManager
@@ -87,6 +89,24 @@ class ScreenerEngine:
             
             elif mode == "volume":
                 return await get_top_volume(client, timeframe, top_n)
+            
+            elif mode == "top_oi":
+                return await get_top_oi(client, timeframe, top_n)
+            
+            elif mode in ("meme", "solana", "new", "ai", "defi", "layer1", "layer2", "gaming"):
+                # Map mode to Delta Exchange API tag
+                tag_map = {
+                    "meme": "meme",
+                    "solana": "sol_ecosystem",
+                    "new": "new",
+                    "ai": "ai",
+                    "defi": "defi",
+                    "layer1": "layer_1",
+                    "layer2": "layer_2",
+                    "gaming": "gaming",
+                }
+                tag = tag_map[mode]
+                return await get_assets_by_tag(client, tag)
             
             else:
                 logger.error(f"Unknown screener mode: {mode}")
