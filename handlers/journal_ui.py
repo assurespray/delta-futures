@@ -379,6 +379,9 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         
     if len(matches) == 1:
         asset = matches[0]
+        context.user_data['pj_current_strategy'] = strategy
+        context.user_data['pj_current_asset'] = asset
+        
         trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy)
         total_trades = len(trades)
         wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -403,6 +406,9 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return ConversationHandler.END
         
+    context.user_data['pj_current_strategy'] = strategy
+    context.user_data.pop('pj_current_asset', None)
+    
     msg = f"🔍 Multiple assets match '{search_term}'. Select one:\n"
     keyboard = []
     row = []

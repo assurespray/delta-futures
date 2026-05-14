@@ -49,7 +49,7 @@ class JournalService:
                 "is_paper_trade": is_paper,
                 
                 "entry_price": entry_price,
-                "entry_time": trade_data.get("entry_time", datetime.utcnow()),
+                "entry_time": trade_data.get("entry_time") or datetime.utcnow(),
                 "entry_order_id": order_id,
                 "entry_fee": entry_fee,
                 
@@ -116,7 +116,7 @@ class JournalService:
             exit_update = {
                 "status": "closed",
                 "exit_price": exit_price,
-                "exit_time": trade_data.get("exit_time", datetime.utcnow()),
+                "exit_time": trade_data.get("exit_time") or datetime.utcnow(),
                 "exit_reason": exit_reason,
                 "exit_order_id": exit_order_id,
                 "exit_fee": exit_fee,
