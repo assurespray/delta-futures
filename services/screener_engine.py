@@ -314,7 +314,8 @@ class ScreenerEngine:
                         entry_price=cache_mapping["current_price"],
                         lot_size=screener_setup.get("lot_size", 1),
                         signal_text=cache_mapping["primary_signal_text"],
-                        stop_loss=cache_mapping["secondary_value"]
+                        stop_loss=cache_mapping["secondary_value"],
+                        api_name=screener_setup.get("api_name")
                     )
                     
         except Exception as e:

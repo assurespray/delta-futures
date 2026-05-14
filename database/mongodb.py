@@ -85,18 +85,24 @@ class MongoDB:
 
     @classmethod
     async def setup_position_lock_indexes(cls):
-        """Set up unique index for position locks."""
+        """Set up compound unique index for position locks."""
         try:
             collection = cls.db["position_locks"]
+            
+            # Drop old single-field index if it exists
+            try:
+                await collection.drop_index("symbol_1")
+            except:
+                pass
         
-            # Create unique index on symbol (only one lock per symbol)
+            # Create unique compound index on symbol + api_id
             await collection.create_index(
-                "symbol",
+                [("symbol", 1), ("api_id", 1)],
                 unique=True,
-                sparse=True  # Allow multiple null values
+                sparse=True
             )
         
-            logger.info("✅ Position lock indexes created")
+            logger.info("✅ Position lock compound indexes created")
         
         except Exception as e:
             logger.error(f"❌ Error creating position lock indexes: {e}")

@@ -95,7 +95,8 @@ class LoggerBot:
     
     async def send_trade_entry(self, setup_name: str, asset: str, direction: str,
                               entry_price: float, lot_size: int, signal_text: str,
-                              stop_loss: Optional[float] = None):
+                              stop_loss: Optional[float] = None,
+                              api_name: Optional[str] = None):
         """
         Send trade entry notification.
         
@@ -107,6 +108,7 @@ class LoggerBot:
             lot_size: Lot size
             signal_text: Entry signal text (e.g., "Uptrend", "Downtrend")
             stop_loss: Stop-loss price value
+            api_name: API account name (e.g., "Main Account")
         """
         emoji = "🟢" if direction == "long" else "🔴"
         
@@ -114,6 +116,8 @@ class LoggerBot:
         price_str = f"${float(entry_price):.2f}" if entry_price is not None else "N/A"
         
         message = f"{emoji} **TRADE ENTRY**\n\n"
+        if api_name:
+            message += f"**API:** {api_name}\n"
         message += f"**Setup:** {setup_name}\n"
         message += f"**Asset:** {asset}\n"
         message += f"**Direction:** {direction.upper()}\n"
@@ -346,7 +350,8 @@ class LoggerBot:
                                      stop_loss_price: float = None,
                                      entry_type: str = "market",
                                      entry_order_id=None, sl_order_id=None,
-                                     primary_name: str = "Primary", secondary_name: str = "Secondary"):
+                                     primary_name: str = "Primary", secondary_name: str = "Secondary",
+                                     api_name: Optional[str] = None):
         """
         Send detailed trade entry notification (for main bot user chat).
         """
@@ -357,8 +362,10 @@ class LoggerBot:
         pv_str = f"${float(primary_value):.5f}" if primary_value is not None else "N/A"
         sv_str = f"${float(secondary_value):.5f}" if secondary_value is not None else "N/A"
         
-        message = (
-            f"{emoji} **TRADE ENTRY**\n\n"
+        message = f"{emoji} **TRADE ENTRY**\n\n"
+        if api_name:
+            message += f"**API:** {api_name}\n"
+        message += (
             f"**Setup:** {setup_name}\n"
             f"**Asset:** {asset} @ {timeframe}\n"
             f"**Direction:** {direction.upper()}\n"
@@ -387,7 +394,8 @@ class LoggerBot:
                                     lot_size: int, pnl_usd: float = None, pnl_inr: float = None,
                                     exit_signal_text: str = "",
                                     exit_reason: str = "Indicator flip",
-                                    entry_order_id=None, sl_order_id=None, exit_order_id=None):
+                                    entry_order_id=None, sl_order_id=None, exit_order_id=None,
+                                    api_name: Optional[str] = None):
         """
         Send detailed trade exit notification (for main bot user chat).
         """
@@ -397,8 +405,10 @@ class LoggerBot:
         ep_str = f"${float(entry_price):.5f}" if entry_price is not None else "N/A"
         xp_str = f"${float(exit_price):.5f}" if exit_price is not None else "N/A"
         
-        message = (
-            f"🚪 **TRADE EXIT**\n\n"
+        message = f"🚪 **TRADE EXIT**\n\n"
+        if api_name:
+            message += f"**API:** {api_name}\n"
+        message += (
             f"**Setup:** {setup_name}\n"
             f"**Asset:** {asset} @ {timeframe}\n"
             f"**Direction:** {direction.upper()}\n"

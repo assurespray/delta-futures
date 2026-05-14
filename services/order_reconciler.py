@@ -39,7 +39,7 @@ async def reconcile_pending_orders(logger_bot=None):
             try:
                 from database.crud import get_db, release_position_lock
                 db = await get_db()
-                await release_position_lock(db, trade.get("asset", ""), setup_id)
+                await release_position_lock(db, trade.get("asset", ""), setup_id, api_id=trade.get("api_id", ""))
             except Exception:
                 pass
             continue
@@ -121,9 +121,7 @@ async def reconcile_pending_orders(logger_bot=None):
                             
                         from database.crud import get_db, release_position_lock
                         db = await get_db()
-                        await release_position_lock(db, symbol, trade["setup_id"])
-                    
-                    # Telegram notification for external close
+                        await release_position_lock(db, symbol, trade["setup_id"], api_id=trade.get("api_id", ""))
                     if logger_bot:
                         try:
                             setup_name = trade.get("setup_name", setup.get("setup_name", "Unknown"))
@@ -149,7 +147,7 @@ async def reconcile_pending_orders(logger_bot=None):
                         await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                         from database.crud import get_db, release_position_lock
                         db = await get_db()
-                        await release_position_lock(db, symbol, trade["setup_id"])
+                        await release_position_lock(db, symbol, trade["setup_id"], api_id=trade.get("api_id", ""))
                     elif status == "filled":
                         from strategy.position_manager import PositionManager
                         pm = PositionManager()
@@ -160,7 +158,7 @@ async def reconcile_pending_orders(logger_bot=None):
                     await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                     from database.crud import get_db, release_position_lock
                     db = await get_db()
-                    await release_position_lock(db, symbol, trade["setup_id"])
+                    await release_position_lock(db, symbol, trade["setup_id"], api_id=trade.get("api_id", ""))
         except Exception as e:
             logger.error(f"[RECON] Error processing trade {trade_id} ({symbol}): {e}")
         finally:

@@ -432,16 +432,20 @@ def create_application() -> Application:
     
     # ===== JOURNAL HANDLERS =====
     from handlers.journal_ui import (
-        journal_dashboard_callback, journal_recent_callback, journal_export_callback,
+        journal_dashboard_callback, journal_api_callback,
+        journal_strategy_callback, journal_asset_callback,
+        journal_recent_callback, journal_export_callback,
         paper_journal_dashboard_callback, paper_journal_recent_callback, paper_journal_export_callback,
         pjournal_reset_start_callback, pjournal_reset_execute_callback
     )
-    # Live Journal
+    # Live Journal — 4-tier: Overall → API → Strategy → Asset
     application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
-    application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_filter_"))
+    application.add_handler(CallbackQueryHandler(journal_api_callback, pattern="^lj_api_"))
+    application.add_handler(CallbackQueryHandler(journal_strategy_callback, pattern="^lj_strat_"))
+    application.add_handler(CallbackQueryHandler(journal_asset_callback, pattern="^lj_asset_"))
     application.add_handler(CallbackQueryHandler(journal_recent_callback, pattern="^journal_recent_15$"))
     application.add_handler(CallbackQueryHandler(journal_export_callback, pattern="^journal_export_csv$"))
-    # Paper Journal
+    # Paper Journal — 3-tier: Overall → Strategy → Asset
     from handlers.journal_ui import (
         pjournal_strategy_callback, pjournal_asset_callback,
         pjournal_search_start_callback, pjournal_search_receive_callback

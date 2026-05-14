@@ -40,7 +40,7 @@ class JournalService:
             journal_entry = {
                 "trade_id": trade_id,
                 "user_id": trade_data.get("user_id"),
-                "api_name": "PaperTrade" if is_paper else "DeltaExchange",
+                "api_name": "PaperTrade" if is_paper else (trade_data.get("api_name") or "DeltaExchange"),
                 "strategy_name": trade_data.get("setup_name"),
                 "asset": trade_data.get("asset"),
                 "direction": trade_data.get("direction", trade_data.get("current_position")),

@@ -23,32 +23,34 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# LIVE JOURNAL (is_paper_trade=False)
+# LIVE JOURNAL (is_paper_trade=False) — 4-Tier Drill-Down
+# Level 1: Overall → Level 2: API → Level 3: Strategy → Level 4: Asset
 # ============================================================
 
 async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the live journal dashboard with optional asset filtering."""
+    """Level 1: Overall Dashboard — stats across all APIs, lists API buttons."""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    
-    selected_asset = None
-    if "journal_filter_" in query.data:
-        selected_asset = query.data.split("journal_filter_")[-1]
-    
-    trades = await journal_ops.get_trades_by_asset(user_id, selected_asset, is_paper_trade=False)
-    
+
+    # Clear live journal navigation context
+    context.user_data.pop('lj_current_api', None)
+    context.user_data.pop('lj_current_strategy', None)
+    context.user_data.pop('lj_current_asset', None)
+
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False)
+
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
     losses = total_trades - wins
     win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-    
+
     gross_pnl = sum(t.get("gross_pnl", 0) for t in trades)
     fees = sum(t.get("total_fees", 0) for t in trades)
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
-    
-    header = f"📊 **Live Trade Journal** ({selected_asset if selected_asset else 'All Assets'})\n\n"
-    
+
+    header = "📊 **Live Trade Journal (Overall)**\n\n"
+
     if total_trades == 0:
         msg = header + "No recorded live trades found."
     else:
@@ -57,89 +59,281 @@ async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAU
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Exchange Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
+        msg += "Select an API below to view its performance:"
 
-    # Build Asset Filter Keyboard
-    assets = await journal_ops.get_traded_assets(user_id, is_paper_trade=False)
+    # Build API list keyboard
+    api_names = await journal_ops.get_traded_api_names(user_id, is_paper_trade=False)
     keyboard = []
-    
-    if selected_asset:
-        keyboard.append([InlineKeyboardButton("🔙 View All Assets", callback_data="journal_dashboard")])
-        
-    row = []
-    for asset in assets:
-        if asset != selected_asset:
-            row.append(InlineKeyboardButton(f"🪙 {asset}", callback_data=f"journal_filter_{asset}"))
-            if len(row) == 2:
-                keyboard.append(row)
-                row = []
-    if row: keyboard.append(row)
-    
+
+    for api in api_names:
+        keyboard.append([InlineKeyboardButton(f"🔑 {api}", callback_data=f"lj_api_{api}")])
+
     keyboard.append([
         InlineKeyboardButton("📋 Recent 15 Trades", callback_data="journal_recent_15"),
         InlineKeyboardButton("📄 Export CSV", callback_data="journal_export_csv")
     ])
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")])
-    
+
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Level 2: API Dashboard — stats for one API, lists strategy buttons."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+
+    api_name = query.data.replace("lj_api_", "")
+    context.user_data['lj_current_api'] = api_name
+    context.user_data.pop('lj_current_strategy', None)
+    context.user_data.pop('lj_current_asset', None)
+
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, api_name=api_name)
+
+    total_trades = len(trades)
+    wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
+    losses = total_trades - wins
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+    gross_pnl = sum(t.get("gross_pnl", 0) for t in trades)
+    fees = sum(t.get("total_fees", 0) for t in trades)
+    net_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+    msg = f"🔑 **API:** {api_name}\n\n"
+
+    if total_trades == 0:
+        msg += "No trades found for this API."
+    else:
+        msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
+        msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
+        msg += f"🏦 Exchange Fees: ${fees:.2f}\n"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
+        msg += "Select a Strategy below:"
+
+    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name)
+    keyboard = []
+
+    for strat in strategies:
+        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
+
+    keyboard.append([InlineKeyboardButton(f"📋 Recent Trades ({api_name})", callback_data="journal_recent_15")])
+    keyboard.append([InlineKeyboardButton("🔙 Back to Overview", callback_data="journal_dashboard")])
+
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Level 3: Strategy Dashboard — stats for one strategy in one API, paginated asset list."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+
+    api_name = context.user_data.get('lj_current_api')
+    if not api_name:
+        await query.edit_message_text("❌ Session expired. Please start from the Journal Dashboard.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]))
+        return
+
+    data = query.data.replace("lj_strat_", "")
+    page = 0
+    if ":p" in data:
+        parts = data.rsplit(":p", 1)
+        strategy = parts[0]
+        try:
+            page = int(parts[1])
+        except:
+            page = 0
+    else:
+        strategy = data
+
+    context.user_data['lj_current_strategy'] = strategy
+    context.user_data.pop('lj_current_asset', None)
+
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, strategy=strategy, api_name=api_name)
+
+    total_trades = len(trades)
+    wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
+    losses = total_trades - wins
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+    net_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+    msg = f"🔑 **API:** {api_name}\n"
+    msg += f"📁 **Strategy:** {strategy}\n\n"
+    msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
+    msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
+    msg += "Select an asset below:"
+
+    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=False, api_name=api_name)
+
+    ASSETS_PER_PAGE = 14
+    total_assets = len(assets)
+    total_pages = max(1, (total_assets + ASSETS_PER_PAGE - 1) // ASSETS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * ASSETS_PER_PAGE
+    end = min(start + ASSETS_PER_PAGE, total_assets)
+    page_assets = assets[start:end]
+
+    keyboard = []
+
+    row = []
+    for asset in page_assets:
+        row.append(InlineKeyboardButton(f"🪙 {asset}", callback_data=f"lj_asset_{strategy}_{asset}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row: keyboard.append(row)
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lj_strat_{strategy}:p{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"lj_strat_{strategy}:p{page + 1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    keyboard.append([InlineKeyboardButton(f"📋 Recent Trades ({strategy})", callback_data="journal_recent_15")])
+    keyboard.append([InlineKeyboardButton(f"🔙 Back to {api_name}", callback_data=f"lj_api_{api_name}")])
+
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def journal_asset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Level 4: Asset Details for a specific strategy and API."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+
+    api_name = context.user_data.get('lj_current_api')
+    if not api_name:
+        await query.edit_message_text("❌ Session expired. Please start from the Journal Dashboard.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]))
+        return
+
+    data = query.data.replace("lj_asset_", "")
+    parts = data.rsplit("_", 1)
+    if len(parts) != 2:
+        await query.edit_message_text("Error parsing asset.")
+        return
+    strategy, asset = parts[0], parts[1]
+    context.user_data['lj_current_strategy'] = strategy
+    context.user_data['lj_current_asset'] = asset
+
+    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=False, strategy=strategy, api_name=api_name)
+
+    total_trades = len(trades)
+    wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
+    losses = total_trades - wins
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+    gross_pnl = sum(t.get("gross_pnl", 0) for t in trades)
+    fees = sum(t.get("total_fees", 0) for t in trades)
+    net_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+    msg = f"🔑 **API:** {api_name}\n"
+    msg += f"📁 **Strategy:** {strategy}\n"
+    msg += f"🪙 **Asset:** {asset}\n\n"
+
+    if total_trades == 0:
+        msg += "No trades found."
+    else:
+        msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
+        msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
+        msg += f"🏦 Exchange Fees: ${fees:.2f}\n"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+
+    keyboard = [
+        [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="journal_recent_15")],
+        [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"lj_strat_{strategy}")]
+    ]
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the 15 most recent live trades."""
+    """Context-aware: Displays the 15 most recent live trades, filtered by current drill-down level."""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    
-    context.user_data.pop('pj_current_strategy', None)
-    context.user_data.pop('pj_current_asset', None)
-    
-    trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=False)
+
+    api_name = context.user_data.get('lj_current_api')
+    strategy = context.user_data.get('lj_current_strategy')
+    asset = context.user_data.get('lj_current_asset')
+
+    trades = await journal_ops.get_recent_trades(
+        user_id, limit=15, is_paper_trade=False,
+        strategy=strategy, asset=asset, api_name=api_name
+    )
+
+    # Determine back button based on drill-down level
+    if strategy and asset:
+        back_btn = f"lj_asset_{strategy}_{asset}"
+    elif strategy:
+        back_btn = f"lj_strat_{strategy}"
+    elif api_name:
+        back_btn = f"lj_api_{api_name}"
+    else:
+        back_btn = "journal_dashboard"
+
     if not trades:
-        await query.edit_message_text("No recent live trades found.", 
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="journal_dashboard")]]))
+        await query.edit_message_text("No recent live trades found.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=back_btn)]]))
         return
-        
-    msg = "📋 **Last 15 Live Journal Entries**\n\n"
+
+    # Build header based on context
+    if strategy and asset:
+        msg = f"📋 **Last 15 Live Trades ({asset})**\n\n"
+    elif strategy:
+        msg = f"📋 **Last 15 Live Trades ({strategy})**\n\n"
+    elif api_name:
+        msg = f"📋 **Last 15 Live Trades ({api_name})**\n\n"
+    else:
+        msg = "📋 **Last 15 Live Journal Entries**\n\n"
+
     for t in trades:
-        asset = t.get('asset', '?')
+        t_asset = t.get('asset', '?')
         direction = t.get('direction', '?').upper()
         pnl = t.get('net_pnl', 0)
         emoji = "🟢" if pnl > 0 else "🔴"
-        
+
         entry_time = to_ist_str(t.get('entry_time'))
         exit_time = to_ist_str(t.get('exit_time'))
-        
-        msg += f"{emoji} **{asset}** ({direction}) | ${pnl:.2f}\n"
+
+        msg += f"{emoji} **{t_asset}** ({direction}) | ${pnl:.2f}\n"
         msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
         msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
-        
-    keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]
+
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_btn)]]
+
+    if len(msg) > 4000:
+        msg = msg[:3997] + "..."
+
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
 
 async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and sends a CSV of all live trades."""
     query = update.callback_query
     await query.answer("Generating CSV...")
     user_id = str(query.from_user.id)
-    
-    context.user_data.pop('pj_current_strategy', None)
-    context.user_data.pop('pj_current_asset', None)
-    
+
     trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False)
     if not trades:
         await context.bot.send_message(chat_id=query.message.chat_id, text="No live trades to export.")
         return
-        
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "Trade ID", "Setup", "Asset", "Direction", "Quantity", 
-        "Entry Time", "Entry Price", "Exit Time", "Exit Price", 
+        "Trade ID", "API", "Setup", "Asset", "Direction", "Quantity",
+        "Entry Time", "Entry Price", "Exit Time", "Exit Price",
         "Exit Reason", "Gross PnL", "Total Fees", "Net PnL"
     ])
-    
+
     for t in trades:
         writer.writerow([
             t.get('trade_id', ''),
+            t.get('api_name', 'DeltaExchange'),
             t.get('strategy_name', ''),
             t.get('asset', ''),
             t.get('direction', ''),
@@ -153,11 +347,11 @@ async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_
             round(t.get('total_fees', 0), 4),
             round(t.get('net_pnl', 0), 4)
         ])
-        
+
     buf = io.BytesIO()
     buf.write(output.getvalue().encode('utf-8'))
     buf.seek(0)
-    
+
     filename = f"LiveJournal_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.csv"
     await context.bot.send_document(
         chat_id=query.message.chat_id,
@@ -226,8 +420,8 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     
     data = query.data.replace("pj_strat_", "")
     page = 0
-    if "_p" in data:
-        parts = data.rsplit("_p", 1)
+    if ":p" in data:
+        parts = data.rsplit(":p", 1)
         strategy = parts[0]
         try:
             page = int(parts[1])
@@ -278,9 +472,9 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"pj_strat_{strategy}_p{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"pj_strat_{strategy}:p{page - 1}"))
     if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"pj_strat_{strategy}_p{page + 1}"))
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"pj_strat_{strategy}:p{page + 1}"))
     if nav_buttons:
         keyboard.append(nav_buttons)
         

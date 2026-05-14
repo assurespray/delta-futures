@@ -76,7 +76,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                         await logger_bot.send_warning(f"⚠️ Marked trade closed for {symbol} (no exchange position)")
                     await update_trade_state(trade_id, {"status": "closed", "exit_signal": reason})
                 else:
-                    await acquire_position_lock(db, symbol, setup_id, setup["setup_name"])
+                    await acquire_position_lock(db, symbol, setup_id, setup["setup_name"], api_id=api_id)
             
             elif trade["status"] == "pending_entry":
                 order_id = trade.get("pending_entry_order_id")

@@ -417,7 +417,8 @@ class AlgoEngine:
 
                     from database.crud import get_db, release_position_lock
                     db = await get_db()
-                    await release_position_lock(db, asset, setup_id)
+                    trade_api_id = trade_state.get("api_id", "")
+                    await release_position_lock(db, asset, setup_id, api_id=trade_api_id)
                     
                     # Close position records
                     try:
@@ -525,7 +526,8 @@ class AlgoEngine:
                             pnl_usd=pnl,
                             pnl_inr=pnl_inr,
                             exit_signal_text=exit_signal.reason,
-                            exit_reason=exit_signal.reason
+                            exit_reason=exit_signal.reason,
+                            api_name=trade_state.get("api_name")
                         )
                     except Exception as e:
                         logger.error(f"Failed to send exit notification for {asset}: {e}")
@@ -611,7 +613,8 @@ class AlgoEngine:
                         "pending_entry_order_id": None
                     })
                     db = await get_db()
-                    await release_position_lock(db, asset, setup_id)
+                    trade_api_id = trade_state.get("api_id", "")
+                    await release_position_lock(db, asset, setup_id, api_id=trade_api_id)
                     
             await client.close()
             

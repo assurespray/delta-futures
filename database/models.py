@@ -102,6 +102,8 @@ class TradeState(BaseModel):
     setup_id: str  # ID of the AlgoSetup or ScreenerSetup
     setup_type: str  # "algo" or "screener"
     setup_name: str
+    api_id: Optional[str] = None
+    api_name: Optional[str] = None
     
     # Core Trade Info
     asset: str
@@ -235,13 +237,17 @@ class ScreenerSetup(BaseModel):
 
 class PositionLock(BaseModel):
     """
-    ✅ NEW: Global asset position lock to prevent multi-timeframe conflicts.
-    Only ONE setup can trade an asset at a time.
+    Global asset position lock to prevent multi-timeframe conflicts.
+    Only ONE setup can trade an asset per API account at a time.
+    
+    Compound unique index on (symbol, api_id) allows the same asset
+    to be traded on different exchange accounts simultaneously.
     
     Stored in MongoDB as documents:
     {
         "_id": ObjectId(...),
         "symbol": "ADAUSD",
+        "api_id": "abc123...",
         "setup_id": "123abc...",
         "setup_name": "ADA Scalper",
         "locked_at": datetime.utcnow()
@@ -250,6 +256,7 @@ class PositionLock(BaseModel):
     
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     symbol: str  # Asset symbol (e.g., "ADAUSD")
+    api_id: str  # API credential ID — compound key with symbol
     setup_id: str  # ID of the setup owning this lock
     setup_name: str  # Name of setup (for logging/display)
     locked_at: datetime = Field(default_factory=datetime.utcnow)  # When lock was acquired

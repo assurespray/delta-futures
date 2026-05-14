@@ -624,10 +624,13 @@ async def get_all_active_screener_setups() -> List[Dict[str, Any]]:
 async def acquire_position_lock(db: AsyncIOMotorDatabase,
                                symbol: str,
                                setup_id: str,
-                               setup_name: str) -> bool:
+                               setup_name: str,
+                               api_id: str = "") -> bool:
     """
-    ✅ Acquire exclusive lock on asset for this setup.
-    Only ONE setup can trade this asset at a time.
+    Acquire exclusive lock on asset for this setup within an API account.
+    Only ONE setup can trade this asset per API account at a time.
+    Uses compound key (symbol, api_id) so the same asset can be traded
+    on different exchange accounts simultaneously.
     Uses UPSERT to prevent duplicate key errors on restart.
     
     Args:
@@ -635,6 +638,7 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
         symbol: Asset symbol (e.g., "ADAUSD")
         setup_id: Setup ID requesting lock
         setup_name: Setup name (for logging)
+        api_id: API credential ID (compound key with symbol)
     
     Returns:
         True if lock acquired, False if already locked by another setup
@@ -642,27 +646,28 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
     try:
         collection = db["position_locks"]
         
-        # Check if locked by a DIFFERENT setup
-        existing = await collection.find_one({"symbol": symbol})
+        # Check if locked by a DIFFERENT setup on the same API account
+        existing = await collection.find_one({"symbol": symbol, "api_id": api_id})
         if existing and existing.get("setup_id") != setup_id:
-            logger.error(f"❌ {symbol} is LOCKED by: {existing.get('setup_name')}")
+            logger.error(f"❌ {symbol} is LOCKED by: {existing.get('setup_name')} (api_id={api_id})")
             return False
         
         # Upsert: update if exists (same setup), insert if new
         lock_data = {
             "symbol": symbol,
+            "api_id": api_id,
             "setup_id": setup_id,
             "setup_name": setup_name,
             "locked_at": datetime.utcnow()
         }
         
         result = await collection.update_one(
-            {"symbol": symbol},
+            {"symbol": symbol, "api_id": api_id},
             {"$set": lock_data},
             upsert=True
         )
         
-        logger.info(f"✅ Lock acquired/refreshed for {symbol} by {setup_name}")
+        logger.info(f"✅ Lock acquired/refreshed for {symbol} by {setup_name} (api_id={api_id})")
         return True
         
     except Exception as e:
@@ -671,16 +676,22 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
 
 
 async def get_position_lock(db: AsyncIOMotorDatabase,
-                           symbol: str) -> Optional[dict]:
+                           symbol: str,
+                           api_id: str = "") -> Optional[dict]:
     """
-    ✅ NEW: Get lock information for an asset.
+    Get lock information for an asset on a specific API account.
+    
+    Args:
+        db: MongoDB database connection
+        symbol: Asset symbol
+        api_id: API credential ID (compound key with symbol)
     
     Returns:
         Lock record or None if not locked
     """
     try:
         collection = db["position_locks"]
-        lock = await collection.find_one({"symbol": symbol})
+        lock = await collection.find_one({"symbol": symbol, "api_id": api_id})
         return lock
         
     except Exception as e:
@@ -690,32 +701,36 @@ async def get_position_lock(db: AsyncIOMotorDatabase,
 
 async def release_position_lock(db: AsyncIOMotorDatabase,
                                symbol: str,
-                               setup_id: str) -> bool:
+                               setup_id: str,
+                               api_id: str = "") -> bool:
     """
-    ✅ NEW: Release lock when position is closed.
+    Release lock when position is closed.
+    Uses compound key (symbol, api_id) + setup_id for safety.
     
     Args:
         db: MongoDB database connection
         symbol: Asset symbol
         setup_id: Setup ID releasing lock
+        api_id: API credential ID (compound key with symbol)
     
     Returns:
         True if lock released, False if error
     """
     try:
-        logger.debug(f"release_position_lock called for symbol={symbol}, setup_id={setup_id}")
+        logger.debug(f"release_position_lock called for symbol={symbol}, setup_id={setup_id}, api_id={api_id}")
         collection = db["position_locks"]
         
         result = await collection.delete_one({
             "symbol": symbol,
+            "api_id": api_id,
             "setup_id": setup_id
         })
-        logger.debug(f"release_position_lock deleted_count={result.deleted_count} for symbol={symbol}, setup_id={setup_id}")
+        logger.debug(f"release_position_lock deleted_count={result.deleted_count} for symbol={symbol}, setup_id={setup_id}, api_id={api_id}")
         if result.deleted_count > 0:
-            logger.info(f"✅ Released lock on {symbol}")
+            logger.info(f"✅ Released lock on {symbol} (api_id={api_id})")
             return True
         else:
-            logger.warning(f"⚠️ Lock not found for {symbol}")
+            logger.warning(f"⚠️ Lock not found for {symbol} (api_id={api_id})")
             return False
         
     except Exception as e:
@@ -807,13 +822,12 @@ async def create_position_record(position_data: dict) -> str:
     result = await db.positions.insert_one(position_data)
     return str(result.inserted_id)
     
-async def create_position_lock(symbol: str, setup_id: str) -> bool:
+async def create_position_lock(symbol: str, setup_id: str, api_id: str = "") -> bool:
     """
     Shortcut compatible with reconciliation routine.
     """
     db = await get_db()
-    # You can use the setup_id as setup_name, or fetch the name if needed
-    return await acquire_position_lock(db, symbol, setup_id, setup_name=setup_id)
+    return await acquire_position_lock(db, symbol, setup_id, setup_name=setup_id, api_id=api_id)
 
 async def delete_position_lock(symbol: str = None) -> int:
     """

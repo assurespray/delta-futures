@@ -47,21 +47,26 @@ class JournalOperations:
             logger.error(f"Failed to append scaling event: {e}")
             return False
 
-    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None, is_paper_trade: bool = False, strategy: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch closed trades for a user, optionally filtered by asset, strategy, and trade type."""
+    async def get_trades_by_asset(self, user_id: str, asset: Optional[str] = None, is_paper_trade: bool = False, strategy: Optional[str] = None, api_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch closed trades for a user, optionally filtered by asset, strategy, api_name, and trade type."""
         try:
             query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
             if asset and asset != "ALL":
                 query["asset"] = asset
             if strategy and strategy != "ALL":
                 query["strategy_name"] = strategy
+            if api_name:
+                if api_name == "DeltaExchange":
+                    query["api_name"] = {"$in": ["DeltaExchange", None, ""]}
+                else:
+                    query["api_name"] = api_name
             cursor = self.collection.find(query).sort("exit_time", -1)
             return await cursor.to_list(1000)
         except Exception as e:
             logger.error(f"Failed to get journal trades: {e}")
             return []
 
-    async def get_recent_trades(self, user_id: str, limit: int = 15, is_paper_trade: bool = False, strategy: Optional[str] = None, asset: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_recent_trades(self, user_id: str, limit: int = 15, is_paper_trade: bool = False, strategy: Optional[str] = None, asset: Optional[str] = None, api_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """Fetch the most recent closed trades for the user."""
         try:
             query = {"user_id": user_id, "status": "closed", "is_paper_trade": is_paper_trade}
@@ -69,33 +74,70 @@ class JournalOperations:
                 query["strategy_name"] = strategy
             if asset and asset != "ALL":
                 query["asset"] = asset
+            if api_name:
+                if api_name == "DeltaExchange":
+                    query["api_name"] = {"$in": ["DeltaExchange", None, ""]}
+                else:
+                    query["api_name"] = api_name
             cursor = self.collection.find(query).sort("exit_time", -1).limit(limit)
             return await cursor.to_list(limit)
         except Exception as e:
             logger.error(f"Failed to get recent trades: {e}")
             return []
 
-    async def get_traded_strategies(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
-        """Get unique list of strategies traded by a user."""
+    async def get_traded_api_names(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
+        """Get unique list of API names used in closed trades by a user."""
         try:
-            return await self.collection.distinct("strategy_name", {
+            raw = await self.collection.distinct("api_name", {
                 "user_id": user_id,
                 "is_paper_trade": is_paper_trade,
                 "status": "closed"
             })
+            # Normalize: None and "" both mean "DeltaExchange"
+            names = set()
+            for name in raw:
+                if not name:
+                    names.add("DeltaExchange")
+                else:
+                    names.add(name)
+            return sorted(names)
+        except Exception as e:
+            logger.error(f"Failed to fetch traded API names: {e}")
+            return []
+
+    async def get_traded_strategies(self, user_id: str, is_paper_trade: bool = False, api_name: Optional[str] = None) -> List[str]:
+        """Get unique list of strategies traded by a user, optionally filtered by API name."""
+        try:
+            query = {
+                "user_id": user_id,
+                "is_paper_trade": is_paper_trade,
+                "status": "closed"
+            }
+            if api_name:
+                if api_name == "DeltaExchange":
+                    query["api_name"] = {"$in": ["DeltaExchange", None, ""]}
+                else:
+                    query["api_name"] = api_name
+            return await self.collection.distinct("strategy_name", query)
         except Exception as e:
             logger.error(f"Failed to fetch traded strategies: {e}")
             return []
 
-    async def get_traded_assets_by_strategy(self, user_id: str, strategy: str, is_paper_trade: bool = False) -> List[str]:
-        """Get unique list of assets traded by a user under a specific strategy."""
+    async def get_traded_assets_by_strategy(self, user_id: str, strategy: str, is_paper_trade: bool = False, api_name: Optional[str] = None) -> List[str]:
+        """Get unique list of assets traded by a user under a specific strategy, optionally filtered by API name."""
         try:
-            return await self.collection.distinct("asset", {
+            query = {
                 "user_id": user_id,
                 "strategy_name": strategy,
                 "is_paper_trade": is_paper_trade,
                 "status": "closed"
-            })
+            }
+            if api_name:
+                if api_name == "DeltaExchange":
+                    query["api_name"] = {"$in": ["DeltaExchange", None, ""]}
+                else:
+                    query["api_name"] = api_name
+            return await self.collection.distinct("asset", query)
         except Exception as e:
             logger.error(f"Failed to fetch traded assets for strategy {strategy}: {e}")
             return []

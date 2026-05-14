@@ -61,15 +61,17 @@ class PositionManager:
             symbol = algo_setup["asset"]
             lot_size = algo_setup["lot_size"]
             product_id = algo_setup.get("product_id")
+            api_id = algo_setup.get("api_id", "")
+            api_name = algo_setup.get("api_name", "")
             setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
 
             db = await get_db()
-            lock = await get_position_lock(db, symbol)
+            lock = await get_position_lock(db, symbol, api_id=api_id)
             if lock and lock['setup_id'] != setup_id:
                 logger.error(f"❌ ENTRY REJECTED: {symbol} is already traded by setup {lock['setup_id']} ({lock.get('setup_name')})")
                 return False
 
-            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name)
+            lock_acquired = await acquire_position_lock(db, symbol, setup_id, setup_name, api_id=api_id)
             if not lock_acquired:
                 logger.error(f"❌ Failed to acquire lock for {symbol} by {setup_name}")
                 return False
@@ -82,7 +84,7 @@ class PositionManager:
                     f"⚠️ ENTRY BLOCKED: {symbol} already has an open position on exchange "
                     f"(size={existing_pos.get('size')}). Releasing lock."
                 )
-                await release_position_lock(db, symbol, setup_id)
+                await release_position_lock(db, symbol, setup_id, api_id=api_id)
                 return False
 
             if not product_id:
@@ -97,6 +99,8 @@ class PositionManager:
                 "setup_id": setup_id,
                 "setup_type": setup_type,
                 "setup_name": setup_name,
+                "api_id": api_id,
+                "api_name": api_name,
                 "asset": symbol,
                 "product_id": product_id,
                 "direction": entry_side,
@@ -115,7 +119,7 @@ class PositionManager:
                 entry_order = await place_market_order(client, product_id, lot_size, order_side)
                 if not entry_order:
                     logger.error(f"❌ Failed to place market entry order")
-                    await release_position_lock(db, symbol, setup_id)
+                    await release_position_lock(db, symbol, setup_id, api_id=api_id)
                     return False
 
                 entry_order_id = entry_order.get("id")
@@ -178,7 +182,7 @@ class PositionManager:
             )
             if not entry_order:
                 logger.error(f"❌ Failed to place breakout entry order")
-                await release_position_lock(db, symbol, setup_id)
+                await release_position_lock(db, symbol, setup_id, api_id=api_id)
                 return False
                 
             from database.crud import create_order_record, create_trade_state
@@ -223,6 +227,7 @@ class PositionManager:
             symbol = trade_state["asset"]
             lot_size = trade_state["lot_size"]
             product_id = trade_state.get("product_id")
+            api_id = trade_state.get("api_id", "")
             pending_order_id = trade_state.get("pending_entry_order_id")
             
             if not pending_order_id or not product_id:
@@ -254,7 +259,7 @@ class PositionManager:
                         "exit_signal": f"Entry order {order_status} but no position on exchange"
                     })
                     db = await get_db()
-                    await release_position_lock(db, symbol, setup_id)
+                    await release_position_lock(db, symbol, setup_id, api_id=api_id)
                     
                     # Revert strategy_state so the flip can be re-detected next cycle
                     try:
@@ -360,7 +365,8 @@ class PositionManager:
                             entry_price=entry_price,
                             lot_size=lot_size,
                             signal_text="Uptrend" if entry_side == "long" else "Downtrend",
-                            stop_loss=sl_price
+                            stop_loss=sl_price,
+                            api_name=trade_state.get("api_name")
                         )
                     except Exception as notif_err:
                         logger.warning(f"⚠️ Failed to send Telegram entry notification: {notif_err}")
@@ -373,7 +379,7 @@ class PositionManager:
                 from database.crud import update_trade_state
                 await update_trade_state(trade_id, {"status": "cancelled", "pending_entry_order_id": None})
                 db = await get_db()
-                await release_position_lock(db, symbol, setup_id)
+                await release_position_lock(db, symbol, setup_id, api_id=api_id)
                 return False
 
             return False
@@ -438,6 +444,7 @@ class PositionManager:
             symbol = trade_state["asset"]
             lot_size = trade_state["lot_size"]
             product_id = trade_state.get("product_id")
+            api_id = trade_state.get("api_id", "")
             current_position = trade_state.get("current_position") or trade_state.get("direction")
             stop_loss_order_id = trade_state.get("stop_loss_order_id")
 
@@ -554,7 +561,7 @@ class PositionManager:
             except Exception as e:
                 logger.error(f"❌ Error closing position records for {symbol}: {e}")
             
-            await release_position_lock(db, symbol, setup_id)
+            await release_position_lock(db, symbol, setup_id, api_id=api_id)
             
             return True, exit_price, exit_reason
 
