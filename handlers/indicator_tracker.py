@@ -15,10 +15,10 @@ async def tracker_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     keyboard = [
-        [InlineKeyboardButton("📊 Real - Individual", callback_data="tracker_real_algo")],
-        [InlineKeyboardButton("📊 Real - Screener", callback_data="tracker_real_screener")],
-        [InlineKeyboardButton("🎮 Paper - Individual", callback_data="tracker_paper_algo")],
-        [InlineKeyboardButton("🎮 Paper - Screener", callback_data="tracker_paper_screener")],
+        [InlineKeyboardButton("📊 Real - Individual", callback_data="tracker_sub_real_algo")],
+        [InlineKeyboardButton("📊 Real - Screener", callback_data="tracker_sub_real_screener")],
+        [InlineKeyboardButton("🎮 Paper - Individual", callback_data="tracker_sub_paper_algo")],
+        [InlineKeyboardButton("🎮 Paper - Screener", callback_data="tracker_sub_paper_screener")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -62,13 +62,30 @@ def _format_asset_line(c: dict) -> str:
     return line
 
 
-async def _render_tracker_view(query, title: str, setup_type: str, is_paper: bool, page: int = 0):
-    """Helper to render a paginated list of tracked assets."""
-    await query.answer("Fetching live indicators...")
+async def _render_tracker_submenu(query, data: str, context: ContextTypes.DEFAULT_TYPE):
+    """Show a sub-menu listing individual setups as buttons, plus an 'All' option."""
+    await query.answer()
 
-    caches = await get_indicator_cache_by_type(setup_type, is_paper)
+    # data: "tracker_sub_real_algo" or "tracker_sub_paper_screener"
+    parts = data.split("_")  # ['tracker', 'sub', 'real'/'paper', 'algo'/'screener']
+    mode_str = parts[2]  # real / paper
+    type_str = parts[3]  # algo / screener
+    is_paper = (mode_str == "paper")
 
-    if not caches:
+    mode_label = "🎮 Paper" if is_paper else "📊 Real"
+    type_label = "Individual" if type_str == "algo" else "Screener"
+    title = f"{mode_label} - {type_label}"
+
+    # Fetch active caches and extract unique setup names
+    caches = await get_indicator_cache_by_type(type_str, is_paper)
+    setup_names = sorted(set(c["setup_name"] for c in caches)) if caches else []
+
+    # Store setup names in user_data for index-based retrieval
+    context.user_data["tracker_setup_names"] = setup_names
+
+    base_view = f"tracker_{mode_str}_{type_str}"
+
+    if not setup_names:
         keyboard = [[InlineKeyboardButton("🔙 Back to Tracker Menu", callback_data="menu_indicator_tracker")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
@@ -78,11 +95,57 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
         )
         return
 
-    # Build a flat list of (setup_name, cache_entry) preserving setup grouping
-    all_entries = []
-    for c in caches:
-        all_entries.append(c)
+    keyboard = []
+    # "View All" button at the top
+    keyboard.append([InlineKeyboardButton(f"🌟 All Setups ({len(setup_names)})", callback_data=f"{base_view}_all:p0")])
 
+    # Individual setup buttons — 1 per row
+    for idx, name in enumerate(setup_names):
+        # Count assets in this setup for the label
+        asset_count = sum(1 for c in caches if c["setup_name"] == name)
+        label = f"📁 {name} ({asset_count})"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"{base_view}_idx:{idx}:p0")])
+
+    keyboard.append([InlineKeyboardButton("🔙 Back to Tracker Menu", callback_data="menu_indicator_tracker")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"**🔍 {title}**\n\n"
+        f"Found **{len(setup_names)}** active setup(s).\n"
+        "Select a setup to view its indicators, or view all at once.",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+
+async def _render_tracker_view(query, title: str, setup_type: str, is_paper: bool,
+                               page: int = 0, filter_setup_name: str = None,
+                               base_cmd: str = None):
+    """Helper to render a paginated list of tracked assets, optionally filtered to one setup."""
+    await query.answer("Fetching live indicators...")
+
+    caches = await get_indicator_cache_by_type(setup_type, is_paper)
+
+    # Apply setup filter if specified
+    if filter_setup_name and caches:
+        caches = [c for c in caches if c["setup_name"] == filter_setup_name]
+
+    # Build back button target — go to the sub-menu for this category
+    mode_str = "paper" if is_paper else "real"
+    sub_menu_data = f"tracker_sub_{mode_str}_{setup_type}"
+
+    if not caches:
+        display_title = f"{title} — {filter_setup_name}" if filter_setup_name else title
+        keyboard = [[InlineKeyboardButton("🔙 Back to Setups", callback_data=sub_menu_data)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"ℹ️ No active scans found for **{display_title}** in the last hour.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    all_entries = list(caches)
     total_assets = len(all_entries)
     total_pages = max(1, (total_assets + ASSETS_PER_PAGE - 1) // ASSETS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
@@ -99,11 +162,12 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
             setups[setup_name] = []
         setups[setup_name].append(c)
 
+    display_title = f"{title} — {filter_setup_name}" if filter_setup_name else title
     if total_pages > 1:
-        message = f"**{title} Dashboard** (Page {page + 1}/{total_pages})\n"
+        message = f"**{display_title} Dashboard** (Page {page + 1}/{total_pages})\n"
         message += f"Showing {start + 1}-{end} of {total_assets} assets\n\n"
     else:
-        message = f"**{title} Dashboard**\n\n"
+        message = f"**{display_title} Dashboard**\n\n"
 
     for setup_name, assets in setups.items():
         message += f"📁 **Setup:** `{setup_name}`\n"
@@ -111,19 +175,20 @@ async def _render_tracker_view(query, title: str, setup_type: str, is_paper: boo
             message += _format_asset_line(c)
         message += "\n"
 
-    # Build navigation buttons
-    base_data = f"tracker_{'paper' if is_paper else 'real'}_{setup_type}"
+    # Build navigation buttons — use base_cmd so pagination stays in the same filtered view
+    if not base_cmd:
+        base_cmd = f"tracker_{mode_str}_{setup_type}"
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{base_data}:p{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{base_cmd}:p{page - 1}"))
     if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{base_data}:p{page + 1}"))
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"{base_cmd}:p{page + 1}"))
 
     keyboard = []
     if nav_buttons:
         keyboard.append(nav_buttons)
-    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"{base_data}:p{page}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back to Tracker Menu", callback_data="menu_indicator_tracker")])
+    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"{base_cmd}:p{page}")])
+    keyboard.append([InlineKeyboardButton("🔙 Back to Setups", callback_data=sub_menu_data)])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # Hard truncation failsafe — Telegram rejects messages > 4096 chars
@@ -146,7 +211,12 @@ async def tracker_view_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     data = query.data
 
-    # Parse page from callback_data: e.g. "tracker_paper_screener:p3"
+    # ---- Sub-menu: list individual setups as buttons ----
+    if data.startswith("tracker_sub_"):
+        await _render_tracker_submenu(query, data, context)
+        return
+
+    # ---- Parse page from callback_data: e.g. "tracker_real_algo_all:p2" ----
     page = 0
     if ":p" in data:
         parts = data.rsplit(":p", 1)
@@ -158,11 +228,47 @@ async def tracker_view_callback(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         base = data
 
-    if base == "tracker_real_algo":
-        await _render_tracker_view(query, "📊 Real - Individual", "algo", False, page)
-    elif base == "tracker_real_screener":
-        await _render_tracker_view(query, "📊 Real - Screener", "screener", False, page)
-    elif base == "tracker_paper_algo":
-        await _render_tracker_view(query, "🎮 Paper - Individual", "algo", True, page)
-    elif base == "tracker_paper_screener":
-        await _render_tracker_view(query, "🎮 Paper - Screener", "screener", True, page)
+    # ---- Determine mode/type and filter ----
+    filter_setup_name = None
+    base_cmd = base  # preserve full base for pagination callbacks
+
+    # Handle "_idx:N" — specific setup by index
+    if "_idx:" in base:
+        idx_parts = base.split("_idx:")
+        core = idx_parts[0]  # e.g. "tracker_real_algo"
+        try:
+            idx = int(idx_parts[1])
+            names = context.user_data.get("tracker_setup_names", [])
+            if 0 <= idx < len(names):
+                filter_setup_name = names[idx]
+            else:
+                logger.warning(f"Tracker idx {idx} out of range ({len(names)} names)")
+        except (ValueError, IndexError):
+            pass
+    # Handle "_all" — show everything
+    elif base.endswith("_all"):
+        core = base[:-4]  # strip "_all"
+        base_cmd = base  # keep "_all" in pagination callbacks
+    else:
+        core = base
+
+    # Map core to (title, setup_type, is_paper)
+    route_map = {
+        "tracker_real_algo":      ("📊 Real - Individual", "algo", False),
+        "tracker_real_screener":  ("📊 Real - Screener", "screener", False),
+        "tracker_paper_algo":     ("🎮 Paper - Individual", "algo", True),
+        "tracker_paper_screener": ("🎮 Paper - Screener", "screener", True),
+    }
+
+    route = route_map.get(core)
+    if not route:
+        await query.answer("Invalid tracker request.", show_alert=True)
+        return
+
+    title, setup_type, is_paper = route
+    await _render_tracker_view(
+        query, title, setup_type, is_paper,
+        page=page,
+        filter_setup_name=filter_setup_name,
+        base_cmd=base_cmd
+    )
