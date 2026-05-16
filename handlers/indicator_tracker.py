@@ -6,7 +6,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-ASSETS_PER_PAGE = 15  # ~15 assets safe for dual-indicator/Donchian (3 lines each)
+ASSETS_PER_PAGE = 8  # ~8 assets safe with display_details (5-8 lines each)
 
 
 async def tracker_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
