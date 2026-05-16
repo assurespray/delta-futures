@@ -313,7 +313,11 @@ async def run_order_reconciliation():
 
 
 async def validate_setup_configuration():
-    """Validate no asset has multiple active setups."""
+    """Validate no asset has conflicting active REAL setups on the same API key.
+    
+    Paper setups are excluded — they can overlap infinitely.
+    Real setups only conflict if they share the same asset AND api_id.
+    """
     try:
         from database.crud import get_all_active_algo_setups
         
@@ -323,30 +327,38 @@ async def validate_setup_configuration():
             logger.info("ℹ️ No active setups to validate")
             return
         
-        # Group by asset
+        # Only validate real setups — paper setups can overlap freely
+        real_setups = [s for s in all_setups if not s.get("is_paper_trade", False)]
+        paper_count = len(all_setups) - len(real_setups)
+        
+        if paper_count:
+            logger.info(f"ℹ️ Skipping {paper_count} paper setup(s) in validation (overlap allowed)")
+        
+        # Group real setups by (asset, api_id) — only same-API conflicts matter
         assets_map = {}
-        for setup in all_setups:
-            symbol = setup["asset"]
-            if symbol not in assets_map:
-                assets_map[symbol] = []
-            assets_map[symbol].append(setup)
+        for setup in real_setups:
+            key = (setup["asset"], setup.get("api_id", ""))
+            if key not in assets_map:
+                assets_map[key] = []
+            assets_map[key].append(setup)
         
         # Check for conflicts
         conflicts = False
-        for symbol, setups in assets_map.items():
+        for (symbol, api_id), setups in assets_map.items():
             if len(setups) > 1:
-                logger.warning(f"⚠️ CONFLICT: {symbol} has {len(setups)} active setups!")
+                logger.warning(f"⚠️ CONFLICT: {symbol} has {len(setups)} active REAL setups on api_id={api_id}!")
                 for setup in setups:
                     logger.warning(f"   - {setup['setup_name']} ({setup.get('timeframe', 'N/A')})")
                 conflicts = True
         
         if conflicts:
-            raise Exception("Invalid setup configuration: Multiple timeframes detected")
+            raise Exception("Invalid setup configuration: Multiple real setups for same asset on same API key")
         
         logger.info(f"✅ Setup configuration valid - no asset conflicts")
-        logger.info(f"   Active setups: {len(all_setups)}")
+        logger.info(f"   Active setups: {len(all_setups)} ({len(real_setups)} real, {paper_count} paper)")
         for setup in all_setups:
-            logger.info(f"   • {setup['setup_name']} ({setup['asset']} @ {setup.get('timeframe', 'N/A')})")
+            mode = "🎮 PAPER" if setup.get("is_paper_trade") else "📊 REAL"
+            logger.info(f"   • {mode} {setup['setup_name']} ({setup['asset']} @ {setup.get('timeframe', 'N/A')})")
         
     except Exception as e:
         logger.error(f"❌ Configuration validation failed: {e}")
