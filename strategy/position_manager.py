@@ -143,7 +143,7 @@ class PositionManager:
                     import asyncio
                     from services.journal_service import journal_service
                     trade_data["trade_id"] = trade_id
-                    asyncio.create_task(journal_service.record_entry(client, trade_data, entry_order))
+                    asyncio.create_task(journal_service.record_entry(trade_data, entry_order))
                 except Exception as e:
                     logger.warning(f"Journal record_entry skipped: {e}")
                 
@@ -300,7 +300,7 @@ class PositionManager:
                     j_trade["trade_id"] = trade_id
                     # We pass a minimal order_response since it was filled asynchronously
                     mock_order_resp = {"id": pending_order_id, "average_fill_price": entry_price}
-                    asyncio.create_task(journal_service.record_entry(client, j_trade, mock_order_resp))
+                    asyncio.create_task(journal_service.record_entry(j_trade, mock_order_resp))
                 except Exception as e:
                     logger.warning(f"Journal record_entry (pending) skipped: {e}")
                 
@@ -546,7 +546,7 @@ class PositionManager:
                 mock_exit_resp = exit_order if 'exit_order' in locals() else None
                 if not mock_exit_resp and stop_loss_order_id:
                     mock_exit_resp = {"id": stop_loss_order_id, "average_fill_price": exit_price}
-                asyncio.create_task(journal_service.record_exit(client, trade_state, mock_exit_resp, exit_reason))
+                asyncio.create_task(journal_service.record_exit(trade_state, mock_exit_resp, exit_reason))
             except Exception as e:
                 logger.warning(f"Journal record_exit skipped: {e}")
 

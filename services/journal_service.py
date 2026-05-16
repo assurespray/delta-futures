@@ -11,9 +11,38 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
+async def _create_client_for_trade(trade_data: Dict[str, Any]):
+    """Create a fresh DeltaExchangeClient from trade_data's api_id.
+    
+    Returns (client, True) on success, (None, False) on failure.
+    The caller MUST close the client when done.
+    """
+    try:
+        from database.crud import get_api_credential_by_id
+        from api.delta_client import DeltaExchangeClient
+        api_id = trade_data.get("api_id", "")
+        if not api_id:
+            return None, False
+        cred = await get_api_credential_by_id(api_id, decrypt=True)
+        if not cred:
+            logger.warning(f"Journal: could not load credentials for api_id={api_id}")
+            return None, False
+        client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+        return client, True
+    except Exception as e:
+        logger.warning(f"Journal: failed to create client: {e}")
+        return None, False
+
+
 class JournalService:
-    async def record_entry(self, client, trade_data: Dict[str, Any], order_response: Dict[str, Any]):
-        """Background hook to accurately record a new trade entry."""
+    async def record_entry(self, trade_data: Dict[str, Any], order_response: Dict[str, Any]):
+        """Background hook to accurately record a new trade entry.
+        
+        Creates its own DeltaExchangeClient for live-trade polling so it is
+        safe to run as a fire-and-forget asyncio.create_task().
+        """
+        client = None
         try:
             trade_id = str(trade_data.get("_id") or trade_data.get("trade_id"))
             order_id = str(order_response.get("id"))
@@ -25,8 +54,12 @@ class JournalService:
                 entry_price = float(order_response.get("average_fill_price", 0))
                 entry_fee = float(order_response.get("fee", 0))
             else:
-                # Live trade — poll Delta Exchange for exact fill
-                fill_data = await get_exact_fill_details(client, order_id, product_id)
+                # Live trade — create own client and poll Delta Exchange for exact fill
+                client, ok = await _create_client_for_trade(trade_data)
+                if ok and client:
+                    fill_data = await get_exact_fill_details(client, order_id, product_id)
+                else:
+                    fill_data = None
                 
                 if fill_data and fill_data.get("state") in ["closed", "filled"]:
                     entry_price = fill_data["fill_price"]
@@ -60,9 +93,17 @@ class JournalService:
             
         except Exception as e:
             logger.error(f"Journal record_entry failed: {e}")
+        finally:
+            if client:
+                await client.close()
 
-    async def record_exit(self, client, trade_data: Dict[str, Any], exit_order_response: Dict[str, Any], exit_reason: str):
-        """Background hook to accurately record a trade exit and calculate Net PnL."""
+    async def record_exit(self, trade_data: Dict[str, Any], exit_order_response: Dict[str, Any], exit_reason: str):
+        """Background hook to accurately record a trade exit and calculate Net PnL.
+        
+        Creates its own DeltaExchangeClient for live-trade polling so it is
+        safe to run as a fire-and-forget asyncio.create_task().
+        """
+        client = None
         try:
             trade_id = str(trade_data.get("_id") or trade_data.get("trade_id"))
             product_id = trade_data.get("product_id")
@@ -82,8 +123,12 @@ class JournalService:
                 exit_price = float(exit_order_response.get("average_fill_price", 0))
                 exit_fee = float(exit_order_response.get("fee", 0))
             elif exit_order_id:
-                # Live trade — poll Delta Exchange for exact fill
-                fill_data = await get_exact_fill_details(client, exit_order_id, product_id)
+                # Live trade — create own client and poll Delta Exchange for exact fill
+                client, ok = await _create_client_for_trade(trade_data)
+                if ok and client:
+                    fill_data = await get_exact_fill_details(client, exit_order_id, product_id)
+                else:
+                    fill_data = None
                 if fill_data and fill_data.get("state") in ["closed", "filled"]:
                     exit_price = fill_data["fill_price"]
                     exit_fee = fill_data["fee"]
@@ -131,5 +176,8 @@ class JournalService:
             
         except Exception as e:
             logger.error(f"Journal record_exit failed: {e}")
+        finally:
+            if client:
+                await client.close()
 
 journal_service = JournalService()

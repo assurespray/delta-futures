@@ -111,7 +111,7 @@ class PaperTrader:
                 try:
                     from services.journal_service import journal_service
                     mock_resp = {"id": "paper_entry", "average_fill_price": live_price, "fee": entry_fee}
-                    asyncio.create_task(journal_service.record_entry(client, trade_data, mock_resp))
+                    asyncio.create_task(journal_service.record_entry(trade_data, mock_resp))
                 except Exception as e:
                     logger.warning(f"Journal record_entry (paper immediate) skipped: {e}")
                 
@@ -226,7 +226,7 @@ class PaperTrader:
             try:
                 from services.journal_service import journal_service
                 mock_exit_resp = {"id": "paper_exit", "average_fill_price": exit_price, "fee": exit_fee}
-                asyncio.create_task(journal_service.record_exit(client, trade_state, mock_exit_resp, exit_reason))
+                asyncio.create_task(journal_service.record_exit(trade_state, mock_exit_resp, exit_reason))
             except Exception as e:
                 logger.warning(f"Journal record_exit (paper) skipped: {e}")
                 
@@ -303,7 +303,7 @@ class PaperTrader:
                     trade["entry_price"] = live_price
                     trade["entry_time"] = datetime.utcnow()
                     mock_resp = {"id": "paper_pending_fill", "average_fill_price": live_price, "fee": entry_fee}
-                    asyncio.create_task(journal_service.record_entry(client, trade, mock_resp))
+                    asyncio.create_task(journal_service.record_entry(trade, mock_resp))
                 except Exception as e:
                     logger.warning(f"Journal record_entry (paper pending) skipped: {e}")
                     

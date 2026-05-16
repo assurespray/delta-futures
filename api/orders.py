@@ -21,13 +21,16 @@ async def place_order(client: DeltaExchangeClient, product_id: int, size: int,
             "size": size,
             "side": side,
             "order_type": order_type,
-            "time_in_force": "gtc",
             "reduce_only": reduce_only
         }
-        if order_type == ORDER_TYPE_LIMIT and limit_price:
+        # time_in_force: only for limit-type orders (Delta rejects gtc on market/stop-market)
+        if order_type in (ORDER_TYPE_LIMIT, ORDER_TYPE_STOP_LIMIT):
+            order_data["time_in_force"] = "gtc"
+        if limit_price and order_type in (ORDER_TYPE_LIMIT, ORDER_TYPE_STOP_LIMIT):
             order_data["limit_price"] = str(limit_price)
-        if stop_price and stop_order_type:
+        if stop_price:
             order_data["stop_price"] = str(stop_price)
+        if stop_order_type:
             order_data["stop_order_type"] = stop_order_type
         response = await client.post("/v2/orders", order_data)
         if response and response.get("success"):
@@ -61,9 +64,8 @@ async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id:
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_MARKET,
+        order_type=ORDER_TYPE_STOP_MARKET,
         stop_price=stop_price,
-        stop_order_type="stop_order",
         reduce_only=False
     )
 
@@ -83,10 +85,9 @@ async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: 
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_LIMIT,
+        order_type=ORDER_TYPE_STOP_LIMIT,
         limit_price=limit_price,
         stop_price=stop_price,
-        stop_order_type="stop_order",
         reduce_only=False
     )
 

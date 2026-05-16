@@ -115,7 +115,7 @@ async def reconcile_pending_orders(logger_bot=None):
                             trade["trade_id"] = trade_id
                             trade["exit_price"] = entry_price
                             trade["exit_time"] = datetime.utcnow()
-                            asyncio.create_task(journal_service.record_exit(client, trade, None, "Position closed externally (force-synced)"))
+                            asyncio.create_task(journal_service.record_exit(trade, None, "Position closed externally (force-synced)"))
                         except Exception as e:
                             pass
                             
