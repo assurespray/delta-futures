@@ -244,8 +244,12 @@ class ScreenerEngine:
             
             # Calculate indicators (force_recalc to avoid cache conflicts
             # when multiple screener setups process the same asset)
+            # skip_boundary_check=True because the screener loop already
+            # enforces boundary-aligned scheduling — by the time we reach
+            # here the exchange may have started the next candle, causing
+            # _is_candle_closed() to falsely reject every asset
             indicator_result = await strategy.calculate_indicators(
-                client, asset, timeframe, force_recalc=True
+                client, asset, timeframe, skip_boundary_check=True, force_recalc=True
             )
             
             if not indicator_result:
