@@ -3,7 +3,7 @@
 
 This project is indexed by GitNexus as **delta-futures** (2729 symbols, 4853 relationships, 172 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> **CRITICAL:** This is a Termux proot environment. If the index is stale, you MUST run `gitnexus-proot analyze` in terminal first (never use npx or gitnexus directly, or it will cause a memory corruption crash).
 
 ## Always Do
 
