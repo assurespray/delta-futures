@@ -104,7 +104,7 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     user_id = str(query.from_user.id)
 
-    api_name = query.data.replace("lj_api_", "")
+    api_name = query.data.replace("lj_api_", "") if query.data.startswith("lj_api_") else context.user_data.get('lj_current_api', '')
     context.user_data['lj_current_api'] = api_name
     context.user_data.pop('lj_current_strategy', None)
     context.user_data.pop('lj_current_asset', None)
@@ -157,17 +157,22 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]))
         return
 
-    data = query.data.replace("lj_strat_", "")
-    page = 0
-    if ":p" in data:
-        parts = data.rsplit(":p", 1)
-        strategy = parts[0]
-        try:
-            page = int(parts[1])
-        except:
-            page = 0
+    if query.data.startswith("lj_strat_"):
+        data = query.data.replace("lj_strat_", "")
+        page = 0
+        if ":p" in data:
+            parts = data.rsplit(":p", 1)
+            strategy = parts[0]
+            try:
+                page = int(parts[1])
+            except:
+                page = 0
+        else:
+            strategy = data
     else:
-        strategy = data
+        # Called from set_dir redirect — use stored context
+        strategy = context.user_data.get('lj_current_strategy', '')
+        page = 0
 
     context.user_data['lj_current_strategy'] = strategy
     context.user_data.pop('lj_current_asset', None)
@@ -236,12 +241,18 @@ async def journal_asset_callback(update: Update, context: ContextTypes.DEFAULT_T
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data="journal_dashboard")]]))
         return
 
-    data = query.data.replace("lj_asset_", "")
-    parts = data.rsplit("_", 1)
-    if len(parts) != 2:
-        await query.edit_message_text("Error parsing asset.")
-        return
-    strategy, asset = parts[0], parts[1]
+    if query.data.startswith("lj_asset_"):
+        data = query.data.replace("lj_asset_", "")
+        parts = data.rsplit("_", 1)
+        if len(parts) != 2:
+            await query.edit_message_text("Error parsing asset.")
+            return
+        strategy, asset = parts[0], parts[1]
+    else:
+        # Called from set_dir redirect — use stored context
+        strategy = context.user_data.get('lj_current_strategy', '')
+        asset = context.user_data.get('lj_current_asset', '')
+
     context.user_data['lj_current_strategy'] = strategy
     context.user_data['lj_current_asset'] = asset
 
@@ -450,17 +461,23 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     user_id = str(query.from_user.id)
     
-    data = query.data.replace("pj_strat_", "")
-    page = 0
-    if ":p" in data:
-        parts = data.rsplit(":p", 1)
-        strategy = parts[0]
-        try:
-            page = int(parts[1])
-        except:
-            page = 0
+    if query.data.startswith("pj_strat_"):
+        data = query.data.replace("pj_strat_", "")
+        page = 0
+        if ":p" in data:
+            parts = data.rsplit(":p", 1)
+            strategy = parts[0]
+            try:
+                page = int(parts[1])
+            except:
+                page = 0
+        else:
+            strategy = data
     else:
-        strategy = data
+        # Called from set_dir redirect — use stored context
+        strategy = context.user_data.get('pj_current_strategy', '')
+        page = 0
+
     context.user_data['pj_current_strategy'] = strategy
     context.user_data.pop('pj_current_asset', None)
 
@@ -523,12 +540,18 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     user_id = str(query.from_user.id)
     
-    data = query.data.replace("pj_asset_", "")
-    parts = data.rsplit("_", 1)
-    if len(parts) != 2:
-        await query.edit_message_text("Error parsing asset.")
-        return
-    strategy, asset = parts[0], parts[1]
+    if query.data.startswith("pj_asset_"):
+        data = query.data.replace("pj_asset_", "")
+        parts = data.rsplit("_", 1)
+        if len(parts) != 2:
+            await query.edit_message_text("Error parsing asset.")
+            return
+        strategy, asset = parts[0], parts[1]
+    else:
+        # Called from set_dir redirect — use stored context
+        strategy = context.user_data.get('pj_current_strategy', '')
+        asset = context.user_data.get('pj_current_asset', '')
+
     context.user_data['pj_current_strategy'] = strategy
     context.user_data['pj_current_asset'] = asset
     
@@ -815,16 +838,12 @@ async def journal_set_dir_callback(update: Update, context: ContextTypes.DEFAULT
     api_name = context.user_data.get('lj_current_api')
 
     if strategy and asset:
-        query.data = f"lj_asset_{strategy}_{asset}"
         await journal_asset_callback(update, context)
     elif strategy:
-        query.data = f"lj_strat_{strategy}"
         await journal_strategy_callback(update, context)
     elif api_name:
-        query.data = f"lj_api_{api_name}"
         await journal_api_callback(update, context)
     else:
-        query.data = "journal_dashboard"
         await journal_dashboard_callback(update, context)
 
 
@@ -841,11 +860,8 @@ async def pjournal_set_dir_callback(update: Update, context: ContextTypes.DEFAUL
     asset = context.user_data.get('pj_current_asset')
 
     if strategy and asset:
-        query.data = f"pj_asset_{strategy}_{asset}"
         await pjournal_asset_callback(update, context)
     elif strategy:
-        query.data = f"pj_strat_{strategy}"
         await pjournal_strategy_callback(update, context)
     else:
-        query.data = "paper_journal_dashboard"
         await paper_journal_dashboard_callback(update, context)
