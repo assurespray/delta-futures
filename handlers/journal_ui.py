@@ -22,6 +22,25 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _get_dir_filter_row(prefix: str, current_dir: str) -> list:
+    """Generate direction filter button row. prefix='lj' or 'pj'."""
+    options = [("all", "Both"), ("long", "Long"), ("short", "Short")]
+    row = []
+    for val, label in options:
+        check = "✅ " if current_dir == val else ""
+        row.append(InlineKeyboardButton(f"{check}{label}", callback_data=f"{prefix}_set_dir_{val}"))
+    return row
+
+
+def _dir_label(current_dir: str) -> str:
+    """Return a header line indicating active direction filter."""
+    if current_dir == "long":
+        return "📗 Showing: Long trades only\n"
+    elif current_dir == "short":
+        return "📕 Showing: Short trades only\n"
+    return ""
+
+
 # ============================================================
 # LIVE JOURNAL (is_paper_trade=False) — 4-Tier Drill-Down
 # Level 1: Overall → Level 2: API → Level 3: Strategy → Level 4: Asset
@@ -38,7 +57,8 @@ async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAU
     context.user_data.pop('lj_current_strategy', None)
     context.user_data.pop('lj_current_asset', None)
 
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False)
+    current_dir = context.user_data.get('lj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, direction=current_dir)
 
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -49,7 +69,8 @@ async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAU
     fees = sum(t.get("total_fees", 0) for t in trades)
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
 
-    header = "📊 **Live Trade Journal (Overall)**\n\n"
+    header = "📊 **Live Trade Journal (Overall)**\n"
+    header += _dir_label(current_dir) + "\n"
 
     if total_trades == 0:
         msg = header + "No recorded live trades found."
@@ -62,8 +83,8 @@ async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAU
         msg += "Select an API below to view its performance:"
 
     # Build API list keyboard
-    api_names = await journal_ops.get_traded_api_names(user_id, is_paper_trade=False)
-    keyboard = []
+    api_names = await journal_ops.get_traded_api_names(user_id, is_paper_trade=False, direction=current_dir)
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
 
     for api in api_names:
         keyboard.append([InlineKeyboardButton(f"🔑 {api}", callback_data=f"lj_api_{api}")])
@@ -88,7 +109,8 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('lj_current_strategy', None)
     context.user_data.pop('lj_current_asset', None)
 
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, api_name=api_name)
+    current_dir = context.user_data.get('lj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
 
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -99,7 +121,8 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     fees = sum(t.get("total_fees", 0) for t in trades)
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
 
-    msg = f"🔑 **API:** {api_name}\n\n"
+    msg = f"🔑 **API:** {api_name}\n"
+    msg += _dir_label(current_dir) + "\n"
 
     if total_trades == 0:
         msg += "No trades found for this API."
@@ -110,8 +133,8 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
         msg += "Select a Strategy below:"
 
-    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name)
-    keyboard = []
+    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
 
     for strat in strategies:
         keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
@@ -149,7 +172,8 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
     context.user_data['lj_current_strategy'] = strategy
     context.user_data.pop('lj_current_asset', None)
 
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, strategy=strategy, api_name=api_name)
+    current_dir = context.user_data.get('lj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, strategy=strategy, api_name=api_name, direction=current_dir)
 
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -159,12 +183,13 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
 
     msg = f"🔑 **API:** {api_name}\n"
-    msg += f"📁 **Strategy:** {strategy}\n\n"
+    msg += f"📁 **Strategy:** {strategy}\n"
+    msg += _dir_label(current_dir) + "\n"
     msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
     msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
     msg += "Select an asset below:"
 
-    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=False, api_name=api_name)
+    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=False, api_name=api_name, direction=current_dir)
 
     ASSETS_PER_PAGE = 14
     total_assets = len(assets)
@@ -175,7 +200,7 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
     end = min(start + ASSETS_PER_PAGE, total_assets)
     page_assets = assets[start:end]
 
-    keyboard = []
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
 
     row = []
     for asset in page_assets:
@@ -220,7 +245,8 @@ async def journal_asset_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data['lj_current_strategy'] = strategy
     context.user_data['lj_current_asset'] = asset
 
-    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=False, strategy=strategy, api_name=api_name)
+    current_dir = context.user_data.get('lj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=False, strategy=strategy, api_name=api_name, direction=current_dir)
 
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -233,7 +259,8 @@ async def journal_asset_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     msg = f"🔑 **API:** {api_name}\n"
     msg += f"📁 **Strategy:** {strategy}\n"
-    msg += f"🪙 **Asset:** {asset}\n\n"
+    msg += f"🪙 **Asset:** {asset}\n"
+    msg += _dir_label(current_dir) + "\n"
 
     if total_trades == 0:
         msg += "No trades found."
@@ -244,6 +271,7 @@ async def journal_asset_callback(update: Update, context: ContextTypes.DEFAULT_T
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
     keyboard = [
+        _get_dir_filter_row("lj", current_dir),
         [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="journal_recent_15")],
         [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"lj_strat_{strategy}")]
     ]
@@ -259,10 +287,11 @@ async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_
     api_name = context.user_data.get('lj_current_api')
     strategy = context.user_data.get('lj_current_strategy')
     asset = context.user_data.get('lj_current_asset')
+    current_dir = context.user_data.get('lj_direction', 'all')
 
     trades = await journal_ops.get_recent_trades(
         user_id, limit=15, is_paper_trade=False,
-        strategy=strategy, asset=asset, api_name=api_name
+        strategy=strategy, asset=asset, api_name=api_name, direction=current_dir
     )
 
     # Determine back button based on drill-down level
@@ -312,12 +341,13 @@ async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends a CSV of all live trades."""
+    """Generates and sends a CSV of all live trades (respects direction filter)."""
     query = update.callback_query
     await query.answer("Generating CSV...")
     user_id = str(query.from_user.id)
 
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False)
+    current_dir = context.user_data.get('lj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, direction=current_dir)
     if not trades:
         await context.bot.send_message(chat_id=query.message.chat_id, text="No live trades to export.")
         return
@@ -374,7 +404,8 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
     context.user_data.pop('pj_current_strategy', None)
     context.user_data.pop('pj_current_asset', None)
     
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, direction=current_dir)
     
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -385,7 +416,8 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
     fees = sum(t.get("total_fees", 0) for t in trades)
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
     
-    header = f"📄 **Paper Trade Journal (Overall)**\n\n"
+    header = f"📄 **Paper Trade Journal (Overall)**\n"
+    header += _dir_label(current_dir) + "\n"
     
     if total_trades == 0:
         msg = header + "No recorded paper trades found."
@@ -397,8 +429,8 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
         msg += "Select a Strategy below to view its specific performance:"
 
-    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True)
-    keyboard = []
+    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
     
     for strat in strategies:
         keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"pj_strat_{strat}")])
@@ -432,7 +464,8 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     context.user_data['pj_current_strategy'] = strategy
     context.user_data.pop('pj_current_asset', None)
 
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, strategy=strategy)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, strategy=strategy, direction=current_dir)
     
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -443,12 +476,13 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     fees = sum(t.get("total_fees", 0) for t in trades)
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
     
-    msg = f"📁 **Strategy:** {strategy}\n\n"
+    msg = f"📁 **Strategy:** {strategy}\n"
+    msg += _dir_label(current_dir) + "\n"
     msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
     msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
     msg += "Select an asset below:"
 
-    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True)
+    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True, direction=current_dir)
     
     ASSETS_PER_PAGE = 14
     total_assets = len(assets)
@@ -459,7 +493,7 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     end = min(start + ASSETS_PER_PAGE, total_assets)
     page_assets = assets[start:end]
     
-    keyboard = []
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
     keyboard.append([InlineKeyboardButton("🔍 Search Asset", callback_data=f"pj_search_start_{strategy}")])
     
     row = []
@@ -498,7 +532,8 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['pj_current_strategy'] = strategy
     context.user_data['pj_current_asset'] = asset
     
-    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy, direction=current_dir)
     
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -510,7 +545,8 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
     net_pnl = sum(t.get("net_pnl", 0) for t in trades)
     
     msg = f"🪙 **Asset:** {asset}\n"
-    msg += f"📁 **Strategy:** {strategy}\n\n"
+    msg += f"📁 **Strategy:** {strategy}\n"
+    msg += _dir_label(current_dir) + "\n"
     
     if total_trades == 0:
         msg += "No trades found."
@@ -521,6 +557,7 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
     keyboard = [
+        _get_dir_filter_row("pj", current_dir),
         [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
         [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]
     ]
@@ -554,7 +591,7 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         await update.message.reply_text("❌ Session expired. Use /start to return to menu.")
         return ConversationHandler.END
         
-    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True)
+    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True, direction=context.user_data.get('pj_direction', 'all'))
     
     matches = [a for a in assets if search_term in a.upper()]
     
@@ -576,7 +613,7 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         context.user_data['pj_current_strategy'] = strategy
         context.user_data['pj_current_asset'] = asset
         
-        trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy)
+        trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, strategy=strategy, direction=context.user_data.get('pj_direction', 'all'))
         total_trades = len(trades)
         wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
         losses = total_trades - wins
@@ -587,7 +624,8 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         
         msg = f"✅ Match found: **{asset}**\n\n"
         msg += f"🪙 **Asset:** {asset}\n"
-        msg += f"📁 **Strategy:** {strategy}\n\n"
+        msg += f"📁 **Strategy:** {strategy}\n"
+        msg += _dir_label(context.user_data.get('pj_direction', 'all')) + "\n"
         msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
@@ -663,8 +701,9 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
     
     strategy = context.user_data.get('pj_current_strategy')
     asset = context.user_data.get('pj_current_asset')
+    current_dir = context.user_data.get('pj_direction', 'all')
     
-    trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=True, strategy=strategy, asset=asset)
+    trades = await journal_ops.get_recent_trades(user_id, limit=15, is_paper_trade=True, strategy=strategy, asset=asset, direction=current_dir)
     
     if strategy and asset:
         back_btn = f"pj_asset_{strategy}_{asset}"
@@ -706,7 +745,7 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def paper_journal_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends a CSV of all paper trades."""
+    """Generates and sends a CSV of all paper trades (respects direction filter)."""
     query = update.callback_query
     await query.answer("Generating CSV...")
     user_id = str(query.from_user.id)
@@ -714,7 +753,8 @@ async def paper_journal_export_callback(update: Update, context: ContextTypes.DE
     context.user_data.pop('pj_current_strategy', None)
     context.user_data.pop('pj_current_asset', None)
     
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, direction=current_dir)
     if not trades:
         await context.bot.send_message(chat_id=query.message.chat_id, text="No paper trades to export.")
         return
@@ -755,3 +795,57 @@ async def paper_journal_export_callback(update: Update, context: ContextTypes.DE
         filename=filename,
         caption="📄 Here is your complete Paper Trade Journal export."
     )
+
+
+# ============================================================
+# DIRECTION FILTER TOGGLE CALLBACKS
+# ============================================================
+
+async def journal_set_dir_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle direction filter for Live Journal and re-render current view."""
+    query = update.callback_query
+    await query.answer()
+
+    new_dir = query.data.replace("lj_set_dir_", "")
+    context.user_data['lj_direction'] = new_dir
+
+    # Re-render the current view by determining drill-down level
+    strategy = context.user_data.get('lj_current_strategy')
+    asset = context.user_data.get('lj_current_asset')
+    api_name = context.user_data.get('lj_current_api')
+
+    if strategy and asset:
+        query.data = f"lj_asset_{strategy}_{asset}"
+        await journal_asset_callback(update, context)
+    elif strategy:
+        query.data = f"lj_strat_{strategy}"
+        await journal_strategy_callback(update, context)
+    elif api_name:
+        query.data = f"lj_api_{api_name}"
+        await journal_api_callback(update, context)
+    else:
+        query.data = "journal_dashboard"
+        await journal_dashboard_callback(update, context)
+
+
+async def pjournal_set_dir_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle direction filter for Paper Journal and re-render current view."""
+    query = update.callback_query
+    await query.answer()
+
+    new_dir = query.data.replace("pj_set_dir_", "")
+    context.user_data['pj_direction'] = new_dir
+
+    # Re-render the current view by determining drill-down level
+    strategy = context.user_data.get('pj_current_strategy')
+    asset = context.user_data.get('pj_current_asset')
+
+    if strategy and asset:
+        query.data = f"pj_asset_{strategy}_{asset}"
+        await pjournal_asset_callback(update, context)
+    elif strategy:
+        query.data = f"pj_strat_{strategy}"
+        await pjournal_strategy_callback(update, context)
+    else:
+        query.data = "paper_journal_dashboard"
+        await paper_journal_dashboard_callback(update, context)

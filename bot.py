@@ -435,11 +435,14 @@ def create_application() -> Application:
         journal_dashboard_callback, journal_api_callback,
         journal_strategy_callback, journal_asset_callback,
         journal_recent_callback, journal_export_callback,
+        journal_set_dir_callback,
         paper_journal_dashboard_callback, paper_journal_recent_callback, paper_journal_export_callback,
-        pjournal_reset_start_callback, pjournal_reset_execute_callback
+        pjournal_reset_start_callback, pjournal_reset_execute_callback,
+        pjournal_set_dir_callback
     )
     # Live Journal — 4-tier: Overall → API → Strategy → Asset
     application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
+    application.add_handler(CallbackQueryHandler(journal_set_dir_callback, pattern="^lj_set_dir_"))
     application.add_handler(CallbackQueryHandler(journal_api_callback, pattern="^lj_api_"))
     application.add_handler(CallbackQueryHandler(journal_strategy_callback, pattern="^lj_strat_"))
     application.add_handler(CallbackQueryHandler(journal_asset_callback, pattern="^lj_asset_"))
@@ -451,6 +454,7 @@ def create_application() -> Application:
         pjournal_search_start_callback, pjournal_search_receive_callback
     )
     application.add_handler(CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^paper_journal_dashboard$"))
+    application.add_handler(CallbackQueryHandler(pjournal_set_dir_callback, pattern="^pj_set_dir_"))
     application.add_handler(CallbackQueryHandler(pjournal_strategy_callback, pattern="^pj_strat_"))
     application.add_handler(CallbackQueryHandler(pjournal_asset_callback, pattern="^pj_asset_"))
     application.add_handler(CallbackQueryHandler(paper_journal_recent_callback, pattern="^pjournal_recent_15$"))
