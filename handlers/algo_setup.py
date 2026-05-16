@@ -494,7 +494,7 @@ async def algo_view_detail_callback(update: Update, context: ContextTypes.DEFAUL
     
     status_emoji = "🟢 Active" if setup.get('is_active', False) else "🔴 Inactive"
     open_trade = await get_open_trade_by_setup(setup_id)
-    position_text = open_trade["current_position"].title() if open_trade else "None"
+    position_text = open_trade.get("direction", "none").title() if open_trade else "None"
     
     message = f"📋 **Algo Setup Details**\n\n"
     message += f"**Name:** {setup['setup_name']}\n"

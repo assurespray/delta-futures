@@ -897,7 +897,7 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
     for setup in algo_setups:
         status = "Active" if setup.get("is_active") else "Inactive"
         open_trade = await get_open_trade_by_setup(str(setup["_id"]))
-        position = open_trade["current_position"] if open_trade else None
+        position = open_trade.get("direction") if open_trade else None
         pos_text = f" | {position.upper()}" if position else ""
         
         message += (
@@ -961,9 +961,9 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     if setup_type == "algo":
         open_trade = await get_open_trade_by_setup(setup_id)
-        position = open_trade["current_position"] if open_trade else "None"
-        entry_price = open_trade["entry_price"] if open_trade else None
-        sl_price = open_trade["pending_sl_price"] if open_trade else None
+        position = open_trade.get("direction", "None") if open_trade else "None"
+        entry_price = open_trade.get("entry_price") if open_trade else None
+        sl_price = open_trade.get("pending_sl_price") if open_trade else None
         
         message = (
             f"**{label} {setup['setup_name']}**\n\n"
