@@ -39,26 +39,48 @@ def _format_asset_line(c: dict) -> str:
     tf = c["timeframe"]
     price = c.get("current_price", 0.0)
 
-    p_sig_val = c.get("primary_signal", c.get("perusu_signal", 0))
-    s_sig_val = c.get("secondary_signal", c.get("sirusu_signal", 0))
-    p_val = c.get("primary_value", c.get("perusu_value", 0.0))
-    s_val = c.get("secondary_value", c.get("sirusu_value", 0.0))
-    p_name = c.get("primary_name", "Primary")
-    s_name = c.get("secondary_name", "Secondary")
-
-    p_sig = "🔵 UP" if p_sig_val == 1 else ("🔴 DOWN" if p_sig_val == -1 else "⚪ NEUTRAL")
-    s_sig = "🔵 UP" if s_sig_val == 1 else ("🔴 DOWN" if s_sig_val == -1 else "⚪ NEUTRAL")
-
     calc_time = c["calculated_at"]
     age_sec = (datetime.utcnow() - calc_time).total_seconds()
     age_str = f"{int(age_sec)}s ago" if age_sec < 60 else f"{int(age_sec // 60)}m ago"
 
     line = f"  • **{asset}** ({tf}) - ${price:.4f} `[{age_str}]`\n"
-    if p_val == s_val and p_sig_val == s_sig_val:
-        line += f"    └ Signal: {p_sig} (${p_val:.4f})\n"
+
+    # Use display_details if available (dynamic per-strategy details)
+    details = c.get("display_details")
+    if details:
+        items = list(details.items())
+        for i, (key, val) in enumerate(items):
+            connector = "└" if i == len(items) - 1 else "├"
+            if isinstance(val, float):
+                # Auto-detect decimal places from price magnitude
+                if val >= 100:
+                    formatted = f"${val:.2f}"
+                elif val >= 1:
+                    formatted = f"${val:.4f}"
+                elif val > 0:
+                    formatted = f"${val:.6f}"
+                else:
+                    formatted = f"${val:.4f}"
+                line += f"    {connector} {key}: {formatted}\n"
+            else:
+                line += f"    {connector} {key}: {val}\n"
     else:
-        line += f"    ├ {p_name}: {p_sig} (${p_val:.4f})\n"
-        line += f"    └ {s_name}: {s_sig} (${s_val:.4f})\n"
+        # Fallback: legacy primary/secondary format
+        p_sig_val = c.get("primary_signal", 0)
+        s_sig_val = c.get("secondary_signal", 0)
+        p_val = c.get("primary_value", 0.0)
+        s_val = c.get("secondary_value", 0.0)
+        p_name = c.get("primary_name", "Primary")
+        s_name = c.get("secondary_name", "Secondary")
+
+        p_sig = "🔵 UP" if p_sig_val == 1 else ("🔴 DOWN" if p_sig_val == -1 else "⚪ NEUTRAL")
+        s_sig = "🔵 UP" if s_sig_val == 1 else ("🔴 DOWN" if s_sig_val == -1 else "⚪ NEUTRAL")
+
+        if p_val == s_val and p_sig_val == s_sig_val:
+            line += f"    └ Signal: {p_sig} (${p_val:.4f})\n"
+        else:
+            line += f"    ├ {p_name}: {p_sig} (${p_val:.4f})\n"
+            line += f"    └ {s_name}: {s_sig} (${s_val:.4f})\n"
     return line
 
 

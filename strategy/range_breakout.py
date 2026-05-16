@@ -214,6 +214,13 @@ class RangeBreakoutStrategy(BaseStrategy):
         data = indicators_data.get("range_data", {})
         signal = data.get("signal", 0)
         ema = data.get("ema", 0.0)
+        up = data.get("up", 0.0)
+        down = data.get("down", 0.0)
+        mid = data.get("mid", 0.0)
+        range_count = data.get("range_count", 0)
+        trend_phase = data.get("trend_phase", 0)
+        trend_emoji = "🔵 Long" if trend_phase == 1 else "🔴 Short"
+        signal_text = data.get("signal_text", "Neutral")
         return {
             "current_price": indicators_data.get("current_price", 0.0),
             "primary_name": "Range Breakout",
@@ -224,5 +231,14 @@ class RangeBreakoutStrategy(BaseStrategy):
             "secondary_signal": signal if signal != 0 else 1,
             "secondary_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
             "secondary_value": ema,
-            "strategy_state": {}
+            "strategy_state": {},
+            "display_details": {
+                "Signal": signal_text,
+                "Trend": trend_emoji,
+                "EMA": ema,
+                "Range Upper": up,
+                "Range Lower": down,
+                "Range Mid": mid,
+                "Range Length": f"{range_count} candles",
+            }
         }

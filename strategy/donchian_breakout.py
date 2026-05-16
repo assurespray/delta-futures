@@ -351,17 +351,27 @@ class DonchianBreakoutStrategy(BaseStrategy):
         signal = dc.get("signal", 0)
         # For UI: map breakout signals to 1/-1, inside channel defaults to 1 (neutral/bullish)
         ui_signal = signal if signal != 0 else 1
+        upper = dc.get("upper", 0.0)
+        lower = dc.get("lower", 0.0)
+        middle = dc.get("middle", 0.0)
+        signal_text = dc.get("signal_text", "Inside Channel")
         return {
             "current_price": indicators_data.get("current_price", 0.0),
             "primary_name": f"Donchian({self.period})",
             "primary_signal": ui_signal,
-            "primary_signal_text": dc.get("signal_text", "Inside Channel"),
-            "primary_value": dc.get("upper", 0.0),
+            "primary_signal_text": signal_text,
+            "primary_value": upper,
             "secondary_name": "DC Middle",
             "secondary_signal": ui_signal,
-            "secondary_signal_text": dc.get("signal_text", "Inside Channel"),
-            "secondary_value": dc.get("middle", 0.0),
+            "secondary_signal_text": signal_text,
+            "secondary_value": middle,
             "strategy_state": {
                 "primary_signal": signal,
+            },
+            "display_details": {
+                "Signal": signal_text,
+                "Upper": upper,
+                "Lower": lower,
+                "Middle (SL)": middle,
             }
         }

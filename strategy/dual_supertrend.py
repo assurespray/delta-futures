@@ -365,17 +365,31 @@ class DualSuperTrendStrategy(BaseStrategy):
         """Map Dual ST results to IndicatorCache fields."""
         perusu = indicators_data.get("perusu", {})
         sirusu = indicators_data.get("sirusu", {})
+        p_signal = perusu.get("signal", 0)
+        s_signal = sirusu.get("signal", 0)
+        p_val = perusu.get("supertrend_value", 0.0)
+        s_val = sirusu.get("supertrend_value", 0.0)
+        p_text = perusu.get("signal_text", "Unknown")
+        s_text = sirusu.get("signal_text", "Unknown")
+        p_emoji = "🔵" if p_signal == 1 else "🔴"
+        s_emoji = "🔵" if s_signal == 1 else "🔴"
         return {
             "current_price": indicators_data.get("current_price", 0.0),
             "primary_name": "Perusu",
-            "primary_signal": perusu.get("signal", 0),
-            "primary_signal_text": perusu.get("signal_text", "Unknown"),
-            "primary_value": perusu.get("supertrend_value", 0.0),
+            "primary_signal": p_signal,
+            "primary_signal_text": p_text,
+            "primary_value": p_val,
             "secondary_name": "Sirusu",
-            "secondary_signal": sirusu.get("signal", 0),
-            "secondary_signal_text": sirusu.get("signal_text", "Unknown"),
-            "secondary_value": sirusu.get("supertrend_value", 0.0),
+            "secondary_signal": s_signal,
+            "secondary_signal_text": s_text,
+            "secondary_value": s_val,
             "strategy_state": {
-                "primary_signal": perusu.get("signal", 0),
+                "primary_signal": p_signal,
+            },
+            "display_details": {
+                f"Perusu ST": f"{p_emoji} {p_text} @ ${p_val}",
+                f"Sirusu ST": f"{s_emoji} {s_text} @ ${s_val}",
+                "ATR (Perusu)": perusu.get("atr", 0.0),
+                "ATR (Sirusu)": sirusu.get("atr", 0.0),
             }
         }

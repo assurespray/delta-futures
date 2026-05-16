@@ -195,6 +195,11 @@ class IndicatorCache(BaseModel):
     # Each strategy stores whatever it needs here (e.g., {"primary_signal": 1})
     strategy_state: dict = Field(default_factory=dict)
     
+    # Dynamic indicator details for dashboard display
+    # Each strategy populates this with all important values for cross-checking
+    # e.g., {"Upper": 77958.5, "Lower": 77832.5, "Mid": 77895.5, "Signal": "Inside Channel"}
+    display_details: dict = Field(default_factory=dict)
+    
     calculated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:

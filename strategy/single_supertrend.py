@@ -265,17 +265,26 @@ class SingleSuperTrendStrategy(BaseStrategy):
     def get_cache_mapping(self, indicators_data: Dict[str, Any]) -> Dict[str, Any]:
         """Map Single ST results to IndicatorCache fields."""
         st = indicators_data.get("single_st", {})
+        signal = st.get("signal", 0)
+        st_val = st.get("supertrend_value", 0.0)
+        signal_text = st.get("signal_text", "Unknown")
+        atr = st.get("atr", 0.0)
+        emoji = "🔵" if signal == 1 else "🔴"
         return {
             "current_price": indicators_data.get("current_price", 0.0),
             "primary_name": "Single ST",
-            "primary_signal": st.get("signal", 0),
-            "primary_signal_text": st.get("signal_text", "Unknown"),
-            "primary_value": st.get("supertrend_value", 0.0),
+            "primary_signal": signal,
+            "primary_signal_text": signal_text,
+            "primary_value": st_val,
             "secondary_name": "Single ST",
-            "secondary_signal": st.get("signal", 0),
-            "secondary_signal_text": st.get("signal_text", "Unknown"),
-            "secondary_value": st.get("supertrend_value", 0.0),
+            "secondary_signal": signal,
+            "secondary_signal_text": signal_text,
+            "secondary_value": st_val,
             "strategy_state": {
-                "primary_signal": st.get("signal", 0),
+                "primary_signal": signal,
+            },
+            "display_details": {
+                "SuperTrend": f"{emoji} {signal_text} @ ${st_val}",
+                "ATR": atr,
             }
         }

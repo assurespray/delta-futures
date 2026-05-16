@@ -210,6 +210,7 @@ class ScreenerEngine:
             "secondary_signal_text": mapping["secondary_signal_text"],
             "secondary_value": mapping["secondary_value"],
             "strategy_state": mapping.get("strategy_state", {}),
+            "display_details": mapping.get("display_details", {}),
         }
     
     async def check_new_asset_entry(
