@@ -119,36 +119,74 @@ class ScreenerEngine:
     async def filter_assets(
         self,
         screener_assets: List[str],
-        screener_setup_id: str
+        screener_setup: Dict
     ) -> List[str]:
         """
-        Filter assets based on:
-        1. Not in any algo setup (regardless of timeframe)
-        2. Not in any other screener position (first-come-first-served)
+        Filter assets for a screener setup.
+        
+        Paper screeners: bypass ALL collision checks — multiple paper setups
+        (individual + screener) can trade the same asset simultaneously.
+        Only skip assets already open/pending in THIS SAME screener setup.
+        
+        Real screeners: 
+        1. Skip assets in real algo setups on the SAME api_id
+        2. Skip assets with open/pending screener trades on the SAME api_id
+           (first-come-first-served across real screeners sharing an API key)
         """
         allowed_assets = []
+        setup_id = str(screener_setup["_id"])
+        is_paper = screener_setup.get("is_paper_trade", False)
+        api_id = screener_setup.get("api_id", "")
         
-        # Get all algo assets
-        algo_setups = await get_all_active_algo_setups()
-        algo_assets = {setup.get("asset") for setup in algo_setups}
-        
-        for asset in screener_assets:
-            # Filter algo assets
-            if asset in algo_assets:
-                logger.warning(f"SKIP {asset}: Already in algo setup")
-                continue
-            
-            # Filter assets with existing screener positions (first-come-first-served)
-            existing_positions = await get_screener_positions_by_asset(asset)
-            if existing_positions:
-                logger.warning(
-                    f"SKIP {asset}: Already in screener position "
-                    f"({existing_positions[0].get('screener_setup_name')})"
+        if is_paper:
+            # ── Paper mode: only skip assets already in THIS screener ──
+            for asset in screener_assets:
+                existing = await get_screener_positions_by_asset(
+                    asset, is_paper=True
                 )
-                continue
+                # Only block if THIS screener already has an open/pending trade
+                already_in_this = any(
+                    t.get("setup_id") == setup_id for t in existing
+                )
+                if already_in_this:
+                    logger.info(f"SKIP {asset}: Already in this paper screener")
+                    continue
+                
+                allowed_assets.append(asset)
+                logger.info(f"ALLOWED (paper): {asset}")
+        else:
+            # ── Real mode: API-aware isolation ──
+            # Get only REAL algo setups on the SAME api_id
+            all_algo = await get_all_active_algo_setups()
+            algo_assets = {
+                setup.get("asset")
+                for setup in all_algo
+                if not setup.get("is_paper_trade", False)
+                and setup.get("api_id") == api_id
+            }
             
-            allowed_assets.append(asset)
-            logger.info(f"ALLOWED: {asset}")
+            for asset in screener_assets:
+                # 1) Skip if a real algo setup on same API is trading this asset
+                if asset in algo_assets:
+                    logger.warning(
+                        f"SKIP {asset}: In real algo setup (api_id={api_id})"
+                    )
+                    continue
+                
+                # 2) Skip if another real screener on same API already has it
+                existing = await get_screener_positions_by_asset(
+                    asset, is_paper=False, api_id=api_id
+                )
+                if existing:
+                    logger.warning(
+                        f"SKIP {asset}: Already in real screener "
+                        f"({existing[0].get('setup_name', '?')}) "
+                        f"(api_id={api_id})"
+                    )
+                    continue
+                
+                allowed_assets.append(asset)
+                logger.info(f"ALLOWED (real): {asset}")
         
         return allowed_assets
     
@@ -383,7 +421,7 @@ class ScreenerEngine:
                 return
             
             # Filter assets
-            allowed_assets = await self.filter_assets(screener_assets, setup_id)
+            allowed_assets = await self.filter_assets(screener_assets, screener_setup)
             logger.info(f"   Allowed assets: {len(allowed_assets)}")
             
             if not allowed_assets:

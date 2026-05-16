@@ -335,11 +335,13 @@ async def journal_recent_callback(update: Update, context: ContextTypes.DEFAULT_
         direction = t.get('direction', '?').upper()
         pnl = t.get('net_pnl', 0)
         emoji = "🟢" if pnl > 0 else "🔴"
+        setup_name = t.get('strategy_name') or t.get('setup_name') or '?'
 
         entry_time = to_ist_str(t.get('entry_time'))
         exit_time = to_ist_str(t.get('exit_time'))
 
         msg += f"{emoji} **{t_asset}** ({direction}) | ${pnl:.2f}\n"
+        msg += f"   Setup: {setup_name}\n"
         msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
         msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
 
@@ -752,11 +754,13 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
         direction = t.get('direction', '?').upper()
         pnl = t.get('net_pnl', 0)
         emoji = "🟢" if pnl > 0 else "🔴"
+        setup_name = t.get('strategy_name') or t.get('setup_name') or '?'
         
         entry_time = to_ist_str(t.get('entry_time'))
         exit_time = to_ist_str(t.get('exit_time'))
         
         msg += f"{emoji} **{t_asset}** ({direction}) | ${pnl:.2f}\n"
+        msg += f"   Setup: {setup_name}\n"
         msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
         msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
         

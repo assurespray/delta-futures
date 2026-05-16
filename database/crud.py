@@ -846,15 +846,34 @@ async def delete_position_lock(symbol: str = None) -> int:
         logger.debug(f"delete_position_lock deleted ALL locks, deleted_count={result.deleted_count}")
         return result.deleted_count
         
-async def get_screener_positions_by_asset(asset: str):
-    """Get all open screener positions for an asset."""
+async def get_screener_positions_by_asset(
+    asset: str,
+    is_paper: bool = None,
+    api_id: str = None
+) -> list:
+    """Get all open/pending screener trade states for an asset.
+    
+    Queries `trade_states` (not the deprecated `positions` collection).
+    
+    Args:
+        asset: Asset symbol (e.g., "BTCUSD")
+        is_paper: Filter by paper/real mode. None = all.
+        api_id: Filter by API credential ID. None = all.
+    """
     db = await get_db()
-    positions = await db.positions.find({
+    query = {
         "asset": asset,
-        "status": "open",
-        "source": "screener"
-    }).to_list(None)
-    return positions
+        "status": {"$in": ["open", "pending_entry"]},
+        "setup_type": "screener"
+    }
+    if is_paper is not None:
+        query["is_paper_trade"] = is_paper
+    if api_id is not None:
+        query["api_id"] = api_id
+    trades = await db.trade_states.find(query).to_list(None)
+    for t in trades:
+        t["_id"] = str(t["_id"])
+    return trades
 
 async def create_screener_position_record(position_data: Dict[str, Any]):
     """Create a screener position record."""
