@@ -1,7 +1,6 @@
 """Market screener for fetching gainers/losers from Delta Exchange."""
 import logging
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from typing import List, Dict
 from api.delta_client import DeltaExchangeClient
 
 logger = logging.getLogger(__name__)
@@ -31,59 +30,6 @@ async def get_all_perpetual_tickers(client: DeltaExchangeClient) -> List[Dict]:
     except Exception as e:
         logger.error(f"❌ Error fetching tickers: {e}")
         return []
-
-
-async def calculate_percentage_change_24h(
-    client: DeltaExchangeClient,
-    symbol: str,
-    timeframe: str
-) -> Optional[float]:
-    """
-    Calculate 24-hour percentage change aligned to timeframe boundary.
-    
-    Example: If current time is 5:30 PM IST on Nov 19,
-    compares with 5:30 PM IST on Nov 18.
-    """
-    try:
-        from api.market_data import get_candles
-        from utils.timeframe import get_timeframe_seconds
-        
-        current_time = datetime.utcnow()
-        timeframe_seconds = get_timeframe_seconds(timeframe)
-        
-        # Get current boundary-aligned time
-        boundary_time = current_time.replace(second=0, microsecond=0)
-        
-        # Calculate 24h ago at same boundary
-        time_24h_ago = boundary_time - timedelta(hours=24)
-        
-        # Fetch 2 candles: one from 24h ago, one current
-        start_time = int(time_24h_ago.timestamp())
-        end_time = int(boundary_time.timestamp())
-        
-        candles = await get_candles(
-            client, symbol, timeframe,
-            start_time=start_time,
-            end_time=end_time,
-            limit=50  # Get enough candles
-        )
-        
-        if not candles or len(candles) < 2:
-            return None
-        
-        # First candle (24h ago) and last candle (current)
-        old_price = float(candles[0]['close'])
-        new_price = float(candles[-1]['close'])
-        
-        if old_price == 0:
-            return None
-        
-        percent_change = ((new_price - old_price) / old_price) * 100
-        return round(percent_change, 2)
-        
-    except Exception as e:
-        logger.error(f"❌ Error calculating % change for {symbol}: {e}")
-        return None
 
 
 async def get_top_gainers(
