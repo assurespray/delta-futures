@@ -43,7 +43,6 @@ class RangeIdentifierLazyBear:
             range_count[0] = 1
             
             trend_phase = 0 # 1 for Long, -1 for Short
-            has_traded_this_trend = False
             
             signals = [0]
             
@@ -64,23 +63,19 @@ class RangeIdentifierLazyBear:
                     
                 # Determine Trend Phase
                 curr_trend = 1 if c > emas[i] else (-1 if c < emas[i] else trend_phase)
-                
                 if curr_trend != trend_phase:
-                    # Trend changed! Reset the trade flag
                     trend_phase = curr_trend
-                    has_traded_this_trend = False
                     
                 # Check for breakout signals
+                # Every valid range breakout aligned with EMA trend triggers a signal.
+                # No once-per-trend lockout — the algo_engine/screener_engine gate
+                # duplicate entries via open-trade checks.
                 signal = 0
-                if not has_traded_this_trend:
-                    # Breakout happens when range_count resets to 1 AND previous range count >= min_range_candles
-                    if range_count[i] == 1 and range_count[i-1] >= self.min_range_candles:
-                        if c > up[i-1] and trend_phase == 1:
-                            signal = 1
-                            has_traded_this_trend = True
-                        elif c < down[i-1] and trend_phase == -1:
-                            signal = -1
-                            has_traded_this_trend = True
+                if range_count[i] == 1 and range_count[i-1] >= self.min_range_candles:
+                    if c > up[i-1] and trend_phase == 1:
+                        signal = 1
+                    elif c < down[i-1] and trend_phase == -1:
+                        signal = -1
                             
                 signals.append(signal)
             

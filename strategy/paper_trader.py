@@ -99,7 +99,7 @@ class PaperTrader:
                     "status": "open",
                     "entry_price": live_price,
                     "entry_time": datetime.utcnow(),
-                    "current_position": entry_side,
+                    "direction": entry_side,
                     "paper_liquidation_price": liquidation_price,
                     "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
                     "entry_signal": "uptrend" if entry_side == "long" else "downtrend"
@@ -178,7 +178,7 @@ class PaperTrader:
             symbol = trade_state["asset"]
             lot_size = trade_state["lot_size"]
             user_id = trade_state["user_id"]
-            current_position = trade_state["current_position"]
+            current_position = trade_state.get("direction") or trade_state.get("current_position")
             entry_price = trade_state["entry_price"]
             
             if not exit_price:
@@ -290,7 +290,7 @@ class PaperTrader:
                     "status": "open",
                     "entry_price": live_price,
                     "entry_time": datetime.utcnow(),
-                    "current_position": side,
+                    "direction": side,
                     "paper_liquidation_price": liquidation_price,
                     "trade_date": datetime.utcnow().strftime("%Y-%m-%d"),
                     "entry_signal": "uptrend" if side == "long" else "downtrend",
@@ -343,7 +343,7 @@ class PaperTrader:
             live_price = await get_latest_price(client, symbol)
             if not live_price: continue
                 
-            side = trade.get("current_position")
+            side = trade.get("direction") or trade.get("current_position")
             if not side: continue
             
             sl_price = trade.get("pending_sl_price", 0)

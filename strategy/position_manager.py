@@ -129,7 +129,7 @@ class PositionManager:
                 trade_data["status"] = "open"
                 trade_data["entry_price"] = entry_price
                 trade_data["last_entry_order_id"] = entry_order_id
-                trade_data["current_position"] = entry_side
+                trade_data["direction"] = entry_side
                 trade_data["entry_time"] = datetime.utcnow()
                 trade_data["entry_signal"] = "uptrend" if entry_side == "long" else "downtrend"
                 trade_data["trade_date"] = datetime.utcnow().strftime("%Y-%m-%d")
@@ -279,7 +279,7 @@ class PositionManager:
                 entry_price = float(position["entry_price"])
 
                 update_data = {
-                    "current_position": entry_side,
+                    "direction": entry_side,
                     "entry_price": entry_price,
                     "last_entry_price": entry_price,
                     "last_entry_order_id": pending_order_id,

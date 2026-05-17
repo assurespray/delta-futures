@@ -356,7 +356,7 @@ class AlgoEngine:
         setup_id = trade_state['setup_id']
         asset = trade_state['asset']
         timeframe = trade_state['timeframe']
-        current_position = trade_state.get('current_position')
+        current_position = trade_state.get('direction') or trade_state.get('current_position')
         
         now = datetime.utcnow()
         if not is_at_candle_boundary(timeframe, now):
