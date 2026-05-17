@@ -1083,9 +1083,18 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     keyboard = [
         [InlineKeyboardButton(toggle_text, callback_data=toggle_data)],
-        [InlineKeyboardButton("Back to List", callback_data="paper_view_list")],
-        [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
     ]
+    
+    # Close position button for individual setups with an open trade
+    if setup_type == "algo" and open_trade and open_trade.get("status") == "open":
+        trade_id = str(open_trade["_id"])
+        keyboard.append([InlineKeyboardButton(
+            f"🛑 Close {setup.get('asset', '')} Position",
+            callback_data=f"paper_close_{trade_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton("Back to List", callback_data="paper_view_list")])
+    keyboard.append([InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
