@@ -90,6 +90,72 @@ class AlgoEngine:
         self._strategy_cache[setup_id] = (strategy_type, params_hash, instance)
         return instance
 
+    async def _detect_and_notify_flips(
+        self, prev_cache: dict, cache_data: dict,
+        setup_name: str, asset: str, timeframe: str
+    ) -> None:
+        """Universal Flip Detection — compare previous vs current signals and
+        send Telegram notifications on change.  Works for every strategy
+        because it reads the generic primary/secondary fields.
+
+        Deduplication: if the secondary signal perfectly mirrors the primary
+        (same old value AND same new value), the secondary notification is
+        suppressed to avoid duplicate spam (e.g. Range Breakout where both
+        signals track EMA trend phase).
+        """
+        if not prev_cache:
+            return
+
+        p_name = cache_data.get("primary_name", "Primary")
+        s_name = cache_data.get("secondary_name", "Secondary")
+
+        primary_flipped = False  # Track whether primary actually flipped
+
+        for signal_key, name_key, text_key in [
+            ("primary_signal", "primary_name", "primary_signal_text"),
+            ("secondary_signal", "secondary_name", "secondary_signal_text"),
+        ]:
+            # Skip secondary if it has the same name as primary (e.g. Single ST)
+            if signal_key == "secondary_signal" and p_name == s_name:
+                continue
+
+            old_sig = prev_cache.get(signal_key)
+            new_sig = cache_data[signal_key]
+            if old_sig is None or old_sig == new_sig:
+                continue
+
+            # Deduplicate: if primary already flipped and secondary has the
+            # exact same old→new transition, suppress the redundant message.
+            if signal_key == "secondary_signal" and primary_flipped:
+                old_primary = prev_cache.get("primary_signal")
+                new_primary = cache_data["primary_signal"]
+                if old_sig == old_primary and new_sig == new_primary:
+                    continue
+
+            if signal_key == "primary_signal":
+                primary_flipped = True
+
+            old_text = "Uptrend" if old_sig == 1 else "Downtrend"
+            new_text = cache_data.get(text_key, "Uptrend" if new_sig == 1 else "Downtrend")
+            flipped_name = cache_data.get(name_key, "Indicator")
+            try:
+                await self.logger_bot.send_indicator_flip(
+                    setup_name=setup_name,
+                    asset=asset,
+                    timeframe=timeframe,
+                    indicator_name=flipped_name,
+                    old_signal_text=old_text,
+                    new_signal_text=new_text,
+                    primary_name=p_name,
+                    primary_signal=cache_data["primary_signal"],
+                    primary_value=cache_data.get("primary_value"),
+                    secondary_name=s_name,
+                    secondary_signal=cache_data["secondary_signal"],
+                    secondary_value=cache_data.get("secondary_value"),
+                    current_price=cache_data.get("current_price")
+                )
+            except Exception as e:
+                logger.error(f"Error sending flip notification for {flipped_name}: {e}")
 
     async def run_continuous_monitoring(self):
         """
@@ -254,44 +320,9 @@ class AlgoEngine:
                 await client.close()
                 
             # --- Universal Flip Detection (Telegram alert) ---
-            # Compare previous vs current signals and notify on change.
-            # Works for every strategy because it reads the generic primary/secondary fields.
-            if prev_cache:
-                p_name = cache_data.get("primary_name", "Primary")
-                s_name = cache_data.get("secondary_name", "Secondary")
-                
-                for signal_key, name_key, text_key in [
-                    ("primary_signal", "primary_name", "primary_signal_text"),
-                    ("secondary_signal", "secondary_name", "secondary_signal_text"),
-                ]:
-                    # Skip secondary if it mirrors primary (e.g. Single ST)
-                    if signal_key == "secondary_signal" and p_name == s_name:
-                        continue
-                    
-                    old_sig = prev_cache.get(signal_key)
-                    new_sig = cache_data[signal_key]
-                    if old_sig is not None and old_sig != new_sig:
-                        old_text = "Uptrend" if old_sig == 1 else "Downtrend"
-                        new_text = cache_data.get(text_key, "Uptrend" if new_sig == 1 else "Downtrend")
-                        flipped_name = cache_data.get(name_key, "Indicator")
-                        try:
-                            await self.logger_bot.send_indicator_flip(
-                                setup_name=setup_name,
-                                asset=asset,
-                                timeframe=timeframe,
-                                indicator_name=flipped_name,
-                                old_signal_text=old_text,
-                                new_signal_text=new_text,
-                                primary_name=p_name,
-                                primary_signal=cache_data["primary_signal"],
-                                primary_value=cache_data.get("primary_value"),
-                                secondary_name=s_name,
-                                secondary_signal=cache_data["secondary_signal"],
-                                secondary_value=cache_data.get("secondary_value"),
-                                current_price=cache_data.get("current_price")
-                            )
-                        except Exception as e:
-                            logger.error(f"Error sending flip notification for {flipped_name}: {e}")
+            await self._detect_and_notify_flips(
+                prev_cache, cache_data, setup_name, asset, timeframe
+            )
                 
             # Generate entry signal using the strategy (strategy-agnostic)
             # Reuse the same cached strategy instance from above — no need to recreate
@@ -474,6 +505,19 @@ class AlgoEngine:
                 existing_state = await get_last_strategy_state(setup_id, asset, timeframe)
                 if existing_state is not None:
                     cache_data["strategy_state"] = existing_state
+                
+                # Flip detection BEFORE cache overwrite — otherwise
+                # process_algo_setup sees old==new and skips the notification.
+                from database.mongodb import mongodb
+                _db = mongodb.get_db()
+                prev_cache = await _db.indicator_cache.find_one({
+                    "setup_id": setup_id, "asset": asset, "timeframe": timeframe
+                })
+                setup_name = trade_state.get("setup_name", "Unknown")
+                await self._detect_and_notify_flips(
+                    prev_cache, cache_data, setup_name, asset, timeframe
+                )
+                
                 await save_indicator_cache(cache_data)
             except Exception as e:
                 logger.error(f"Error calculating indicators for {asset}: {e}")
@@ -501,37 +545,41 @@ class AlgoEngine:
                 )
                 
                 if success:
-                    try:
-                        entry_price = trade_state.get("entry_price")
-                        lot_size = trade_state.get("lot_size", 0)
-                        pnl = None
-                        pnl_inr = None
-                        if entry_price and exit_price:
-                            contract_multiplier = get_contract_multiplier(asset)
-                            if current_position == "long":
-                                pnl = (exit_price - entry_price) * lot_size * contract_multiplier
-                            else:
-                                pnl = (entry_price - exit_price) * lot_size * contract_multiplier
-                                
-                            from config.settings import settings as app_settings
-                            pnl_inr = pnl * app_settings.usd_to_inr_rate
-                        
-                        await self.logger_bot.send_trade_exit_detail(
-                            setup_name=trade_state.get("setup_name", "Unknown"),
-                            asset=asset,
-                            timeframe=timeframe,
-                            direction=current_position,
-                            entry_price=entry_price,
-                            exit_price=exit_price,
-                            lot_size=lot_size,
-                            pnl_usd=pnl,
-                            pnl_inr=pnl_inr,
-                            exit_signal_text=exit_signal.reason,
-                            exit_reason=exit_signal.reason,
-                            api_name=trade_state.get("api_name")
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to send exit notification for {asset}: {e}")
+                    # Paper trades already send their own notification from
+                    # execute_virtual_exit — only send the detailed exit
+                    # notification for real (live) trades.
+                    if not trade_state.get("is_paper_trade", False):
+                        try:
+                            entry_price = trade_state.get("entry_price")
+                            lot_size = trade_state.get("lot_size", 0)
+                            pnl = None
+                            pnl_inr = None
+                            if entry_price and exit_price:
+                                contract_multiplier = get_contract_multiplier(asset)
+                                if current_position == "long":
+                                    pnl = (exit_price - entry_price) * lot_size * contract_multiplier
+                                else:
+                                    pnl = (entry_price - exit_price) * lot_size * contract_multiplier
+                                    
+                                from config.settings import settings as app_settings
+                                pnl_inr = pnl * app_settings.usd_to_inr_rate
+                            
+                            await self.logger_bot.send_trade_exit_detail(
+                                setup_name=trade_state.get("setup_name", "Unknown"),
+                                asset=asset,
+                                timeframe=timeframe,
+                                direction=current_position,
+                                entry_price=entry_price,
+                                exit_price=exit_price,
+                                lot_size=lot_size,
+                                pnl_usd=pnl,
+                                pnl_inr=pnl_inr,
+                                exit_signal_text=exit_signal.reason,
+                                exit_reason=exit_signal.reason,
+                                api_name=trade_state.get("api_name")
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send exit notification for {asset}: {e}")
                 
             await client.close()
             
