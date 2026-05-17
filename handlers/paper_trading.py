@@ -874,6 +874,84 @@ async def paper_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
 
+
+async def paper_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually close an open paper trade position at current market price."""
+    query = update.callback_query
+    await query.answer("Closing position...")
+    
+    trade_id = query.data.replace("paper_close_", "")
+    
+    from database.crud import get_trade_state_by_id, get_all_active_algo_setups, get_all_active_screener_setups, get_api_credential_by_id
+    
+    trade = await get_trade_state_by_id(trade_id)
+    if not trade or trade.get("status") != "open":
+        await query.edit_message_text(
+            "❌ Trade not found or already closed.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ]),
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Get a client for fetching live price
+    client = None
+    all_configs = await get_all_active_algo_setups() + await get_all_active_screener_setups()
+    for config in all_configs:
+        api_id = config.get("api_id")
+        if api_id:
+            cred = await get_api_credential_by_id(api_id, decrypt=True)
+            if cred:
+                client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+                break
+    
+    if not client:
+        await query.edit_message_text(
+            "❌ No API credentials available to fetch live price.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ]),
+            parse_mode="Markdown"
+        )
+        return
+    
+    try:
+        success, exit_price, _ = await paper_trader.execute_virtual_exit(
+            client, trade, "Manual Close (user)"
+        )
+    finally:
+        await client.close()
+    
+    if success:
+        asset = trade.get("asset", "Unknown")
+        direction = (trade.get("direction") or trade.get("current_position", "")).upper()
+        entry_price = trade.get("entry_price", 0)
+        
+        await query.edit_message_text(
+            f"✅ **Paper position closed**\n\n"
+            f"**Asset:** {asset}\n"
+            f"**Direction:** {direction}\n"
+            f"**Entry:** ${entry_price:.4f}\n"
+            f"**Exit:** ${exit_price:.4f}\n"
+            f"**Reason:** Manual Close\n\n"
+            f"Check Paper Activity for full PnL details.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 Paper Activity", callback_data="paper_activity:p0")],
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ]),
+            parse_mode="Markdown"
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Failed to close position. Check logs for details.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ]),
+            parse_mode="Markdown"
+        )
+
+
 # ==================== VIEW PAPER SETUPS (UNIFIED: Individual + Screener) ====================
 
 async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

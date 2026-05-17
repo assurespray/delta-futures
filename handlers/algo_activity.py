@@ -275,6 +275,11 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             if sl_price:
                 message += f'🛡️ SL: ${sl_price:.4f}\n'
             message += f'💰 Unrealized PnL: {upnl_str}\n'
+            
+            # Manual close button for paper trades
+            if is_paper:
+                trade_id = str(activity['_id'])
+                keyboard.append([InlineKeyboardButton(f'🛑 Close {asset} Position', callback_data=f'paper_close_{trade_id}')])
         
         message += '\n'
     
