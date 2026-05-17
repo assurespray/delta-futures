@@ -59,3 +59,8 @@ htmlcov/
 *.tmp
 *.bak
 .gitnexus
+
+# AI tooling
+.claude/
+.opencode/
+CLAUDE.md
