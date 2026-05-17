@@ -79,7 +79,7 @@ async def reconcile_pending_orders(logger_bot=None):
                 actual_size = actual_position.get("size", 0) if actual_position else 0
                 
                 # Detect direction flip: exchange has opposite position to what bot expects
-                current_position = trade.get("current_position") or trade.get("direction")
+                current_position = trade.get("direction") or trade.get("current_position")
                 actual_direction = "long" if actual_size > 0 else "short" if actual_size < 0 else None
                 position_flipped = actual_size != 0 and actual_direction != current_position
                 

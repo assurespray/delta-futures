@@ -120,7 +120,7 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         pnl_inr = 0.0
         if entry_price and exit_price:
             contract_multiplier = get_contract_multiplier(activity.get('asset', ''))
-            pos_dir = activity.get('current_position') or activity.get('direction', '')
+            pos_dir = activity.get('direction') or activity.get('current_position', '')
             if pos_dir == 'long':
                 pnl = (exit_price - entry_price) * lot_size * contract_multiplier
             elif pos_dir == 'short':
@@ -177,7 +177,7 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             pnl_inr = 0.0
             if entry_price and exit_price:
                 contract_multiplier = get_contract_multiplier(asset)
-                pos_dir = activity.get('current_position') or activity.get('direction', '')
+                pos_dir = activity.get('direction') or activity.get('current_position', '')
                 if pos_dir == 'long':
                     pnl = (exit_price - entry_price) * lot_size * contract_multiplier
                 elif pos_dir == 'short':
@@ -256,7 +256,7 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             upnl_inr = 0.0
             upnl_str = 'N/A'
             if entry_price and mark_price:
-                pos_dir = activity.get('current_position') or activity.get('direction', '')
+                pos_dir = activity.get('direction') or activity.get('current_position', '')
                 contract_multiplier = get_contract_multiplier(asset)
                 if pos_dir == 'long':
                     upnl = (mark_price - entry_price) * lot_size * contract_multiplier

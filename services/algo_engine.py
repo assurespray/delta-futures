@@ -183,7 +183,7 @@ class AlgoEngine:
             if not history:
                 return None
             
-            current_position = trade_state.get("current_position") or trade_state.get("direction")
+            current_position = trade_state.get("direction") or trade_state.get("current_position")
             exit_side = "sell" if current_position == "long" else "buy"
             
             # Find the most recent filled order that would close this position

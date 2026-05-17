@@ -60,7 +60,7 @@ async def startup_reconciliation(logger_bot: LoggerBot):
                 pos_size = pos.get("size", 0) if pos else 0
                 
                 # Detect direction flip: exchange has opposite position to what bot expects
-                current_position = trade.get("current_position") or trade.get("direction")
+                current_position = trade.get("direction") or trade.get("current_position")
                 actual_direction = "long" if pos_size > 0 else "short" if pos_size < 0 else None
                 position_flipped = pos_size != 0 and actual_direction != current_position
                 

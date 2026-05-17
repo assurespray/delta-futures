@@ -284,7 +284,7 @@ def get_actual_pnl(trade: Dict[str, Any]) -> float:
         return 0.0
     mult = get_contract_multiplier(trade.get('asset', ''))
     lot = trade.get('lot_size', 0)
-    if trade.get('current_position', trade.get('direction', '')) == 'long':
+    if trade.get('direction', trade.get('current_position', '')) == 'long':
         return (exit_p - entry) * lot * mult
     else:
         return (entry - exit_p) * lot * mult
@@ -410,7 +410,7 @@ def _generate_equity_chart(
             if entry and exit_p:
                 mult = get_contract_multiplier(act.get('asset', ''))
                 lot = act.get('lot_size', 0)
-                if act.get('current_position', act.get('direction', '')) == 'long':
+                if act.get('direction', act.get('current_position', '')) == 'long':
                     pnl = (exit_p - entry) * lot * mult
                 else:
                     pnl = (entry - exit_p) * lot * mult
