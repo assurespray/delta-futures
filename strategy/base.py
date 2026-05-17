@@ -43,6 +43,11 @@ class BaseStrategy(ABC):
     strategies through this interface.
     """
 
+    # Override in strategies with transient one-candle signals (e.g. Range Breakout).
+    # When True, the screener engine skips flip detection and uses the strategy's
+    # generate_entry_signal() directly — the signal itself IS the trigger.
+    uses_transient_signals: bool = False
+
     @abstractmethod
     async def calculate_indicators(
         self,

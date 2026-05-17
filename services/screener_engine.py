@@ -314,10 +314,20 @@ class ScreenerEngine:
                 "updated_at": datetime.utcnow()
             })
             
-            # Check for entry signal (Option 1: wait for flip)
-            entry_signal = await self.check_new_asset_entry(
-                asset, screener_setup, strategy, indicator_result, client
-            )
+            # Check for entry signal
+            # Transient-signal strategies (e.g. Range Breakout) fire a signal for
+            # exactly one candle — flip detection is meaningless. Use the strategy's
+            # generate_entry_signal() directly; filter_assets() already prevents
+            # duplicate entries for the same asset in this screener.
+            if getattr(strategy, "uses_transient_signals", False):
+                entry_signal = strategy.generate_entry_signal(
+                    setup_id, None, indicator_result
+                )
+            else:
+                # Option 1: Conservative — wait for flip
+                entry_signal = await self.check_new_asset_entry(
+                    asset, screener_setup, strategy, indicator_result, client
+                )
             
             if entry_signal:
                 side = entry_signal.side

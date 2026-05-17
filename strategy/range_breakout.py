@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 class RangeBreakoutStrategy(BaseStrategy):
     """LazyBear Range Breakout — always uses market orders, no flip detection."""
 
+    uses_transient_signals = True  # Breakout signal fires for exactly one candle
+
     def __init__(self, params: Dict[str, Any] = None):
         self.params = params or {}
 
@@ -221,15 +223,20 @@ class RangeBreakoutStrategy(BaseStrategy):
         trend_phase = data.get("trend_phase", 0)
         trend_emoji = "🔵 Long" if trend_phase == 1 else "🔴 Short"
         signal_text = data.get("signal_text", "Neutral")
+        # When no breakout, use EMA trend phase for primary/secondary signals
+        # so the indicator tracker shows correct trend direction and screener
+        # flip detection works properly.
+        effective_signal = signal if signal != 0 else trend_phase
+        is_up = effective_signal >= 1
         return {
             "current_price": indicators_data.get("current_price", 0.0),
             "primary_name": "Range Breakout",
-            "primary_signal": signal if signal != 0 else 1,
-            "primary_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
+            "primary_signal": 1 if is_up else -1,
+            "primary_signal_text": "Uptrend" if is_up else "Downtrend",
             "primary_value": ema,
             "secondary_name": "EMA Trend",
-            "secondary_signal": signal if signal != 0 else 1,
-            "secondary_signal_text": "Uptrend" if signal >= 0 else "Downtrend",
+            "secondary_signal": 1 if is_up else -1,
+            "secondary_signal_text": "Uptrend" if is_up else "Downtrend",
             "secondary_value": ema,
             "strategy_state": {},
             "display_details": {
