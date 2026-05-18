@@ -52,7 +52,9 @@ Critical rules learned from production debugging. Violating these causes silent 
 
 ### Opening a position (entry orders)
 
-- Use `order_type="stop_market_order"` or `order_type="stop_limit_order"` with a `stop_price`.
+- Use `order_type="market_order"` with a `stop_price` for stop-market entries.
+- Use `order_type="limit_order"` with a `stop_price` and `limit_price` for stop-limit entries.
+- Delta Exchange only accepts `order_type` values `"market_order"` and `"limit_order"` — the strings `"stop_market_order"` and `"stop_limit_order"` are **rejected** by the API.
 - Do **NOT** set `stop_order_type` — that field only exists for closing/protecting positions.
 - Do **NOT** set `reduce_only=True` — entry orders open positions, not close them.
 
@@ -70,8 +72,8 @@ Any other value (e.g., `"stop_order"`) is rejected by the API.
 
 ## `time_in_force` Rules
 
-- Only send `time_in_force="gtc"` for `limit_order` and `stop_limit_order`.
-- Do **NOT** send `time_in_force` for `market_order` or `stop_market_order` — Delta rejects it and returns a misleading `post_only` validation error.
+- Only send `time_in_force="gtc"` for `limit_order`.
+- Do **NOT** send `time_in_force` for `market_order` — Delta rejects it and returns a misleading `post_only` validation error.
 
 ## Tickers API
 
@@ -90,8 +92,8 @@ Any other value (e.g., `"stop_order"`) is rejected by the API.
 |----------|-------|-------|
 | `ORDER_TYPE_LIMIT` | `"limit_order"` | For limit entries and SL/TP with `stop_order_type` |
 | `ORDER_TYPE_MARKET` | `"market_order"` | For market entries and SL/TP with `stop_order_type` |
-| `ORDER_TYPE_STOP_MARKET` | `"stop_market_order"` | For stop-trigger entries only, no `stop_order_type` |
-| `ORDER_TYPE_STOP_LIMIT` | `"stop_limit_order"` | For stop-limit entries only, no `stop_order_type` |
+| `ORDER_TYPE_STOP_MARKET` | `"stop_market_order"` | **NOT accepted by API** — use `ORDER_TYPE_MARKET` + `stop_price` instead |
+| `ORDER_TYPE_STOP_LIMIT` | `"stop_limit_order"` | **NOT accepted by API** — use `ORDER_TYPE_LIMIT` + `stop_price` + `limit_price` instead |
 | `PAPER_TRADE_TAKER_FEE` | `0.0005` | 0.05% taker fee for paper trade simulation |
 | `BREAKOUT_PIP_OFFSET` | varies | Offset added/subtracted from breakout candle high/low |
 | `CANDLE_CLOSE_BUFFER_SECONDS` | `5` | Buffer before candle boundary for close enforcement |

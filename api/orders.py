@@ -64,7 +64,7 @@ async def place_stop_market_entry_order(client: DeltaExchangeClient, product_id:
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_STOP_MARKET,
+        order_type=ORDER_TYPE_MARKET,
         stop_price=stop_price,
         reduce_only=False
     )
@@ -85,7 +85,7 @@ async def place_stop_limit_entry_order(client: DeltaExchangeClient, product_id: 
         product_id=product_id,
         size=size,
         side=side,
-        order_type=ORDER_TYPE_STOP_LIMIT,
+        order_type=ORDER_TYPE_LIMIT,
         limit_price=limit_price,
         stop_price=stop_price,
         reduce_only=False
