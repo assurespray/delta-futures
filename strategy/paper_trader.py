@@ -105,7 +105,8 @@ class PaperTrader:
                     "entry_signal": "uptrend" if entry_side == "long" else "downtrend"
                 })
                 
-                await create_trade_state(trade_data)
+                trade_id = await create_trade_state(trade_data)
+                trade_data["trade_id"] = trade_id
                 
                 # Journal hook — record paper entry
                 try:
@@ -142,7 +143,8 @@ class PaperTrader:
                 new_locked = paper_bal.get("locked_margin", 0) + margin_required
                 await update_paper_balance(user_id, {"locked_margin": new_locked})
                 
-                await create_trade_state(trade_data)
+                trade_id = await create_trade_state(trade_data)
+                trade_data["trade_id"] = trade_id
                 
                 # Send [PAPER] Pending Order Notification
                 try:
