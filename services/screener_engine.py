@@ -302,18 +302,6 @@ class ScreenerEngine:
             )
             await save_indicator_cache(cache_data)
             
-            # Also persist to screener_indicator_cache so check_new_asset_entry()
-            # can detect flips across cycles (this collection is keyed per-asset)
-            mapping = strategy.get_cache_mapping(indicator_result)
-            await upsert_screener_indicator_cache({
-                "screener_setup_id": setup_id,
-                "asset": asset,
-                "indicator_name": "primary",
-                "last_signal": mapping["primary_signal"],
-                "last_signal_text": mapping["primary_signal_text"],
-                "updated_at": datetime.utcnow()
-            })
-            
             # Check for entry signal
             # Transient-signal strategies (e.g. Range Breakout) fire a signal for
             # exactly one candle — flip detection is meaningless. Use the strategy's
@@ -329,11 +317,12 @@ class ScreenerEngine:
                     asset, screener_setup, strategy, indicator_result, client
                 )
             
+            mapping = strategy.get_cache_mapping(indicator_result)
+            
             if entry_signal:
                 side = entry_signal.side
-                cache_mapping = strategy.get_cache_mapping(indicator_result)
-                primary_signal = cache_mapping["primary_signal"]
-                secondary_signal = cache_mapping["secondary_signal"]
+                primary_signal = mapping["primary_signal"]
+                secondary_signal = mapping["secondary_signal"]
                 
                 # Filter 1: Primary & secondary indicators must agree on direction
                 aligned = (
@@ -384,12 +373,26 @@ class ScreenerEngine:
                         setup_name=f"[SCREENER] {setup_name}",
                         asset=asset,
                         direction=entry_signal.side,
-                        entry_price=cache_mapping["current_price"],
+                        entry_price=mapping["current_price"],
                         lot_size=screener_setup.get("lot_size", 1),
-                        signal_text=cache_mapping["primary_signal_text"],
-                        stop_loss=cache_mapping["secondary_value"],
+                        signal_text=mapping["primary_signal_text"],
+                        stop_loss=mapping["secondary_value"],
                         api_name=screener_setup.get("api_name")
                     )
+                else:
+                    logger.warning(f"Entry placement failed for {asset} - keeping old screener cache for retry")
+                    return
+            
+            # Also persist to screener_indicator_cache AFTER entry check
+            # so check_new_asset_entry() can detect flips across cycles
+            await upsert_screener_indicator_cache({
+                "screener_setup_id": setup_id,
+                "asset": asset,
+                "indicator_name": "primary",
+                "last_signal": mapping["primary_signal"],
+                "last_signal_text": mapping["primary_signal_text"],
+                "updated_at": datetime.utcnow()
+            })
                     
         except Exception as e:
             logger.error(f"Error processing screener asset {asset}: {e}")
