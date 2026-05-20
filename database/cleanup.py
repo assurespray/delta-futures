@@ -13,19 +13,24 @@ async def cleanup_stale_indicator_cache():
     try:
         db = mongodb.get_db()
         
-        # 1. Get all active algo setup IDs
+        # 1. Get all active setup IDs (algo + screener)
         active_algo_setups = await db.algo_setups.find(
             {"asset": {"$ne": "MANUAL"}},  # Exclude manual/inactive
             {"_id": 1}
         ).to_list(None)
         
-        active_ids = [str(setup["_id"]) for setup in active_algo_setups]
+        active_screener_setups = await db.screener_setups.find(
+            {"is_active": True},
+            {"_id": 1}
+        ).to_list(None)
         
-        logger.info(f"🔍 Found {len(active_ids)} active algo setups")
+        active_ids = [str(setup["_id"]) for setup in active_algo_setups] + [str(setup["_id"]) for setup in active_screener_setups]
+        
+        logger.info(f"🔍 Found {len(active_ids)} active setups (algo + screener)")
         
         # 3. Find stale indicator cache entries
         stale_entries = await db.indicator_cache.count_documents({
-            "algo_setup_id": {"$nin": active_ids}
+            "setup_id": {"$nin": active_ids}
         })
         
         if stale_entries == 0:
@@ -34,12 +39,18 @@ async def cleanup_stale_indicator_cache():
         
         # 4. Delete stale entries
         result = await db.indicator_cache.delete_many({
-            "algo_setup_id": {"$nin": active_ids}
+            "setup_id": {"$nin": active_ids}
         })
         
         deleted_count = result.deleted_count
         
-        logger.info(f"🗑️ Cleaned up {deleted_count} stale indicator cache entries")
+        # 5. Clean up stale screener_indicator_cache entries as well
+        screener_ids = [str(setup["_id"]) for setup in active_screener_setups]
+        screener_result = await db.screener_indicator_cache.delete_many({
+            "screener_setup_id": {"$nin": screener_ids}
+        })
+        
+        logger.info(f"🗑️ Cleaned up {deleted_count} stale indicator cache entries and {screener_result.deleted_count} stale screener cache entries")
         logger.info(f"✅ Kept cache for {len(active_ids)} active setups")
         
         return {

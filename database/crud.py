@@ -102,6 +102,8 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
         await db.positions.delete_many({"algo_setup_id": setup_id})
         await db.trade_states.delete_many({"setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
+        await db.indicator_cache.delete_many({"setup_id": setup_id})
+        await db.screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
 
     # Delete setups linked to this credential
     await db.algo_setups.delete_many({"api_id": credential_id})
@@ -288,6 +290,7 @@ async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     await db.positions.delete_many({"algo_setup_id": setup_id})
     await db.trade_states.delete_many({"setup_id": setup_id})
     await db.position_locks.delete_many({"setup_id": setup_id})
+    await db.indicator_cache.delete_many({"setup_id": setup_id})
     # Delete the setup itself
     result = await db.algo_setups.delete_one({
         "_id": ObjectId(setup_id),
@@ -587,6 +590,8 @@ async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
         await db.positions.delete_many({"algo_setup_id": setup_id})
         await db.trade_states.delete_many({"setup_id": setup_id})
         await db.position_locks.delete_many({"setup_id": setup_id})
+        await db.indicator_cache.delete_many({"setup_id": setup_id})
+        await db.screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
         
         result = await db.screener_setups.delete_one({
             "_id": ObjectId(setup_id),
