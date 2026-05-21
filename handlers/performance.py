@@ -350,17 +350,44 @@ def _build_performance_message(
     
     # Capital & Leverage Analysis for Paper Trades
     if title == "Paper Trading" or paper_bal:
-        leverages = [a.get("paper_leverage") for a in activities if a.get("paper_leverage") is not None]
-        if leverages:
+        valid_trades = [a for a in activities if a.get("paper_leverage") is not None]
+        if valid_trades:
+            leverages = [a["paper_leverage"] for a in valid_trades]
             avg_lev = sum(leverages) / len(leverages)
             min_lev = min(leverages)
             max_lev = max(leverages)
+            
+            notionals = []
+            margins = []
+            for a in valid_trades:
+                asset = a.get("asset", "")
+                qty = a.get("quantity", a.get("lot_size", 0))
+                entry_price = a.get("entry_price", 0)
+                leverage = a["paper_leverage"]
+                if qty and entry_price and leverage:
+                    from utils.market_utils import get_contract_multiplier
+                    multiplier = get_contract_multiplier(asset)
+                    notional = float(entry_price) * float(qty) * multiplier
+                    notionals.append(notional)
+                    margins.append(notional / float(leverage))
+            
             message += (
                 f"\n⚙️ **CAPITAL & LEVERAGE ANALYSIS**\n"
                 f"**Avg Req. Leverage:** {avg_lev:.0f}x\n"
                 f"**Min Safest Leverage:** {min_lev:.0f}x\n"
                 f"**Max Safest Leverage:** {max_lev:.0f}x\n"
             )
+            
+            if notionals and margins:
+                avg_notional = sum(notionals) / len(notionals)
+                avg_margin = sum(margins) / len(margins)
+                max_margin = max(margins)
+                message += (
+                    f"\n💰 **CAPITAL REQUIREMENTS (PER TRADE)**\n"
+                    f"**Avg Position Size (1x Lev):** ${avg_notional:.2f}\n"
+                    f"**Avg Capital Required:** ${avg_margin:.2f}\n"
+                    f"**Max Capital Required:** ${max_margin:.2f} (Widest SL)\n"
+                )
     
     if total_fees > 0:
         message += f"**Total Fees:** ${total_fees:.4f}\n"

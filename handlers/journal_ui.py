@@ -42,17 +42,45 @@ def _dir_label(current_dir: str) -> str:
 
 def _build_leverage_summary(trades: list) -> str:
     """Generate leverage statistics summary for paper trades."""
-    leverages = [t.get("paper_leverage") for t in trades if t.get("paper_leverage") is not None]
-    if leverages:
+    from utils.market_utils import get_contract_multiplier
+    valid_trades = [t for t in trades if t.get("paper_leverage") is not None]
+    if valid_trades:
+        leverages = [t["paper_leverage"] for t in valid_trades]
         avg_lev = sum(leverages) / len(leverages)
         min_lev = min(leverages)
         max_lev = max(leverages)
-        return (
+        
+        notionals = []
+        margins = []
+        for t in valid_trades:
+            asset = t.get("asset", "")
+            qty = t.get("quantity", t.get("lot_size", 0))
+            entry_price = t.get("entry_price", 0)
+            leverage = t["paper_leverage"]
+            if qty and entry_price and leverage:
+                multiplier = get_contract_multiplier(asset)
+                notional = float(entry_price) * float(qty) * multiplier
+                notionals.append(notional)
+                margins.append(notional / float(leverage))
+                
+        msg = (
             f"\n⚙️ **CAPITAL & LEVERAGE ANALYSIS**\n"
             f"Avg Req. Leverage: {avg_lev:.0f}x\n"
             f"Min Safest Leverage: {min_lev:.0f}x\n"
             f"Max Safest Leverage: {max_lev:.0f}x\n"
         )
+        
+        if notionals and margins:
+            avg_notional = sum(notionals) / len(notionals)
+            avg_margin = sum(margins) / len(margins)
+            max_margin = max(margins)
+            msg += (
+                f"\n💰 **CAPITAL REQUIREMENTS (PER TRADE)**\n"
+                f"Avg Position Size (1x Lev): ${avg_notional:.2f}\n"
+                f"Avg Capital Required: ${avg_margin:.2f}\n"
+                f"Max Capital Required: ${max_margin:.2f} (Widest SL)\n"
+            )
+        return msg
     return ""
 
 # ============================================================
