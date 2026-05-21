@@ -40,6 +40,20 @@ def _dir_label(current_dir: str) -> str:
         return "📕 Showing: Short trades only\n"
     return ""
 
+def _build_leverage_summary(trades: list) -> str:
+    """Generate leverage statistics summary for paper trades."""
+    leverages = [t.get("paper_leverage") for t in trades if t.get("paper_leverage") is not None]
+    if leverages:
+        avg_lev = sum(leverages) / len(leverages)
+        min_lev = min(leverages)
+        max_lev = max(leverages)
+        return (
+            f"\n⚙️ **CAPITAL & LEVERAGE ANALYSIS**\n"
+            f"Avg Req. Leverage: {avg_lev:.0f}x\n"
+            f"Min Safest Leverage: {min_lev:.0f}x\n"
+            f"Max Safest Leverage: {max_lev:.0f}x\n"
+        )
+    return ""
 
 # ============================================================
 # LIVE JOURNAL (is_paper_trade=False) — 4-Tier Drill-Down
@@ -439,8 +453,9 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
-        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
-        msg += "Select a Strategy below to view its specific performance:"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+        msg += _build_leverage_summary(trades)
+        msg += f"\nSelect a Strategy below to view its specific performance:"
 
     strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
     keyboard = [_get_dir_filter_row("pj", current_dir)]
@@ -498,8 +513,9 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     msg = f"📁 **Strategy:** {strategy}\n"
     msg += _dir_label(current_dir) + "\n"
     msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
-    msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
-    msg += "Select an asset below:"
+    msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+    msg += _build_leverage_summary(trades)
+    msg += f"\nSelect an asset below:"
 
     assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True, direction=current_dir)
     
@@ -580,6 +596,7 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+        msg += _build_leverage_summary(trades)
 
     keyboard = [
         _get_dir_filter_row("pj", current_dir),
@@ -655,6 +672,7 @@ async def pjournal_search_receive_callback(update: Update, context: ContextTypes
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+        msg += _build_leverage_summary(trades)
 
         keyboard = [
         [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
