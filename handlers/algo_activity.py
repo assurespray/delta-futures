@@ -64,26 +64,37 @@ async def paper_activity_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, is_paper: bool):
     """
-    Display trading activity (Real or Paper) with paginated closed trades,
-    and open/pending positions at the bottom.
+    Display trading activity (Real or Paper) with tabbed navigation and pagination.
+    Tabs: [ Closed | Open | Pending ]
     """
     query = update.callback_query
     await query.answer()
     
     user_id = str(query.from_user.id)
     
-    # Parse pagination
+    # Parse pagination and tab
     data = query.data
     page = 0
+    tab = "auto"
     base_callback = 'paper_activity' if is_paper else 'menu_algo_activity'
     
-    if '_p' in data:
-        parts = data.rsplit('_p', 1)
+    if "_p" in data:
+        parts = data.rsplit("_p", 1)
         try:
             page = int(parts[1])
         except ValueError:
             page = 0
-            
+        data_before_p = parts[0]
+    else:
+        data_before_p = data
+        
+    if data_before_p.endswith("_open"):
+        tab = "open"
+    elif data_before_p.endswith("_pending"):
+        tab = "pending"
+    elif data_before_p.endswith("_closed"):
+        tab = "closed"
+        
     # Get last 3 days of activity
     activities = await get_trades_by_user(user_id, days=3, is_paper=is_paper)
     
@@ -105,7 +116,24 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     pending_trades = [a for a in activities if a.get('status') == 'pending_entry']
     closed_trades = [a for a in activities if a.get('status') in ('closed', 'cancelled')]
     
-    # Pre-calculate summary stats (needs all closed trades)
+    # Auto-select tab if not specified
+    if tab == "auto":
+        if open_trades:
+            tab = "open"
+        elif pending_trades:
+            tab = "pending"
+        else:
+            tab = "closed"
+            
+    # Ensure tab is valid if a category becomes empty
+    if tab == "open" and not open_trades:
+        tab = "closed" if closed_trades else "pending"
+    if tab == "pending" and not pending_trades:
+        tab = "open" if open_trades else "closed"
+    if tab == "closed" and not closed_trades:
+        tab = "open" if open_trades else "pending"
+    
+    # Pre-calculate summary stats
     total_pnl_usd = 0.0
     total_pnl_inr = 0.0
     winning_trades = 0
@@ -136,30 +164,42 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         total_pnl_usd += pnl
         total_pnl_inr += pnl_inr
 
-    # Pagination for CLOSED trades
-    TRADES_PER_PAGE = 10
-    total_closed = len(closed_trades)
-    total_pages = max(1, (total_closed + TRADES_PER_PAGE - 1) // TRADES_PER_PAGE)
+    # Setup active items for pagination
+    ITEMS_PER_PAGE = 5 if tab in ["open", "pending"] else 10
+    
+    if tab == "open":
+        items = open_trades
+        tab_title = f"🟢 **OPEN POSITIONS** ({len(open_trades)})"
+    elif tab == "pending":
+        items = pending_trades
+        tab_title = f"⏳ **PENDING ORDERS** ({len(pending_trades)})"
+    else:
+        items = closed_trades
+        tab_title = f"⚪ **CLOSED TRADES** ({len(closed_trades)})"
+        
+    total_items = len(items)
+    total_pages = max(1, (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
     
-    start_idx = page * TRADES_PER_PAGE
-    end_idx = min(start_idx + TRADES_PER_PAGE, total_closed)
-    page_closed_trades = closed_trades[start_idx:end_idx]
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = min(start_idx + ITEMS_PER_PAGE, total_items)
+    page_items = items[start_idx:end_idx]
     
     title_text = 'Paper' if is_paper else 'Algo'
     message = f'📜 **{title_text} Trading Activity (Last 3 Days)**\n\n'
+    
+    # Tab Title
+    if total_pages > 1:
+        message += f'{tab_title} - Page {page+1}/{total_pages}\n'
+    else:
+        message += f'{tab_title}\n'
+    message += f"{'━' * 30}\n"
+    
     keyboard = []
     
-    # ── CLOSED TRADES SECTION (Top) ──
-    if total_closed > 0:
-        if total_pages > 1:
-            message += f'⚪ **CLOSED TRADES** (Page {page+1}/{total_pages})\n'
-        else:
-            message += f'⚪ **CLOSED TRADES** ({total_closed})\n'
-            
-        message += f"{'━' * 30}\n"
-        
-        for activity in page_closed_trades:
+    # ── TAB RENDERING ──
+    if tab == "closed":
+        for activity in page_items:
             setup_name = activity['setup_name']
             asset = activity['asset']
             direction = activity.get('direction', '').upper()
@@ -194,51 +234,9 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             message += f'🔵 Entry: {entry_price_str} | {entry_time_str}\n'
             message += f'🔴 Exit: {exit_price_str} | {exit_time_str}\n'
             message += f'{pnl_emoji} PnL: ${pnl:.2f} (₹{pnl_inr:.2f})\n'
-        
-        message += '\n'
-        
-    # Pagination Navigation Buttons
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton('⬅️ Prev Trades', callback_data=f'{base_callback}_p{page - 1}'))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton('Older Trades ➡️', callback_data=f'{base_callback}_p{page + 1}'))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-        
-    # ── PENDING ORDERS SECTION (Middle) ──
-    if pending_trades:
-        message += f'⏳ **PENDING ORDERS** ({len(pending_trades)})\n'
-        message += f"{'━' * 30}\n"
-        
-        for activity in pending_trades:
-            setup_name = activity['setup_name']
-            asset = activity['asset']
-            direction = activity.get('pending_entry_side', activity.get('direction', '')).upper()
-            lot_size = activity.get('lot_size', 0)
-            trigger_price = activity.get('entry_trigger_price')
-            
-            trigger_str = f'${trigger_price:.5f}' if trigger_price else 'N/A'
-            sl_price = activity.get('pending_sl_price')
-            
-            message += f'\n📊 **{setup_name}** - {asset}\n'
-            message += f'Direction: {direction} | Size: {lot_size}\n'
-            message += f'🎯 Trigger: {trigger_str}\n'
-            if sl_price:
-                message += f'🛡️ SL: ${sl_price:.4f}\n'
-                
-            if is_paper:
-                trade_id = str(activity['_id'])
-                keyboard.append([InlineKeyboardButton(f'❌ Cancel {asset} Pending', callback_data=f'paper_cancel_{trade_id}')])
-                
-        message += '\n'
-    
-    # ── OPEN POSITIONS SECTION (Bottom) ──
-    if open_trades:
-        message += f'🟢 **OPEN POSITIONS** ({len(open_trades)})\n'
-        message += f"{'━' * 30}\n"
-        
-        for activity in open_trades:
+
+    elif tab == "open":
+        for activity in page_items:
             setup_name = activity['setup_name']
             asset = activity['asset']
             direction = activity.get('direction', '').upper()
@@ -279,39 +277,87 @@ async def _render_activity(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             # Manual close button for paper trades
             if is_paper:
                 trade_id = str(activity['_id'])
-                keyboard.append([InlineKeyboardButton(f'🛑 Close {asset} Position', callback_data=f'paper_close_{trade_id}')])
-        
-        message += '\n'
+                keyboard.append([InlineKeyboardButton(f'🛑 Close {asset} ({setup_name})', callback_data=f'paper_close_{trade_id}')])
+
+    elif tab == "pending":
+        for activity in page_items:
+            setup_name = activity['setup_name']
+            asset = activity['asset']
+            direction = activity.get('pending_entry_side', activity.get('direction', '')).upper()
+            lot_size = activity.get('lot_size', 0)
+            trigger_price = activity.get('entry_trigger_price')
+            
+            trigger_str = f'${trigger_price:.5f}' if trigger_price else 'N/A'
+            sl_price = activity.get('pending_sl_price')
+            
+            message += f'\n📊 **{setup_name}** - {asset}\n'
+            message += f'Direction: {direction} | Size: {lot_size}\n'
+            message += f'🎯 Trigger: {trigger_str}\n'
+            if sl_price:
+                message += f'🛡️ SL: ${sl_price:.4f}\n'
+                
+            if is_paper:
+                trade_id = str(activity['_id'])
+                keyboard.append([InlineKeyboardButton(f'❌ Cancel {asset} ({setup_name})', callback_data=f'paper_cancel_{trade_id}')])
+                
+    message += '\n'
     
-    if not open_trades and not pending_trades and not closed_trades:
-        message += 'No trades found.\n\n'
+    # ── PAGINATION NAV ──
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton('⬅️ Prev', callback_data=f'{base_callback}_{tab}_p{page - 1}'))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton('Next ➡️', callback_data=f'{base_callback}_{tab}_p{page + 1}'))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+        
+    # ── TABS NAV ──
+    tabs_row = []
+    if open_trades:
+        text = f"🟢 Open ({len(open_trades)})" if tab != "open" else f"📍 Open"
+        tabs_row.append(InlineKeyboardButton(text, callback_data=f"{base_callback}_open_p0"))
+    if pending_trades:
+        text = f"⏳ Pending ({len(pending_trades)})" if tab != "pending" else f"📍 Pending"
+        tabs_row.append(InlineKeyboardButton(text, callback_data=f"{base_callback}_pending_p0"))
+    if closed_trades:
+        text = f"⚪ Closed ({len(closed_trades)})" if tab != "closed" else f"📍 Closed"
+        tabs_row.append(InlineKeyboardButton(text, callback_data=f"{base_callback}_closed_p0"))
+        
+    if tabs_row:
+        # If there are many tabs, might want to split or keep in one row. Max 3 is fine for one row.
+        keyboard.append(tabs_row)
+        
+    keyboard.append([
+        InlineKeyboardButton('🔄 Refresh', callback_data=f'{base_callback}_{tab}_p{page}'),
+        InlineKeyboardButton('🔙 Back to Menu', callback_data=back_button_data)
+    ])
     
     # ── SUMMARY ──
     message += f"{'═' * 30}\n"
-    message += f'**Summary:**\n'
+    message += f'**Summary (Last 3 Days):**\n'
     if open_trades:
         message += f'Open: {len(open_trades)}\n'
     if pending_trades:
         message += f'Pending: {len(pending_trades)}\n'
-    message += f'Closed/Cancelled: {total_closed}\n'
+    message += f'Closed/Cancelled: {len(closed_trades)}\n'
     message += f'Winning: {winning_trades} | Losing: {losing_trades}\n'
     
     if winning_trades + losing_trades > 0:
         win_rate = (winning_trades / (winning_trades + losing_trades)) * 100
         message += f'Win Rate: {win_rate:.1f}%\n'
     
-    total_pnl_emoji = '🟢' if total_pnl_usd >= 0 else '🔴'
-    message += f'\n{total_pnl_emoji} **Realized PnL: ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})**'
-    
-    keyboard.append([InlineKeyboardButton('🔄 Refresh', callback_data=f'{base_callback}_p{page}')])
-    keyboard.append([InlineKeyboardButton('🔙 Back', callback_data=back_button_data)])
+    pnl_emoji = '🟢' if total_pnl_usd >= 0 else '🔴'
+    message += f'Total PnL: {pnl_emoji} ${total_pnl_usd:.2f} (₹{total_pnl_inr:.2f})\n'
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if len(message) > 4000:
-        message = message[:3997] + '...'
-    
     try:
-        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(
+            message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
     except Exception as e:
         if 'Message is not modified' not in str(e):
-            logger.error(f'Error editing activity message: {e}')
+            logger.warning(f"Edit message failed in activity: {e}")
+
