@@ -50,14 +50,25 @@ class PaperTrader:
             symbol = algo_setup["asset"]
             lot_size = algo_setup["lot_size"]
             user_id = algo_setup.get("user_id", "")
-            raw_leverage = algo_setup.get("paper_leverage")
-            if raw_leverage is None:
-                raw_leverage = PAPER_TRADE_DEFAULT_LEVERAGE
-            leverage = clamp_leverage(symbol, raw_leverage)
-            setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
             
             live_price = await get_latest_price(client, symbol)
             if not live_price: return False
+            
+            entry_target = live_price if immediate else breakout_price
+            if stop_loss_price and entry_target:
+                dist = abs(entry_target - stop_loss_price) / entry_target
+                if dist > 0:
+                    dist_with_buffer = dist + 0.005 # 0.5% maintenance margin buffer
+                    dynamic_leverage = int(1 / dist_with_buffer)
+                    leverage = clamp_leverage(symbol, dynamic_leverage)
+                else:
+                    raw_leverage = algo_setup.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
+                    leverage = clamp_leverage(symbol, raw_leverage)
+            else:
+                raw_leverage = algo_setup.get("paper_leverage", PAPER_TRADE_DEFAULT_LEVERAGE)
+                leverage = clamp_leverage(symbol, raw_leverage)
+            
+            setup_type = "screener" if "asset_selection_type" in algo_setup else "algo"
             
             multiplier = get_contract_multiplier(symbol)
             notional = live_price * lot_size * multiplier
@@ -127,6 +138,7 @@ class PaperTrader:
                         f"**Type:** MARKET\n"
                         f"**Entry Price:** ${float(live_price):.5f}\n"
                         f"**Lot Size:** {lot_size}\n"
+                        f"**Required Leverage:** {leverage}x\n"
                     )
                     if stop_loss_price:
                         msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
@@ -157,6 +169,7 @@ class PaperTrader:
                         f"**Type:** STOP-LIMIT\n"
                         f"**Trigger Price:** ${float(breakout_price):.5f}\n"
                         f"**Lot Size:** {lot_size}\n"
+                        f"**Required Leverage:** {leverage}x\n"
                     )
                     if stop_loss_price:
                         msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
@@ -321,6 +334,7 @@ class PaperTrader:
                         f"**Type:** PENDING ORDER FILLED\n"
                         f"**Entry Price:** ${float(live_price):.5f}\n"
                         f"**Lot Size:** {lot_size}\n"
+                        f"**Required Leverage:** {leverage}x\n"
                     )
                     sl_price = trade.get("pending_sl_price")
                     if sl_price:

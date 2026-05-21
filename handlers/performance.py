@@ -348,6 +348,20 @@ def _build_performance_message(
         f"**Max Loss Streak:** {max_loss_streak}\n"
     )
     
+    # Capital & Leverage Analysis for Paper Trades
+    if title == "Paper Trading" or paper_bal:
+        leverages = [a.get("paper_leverage") for a in activities if a.get("paper_leverage") is not None]
+        if leverages:
+            avg_lev = sum(leverages) / len(leverages)
+            min_lev = min(leverages)
+            max_lev = max(leverages)
+            message += (
+                f"\n⚙️ **CAPITAL & LEVERAGE ANALYSIS**\n"
+                f"**Avg Req. Leverage:** {avg_lev:.0f}x\n"
+                f"**Min Safest Leverage:** {min_lev:.0f}x\n"
+                f"**Max Safest Leverage:** {max_lev:.0f}x\n"
+            )
+    
     if total_fees > 0:
         message += f"**Total Fees:** ${total_fees:.4f}\n"
     

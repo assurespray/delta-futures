@@ -758,11 +758,13 @@ async def paper_journal_recent_callback(update: Update, context: ContextTypes.DE
         
         entry_time = to_ist_str(t.get('entry_time'))
         exit_time = to_ist_str(t.get('exit_time'))
+        leverage = t.get('paper_leverage', 'N/A')
         
         msg += f"{emoji} **{t_asset}** ({direction}) | ${pnl:.2f}\n"
         msg += f"   Setup: {setup_name}\n"
         msg += f"   Entry: ${t.get('entry_price', 0):.4f} ({entry_time}) | Exit: ${t.get('exit_price', 0):.4f} ({exit_time})\n"
-        msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n\n"
+        msg += f"   Fees: ${t.get('total_fees', 0):.2f} | Reason: {t.get('exit_reason', 'unknown')}\n"
+        msg += f"   Req. Leverage: {leverage}x\n\n"
         
     keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_btn)]]
     
