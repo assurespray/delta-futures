@@ -85,6 +85,7 @@ class JournalService:
                 "entry_time": trade_data.get("entry_time") or datetime.utcnow(),
                 "entry_order_id": order_id,
                 "entry_fee": entry_fee,
+                "paper_leverage": trade_data.get("paper_leverage"),
                 
                 "scaling_events": []
             }
@@ -169,7 +170,8 @@ class JournalService:
                 "total_fees": total_fees,
                 "net_pnl": net_pnl,
                 "net_pnl_inr": net_pnl * settings.usd_to_inr_rate,
-                "is_paper_trade": is_paper
+                "is_paper_trade": is_paper,
+                "paper_leverage": trade_data.get("paper_leverage")
             }
             
             await journal_ops.log_trade_event(trade_id, exit_update)
