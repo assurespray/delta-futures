@@ -1,6 +1,7 @@
 """Trade Journal UI for Telegram Bot — Live + Paper Journal pages."""
 import io
 import csv
+import asyncio
 import logging
 
 def to_ist_str(dt) -> str:
@@ -157,7 +158,13 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('lj_current_asset', None)
 
     current_dir = context.user_data.get('lj_direction', 'all')
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    
+    trades, all_strategies, algo_setups, screener_setups = await asyncio.gather(
+        journal_ops.get_trades_by_asset(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir),
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id)
+    )
 
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -180,10 +187,6 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
     # Separate active vs inactive strategies for this API
-    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
-    
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
     active_live_names = set()
     for s in algo_setups:
         if not s.get("is_paper_trade", False):
@@ -219,10 +222,11 @@ async def lj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
     context.user_data['lj_current_api'] = api_name
     current_dir = context.user_data.get('lj_direction', 'all')
     
-    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
-    
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
+    all_strategies, algo_setups, screener_setups = await asyncio.gather(
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id)
+    )
     active_live_names = set()
     for s in algo_setups:
         if not s.get("is_paper_trade", False):
@@ -259,10 +263,12 @@ async def lj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
     context.user_data['lj_current_api'] = api_name
     current_dir = context.user_data.get('lj_direction', 'all')
     
-    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
-    
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
+    all_strategies, algo_setups, screener_setups, archived = await asyncio.gather(
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id),
+        get_archived_setups_by_user(user_id, is_paper_trade=False)
+    )
     active_live_names = set()
     for s in algo_setups:
         if not s.get("is_paper_trade", False):
@@ -273,7 +279,6 @@ async def lj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
     
     inactive_strategies = [s for s in all_strategies if s not in active_live_names]
     
-    archived = await get_archived_setups_by_user(user_id, is_paper_trade=False)
     archived_by_name = {a.get("setup_name"): a for a in archived}
     
     msg = f"⚪ **Inactive / Archived Live Setups ({api_name})**\n"
@@ -569,7 +574,13 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
     context.user_data.pop('pj_current_asset', None)
     
     current_dir = context.user_data.get('pj_direction', 'all')
-    trades = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, direction=current_dir)
+    # Fetch all data in parallel
+    trades, all_journal_strategies, algo_setups, screener_setups = await asyncio.gather(
+        journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, direction=current_dir),
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id)
+    )
     
     total_trades = len(trades)
     wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
@@ -594,11 +605,6 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         msg += _build_leverage_summary(trades)
 
     # Separate active vs inactive strategies
-    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
-    
-    # Get active setup names (both algo and screener, paper only)
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
     active_paper_names = set()
     for s in algo_setups:
         if s.get("is_paper_trade", False):
@@ -634,10 +640,11 @@ async def pj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
     user_id = str(query.from_user.id)
     current_dir = context.user_data.get('pj_direction', 'all')
     
-    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
-    
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
+    all_journal_strategies, algo_setups, screener_setups = await asyncio.gather(
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id)
+    )
     active_paper_names = set()
     for s in algo_setups:
         if s.get("is_paper_trade", False):
@@ -671,10 +678,12 @@ async def pj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
     user_id = str(query.from_user.id)
     current_dir = context.user_data.get('pj_direction', 'all')
     
-    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
-    
-    algo_setups = await get_algo_setups_by_user(user_id)
-    screener_setups = await get_screener_setups_by_user(user_id)
+    all_journal_strategies, algo_setups, screener_setups, archived = await asyncio.gather(
+        journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id),
+        get_archived_setups_by_user(user_id, is_paper_trade=True)
+    )
     active_paper_names = set()
     for s in algo_setups:
         if s.get("is_paper_trade", False):
@@ -686,7 +695,6 @@ async def pj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
     inactive_strategies = [s for s in all_journal_strategies if s not in active_paper_names]
     
     # Also get archived setups for "View Parameters" feature
-    archived = await get_archived_setups_by_user(user_id, is_paper_trade=True)
     archived_by_name = {a.get("setup_name"): a for a in archived}
     
     msg = "⚪ **Inactive / Archived Paper Setups**\n"
@@ -852,8 +860,13 @@ async def view_archived_params_callback(update: Update, context: ContextTypes.DE
     user_id = str(query.from_user.id)
     
     # Try to find in archived_setups by name
-    archived_list = await get_archived_setups_by_user(user_id, is_paper_trade=True)
-    archived_list += await get_archived_setups_by_user(user_id, is_paper_trade=False)
+    archived_paper, archived_live, algo_setups, screener_setups = await asyncio.gather(
+        get_archived_setups_by_user(user_id, is_paper_trade=True),
+        get_archived_setups_by_user(user_id, is_paper_trade=False),
+        get_algo_setups_by_user(user_id),
+        get_screener_setups_by_user(user_id)
+    )
+    archived_list = archived_paper + archived_live
     
     setup = None
     for a in archived_list:
@@ -863,8 +876,6 @@ async def view_archived_params_callback(update: Update, context: ContextTypes.DE
     
     # Also check active setups (user might click from active view)
     if not setup:
-        algo_setups = await get_algo_setups_by_user(user_id)
-        screener_setups = await get_screener_setups_by_user(user_id)
         for s in algo_setups + screener_setups:
             if s.get("setup_name") == setup_name:
                 setup = s
