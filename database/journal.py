@@ -100,11 +100,11 @@ class JournalOperations:
             if direction and direction != "all":
                 query["direction"] = direction
             raw = await self.collection.distinct("api_name", query)
-            # Normalize: None and "" both mean "DeltaExchange"
+            # Normalize: None and "" — try to resolve from user's actual API credentials
             names = set()
             for name in raw:
                 if not name:
-                    names.add("DeltaExchange")
+                    names.add("Unknown API")
                 else:
                     names.add(name)
             return sorted(names)

@@ -437,18 +437,25 @@ def create_application() -> Application:
         journal_strategy_callback, journal_asset_callback,
         journal_recent_callback, journal_export_callback,
         journal_set_dir_callback,
+        lj_filter_active_callback, lj_filter_inactive_callback,
         paper_journal_dashboard_callback, paper_journal_recent_callback, paper_journal_export_callback,
         pjournal_reset_start_callback, pjournal_reset_execute_callback,
-        pjournal_set_dir_callback
+        pjournal_set_dir_callback,
+        pj_filter_active_callback, pj_filter_inactive_callback,
+        view_archived_params_callback
     )
     # Live Journal — 4-tier: Overall → API → Strategy → Asset
     application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
     application.add_handler(CallbackQueryHandler(journal_set_dir_callback, pattern="^lj_set_dir_"))
+    application.add_handler(CallbackQueryHandler(lj_filter_active_callback, pattern="^lj_filter_active_"))
+    application.add_handler(CallbackQueryHandler(lj_filter_inactive_callback, pattern="^lj_filter_inactive_"))
     application.add_handler(CallbackQueryHandler(journal_api_callback, pattern="^lj_api_"))
     application.add_handler(CallbackQueryHandler(journal_strategy_callback, pattern="^lj_strat_"))
     application.add_handler(CallbackQueryHandler(journal_asset_callback, pattern="^lj_asset_"))
     application.add_handler(CallbackQueryHandler(journal_recent_callback, pattern="^journal_recent_15$"))
     application.add_handler(CallbackQueryHandler(journal_export_callback, pattern="^journal_export_csv$"))
+    # Archived setup parameters viewer
+    application.add_handler(CallbackQueryHandler(view_archived_params_callback, pattern="^view_arch_params_"))
     # Paper Journal — 3-tier: Overall → Strategy → Asset
     from handlers.journal_ui import (
         pjournal_strategy_callback, pjournal_asset_callback,
@@ -456,6 +463,8 @@ def create_application() -> Application:
     )
     application.add_handler(CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^paper_journal_dashboard$"))
     application.add_handler(CallbackQueryHandler(pjournal_set_dir_callback, pattern="^pj_set_dir_"))
+    application.add_handler(CallbackQueryHandler(pj_filter_active_callback, pattern="^pj_filter_active$"))
+    application.add_handler(CallbackQueryHandler(pj_filter_inactive_callback, pattern="^pj_filter_inactive$"))
     application.add_handler(CallbackQueryHandler(pjournal_strategy_callback, pattern="^pj_strat_"))
     application.add_handler(CallbackQueryHandler(pjournal_asset_callback, pattern="^pj_asset_"))
     application.add_handler(CallbackQueryHandler(paper_journal_recent_callback, pattern="^pjournal_recent_15$"))

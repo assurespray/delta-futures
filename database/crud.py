@@ -280,11 +280,66 @@ async def update_algo_setup(setup_id: str, update_data: Dict[str, Any]) -> bool:
         return False
 
 
+# ==================== Archived Setups ====================
+
+async def archive_setup(setup_doc: dict, setup_type: str) -> bool:
+    """Archive a setup document before deletion."""
+    try:
+        db = await get_db()
+        archive_doc = {**setup_doc}
+        archive_doc.pop("_id", None)
+        archive_doc["original_id"] = str(setup_doc.get("_id", ""))
+        archive_doc["setup_type"] = setup_type  # "algo" or "screener"
+        archive_doc["archived_at"] = datetime.utcnow()
+        await db.archived_setups.update_one(
+            {"original_id": archive_doc["original_id"]},
+            {"$set": archive_doc},
+            upsert=True
+        )
+        logger.info(f"📦 Archived {setup_type} setup: {setup_doc.get('setup_name', 'unknown')}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to archive setup: {e}")
+        return False
+
+
+async def get_archived_setups_by_user(user_id: str, is_paper_trade: bool = False) -> List[Dict[str, Any]]:
+    """Get all archived setups for a user, filtered by paper/live mode."""
+    try:
+        db = await get_db()
+        query = {"user_id": user_id, "is_paper_trade": is_paper_trade}
+        cursor = db.archived_setups.find(query).sort("archived_at", -1)
+        setups = await cursor.to_list(200)
+        for s in setups:
+            s["_id"] = str(s["_id"])
+        return setups
+    except Exception as e:
+        logger.error(f"Failed to get archived setups: {e}")
+        return []
+
+
+async def get_archived_setup_by_id(original_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single archived setup by its original setup ID."""
+    try:
+        db = await get_db()
+        doc = await db.archived_setups.find_one({"original_id": original_id})
+        if doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except Exception as e:
+        logger.error(f"Failed to get archived setup: {e}")
+        return None
+
+
 async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     """
-    Delete algo setup and cascade delete all related data (orders, positions, activities, locks).
+    Archive then delete algo setup and cascade delete all related data.
     """
     db = await get_db()
+    # Archive the setup before deletion
+    setup_doc = await db.algo_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
+    if setup_doc:
+        await archive_setup(setup_doc, "algo")
     # Clean up all related DB records first
     await db.orders.delete_many({"algo_setup_id": setup_id})
     await db.positions.delete_many({"algo_setup_id": setup_id})
@@ -582,9 +637,13 @@ async def update_screener_setup(setup_id: str, update_data: Dict[str, Any]) -> b
 
 
 async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
-    """Delete screener setup and cascade delete all related data."""
+    """Archive then delete screener setup and cascade delete all related data."""
     try:
         db = await get_db()
+        # Archive the setup before deletion
+        setup_doc = await db.screener_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
+        if setup_doc:
+            await archive_setup(setup_doc, "screener")
         # Clean up all related DB records first
         await db.orders.delete_many({"algo_setup_id": setup_id})
         await db.positions.delete_many({"algo_setup_id": setup_id})

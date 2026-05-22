@@ -17,6 +17,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from database.journal import journal_ops
+from database.crud import (
+    get_algo_setups_by_user, get_screener_setups_by_user,
+    get_archived_setups_by_user, get_archived_setup_by_id,
+    get_api_credentials_by_user
+)
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -141,7 +146,7 @@ async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAU
 
 
 async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Level 2: API Dashboard — stats for one API, lists strategy buttons."""
+    """Level 2: API Dashboard — stats for one API, with Active/Inactive separation."""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -172,18 +177,122 @@ async def journal_api_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
         msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
         msg += f"🏦 Exchange Fees: ${fees:.2f}\n"
-        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
-        msg += "Select a Strategy below:"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
 
-    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    # Separate active vs inactive strategies for this API
+    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_live_names = set()
+    for s in algo_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    
+    active_strategies = [s for s in all_strategies if s in active_live_names]
+    inactive_strategies = [s for s in all_strategies if s not in active_live_names]
+
     keyboard = [_get_dir_filter_row("lj", current_dir)]
-
-    for strat in strategies:
-        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
+    
+    if active_strategies:
+        keyboard.append([InlineKeyboardButton(f"🟢 Active Setups ({len(active_strategies)})", callback_data=f"lj_filter_active_{api_name}")])
+    if inactive_strategies:
+        keyboard.append([InlineKeyboardButton(f"⚪ Inactive / Archived ({len(inactive_strategies)})", callback_data=f"lj_filter_inactive_{api_name}")])
 
     keyboard.append([InlineKeyboardButton(f"📋 Recent Trades ({api_name})", callback_data="journal_recent_15")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Overview", callback_data="journal_dashboard")])
 
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def lj_filter_active_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show only active live strategies for the current API."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    
+    # Extract api_name from callback data
+    api_name = query.data.replace("lj_filter_active_", "")
+    context.user_data['lj_current_api'] = api_name
+    current_dir = context.user_data.get('lj_direction', 'all')
+    
+    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_live_names = set()
+    for s in algo_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    
+    active_strategies = [s for s in all_strategies if s in active_live_names]
+    
+    msg = f"🟢 **Active Live Setups ({api_name})**\n"
+    msg += _dir_label(current_dir) + "\n"
+    
+    if not active_strategies:
+        msg += "No active live setups with trade history."
+    else:
+        msg += f"Found {len(active_strategies)} active setup(s).\nSelect one to view performance:"
+    
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
+    for strat in active_strategies:
+        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"lj_api_{api_name}")])
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def lj_filter_inactive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show only inactive/archived live strategies for the current API."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    
+    api_name = query.data.replace("lj_filter_inactive_", "")
+    context.user_data['lj_current_api'] = api_name
+    current_dir = context.user_data.get('lj_direction', 'all')
+    
+    all_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_live_names = set()
+    for s in algo_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if not s.get("is_paper_trade", False):
+            active_live_names.add(s.get("setup_name"))
+    
+    inactive_strategies = [s for s in all_strategies if s not in active_live_names]
+    
+    archived = await get_archived_setups_by_user(user_id, is_paper_trade=False)
+    archived_by_name = {a.get("setup_name"): a for a in archived}
+    
+    msg = f"⚪ **Inactive / Archived Live Setups ({api_name})**\n"
+    msg += _dir_label(current_dir) + "\n"
+    
+    if not inactive_strategies:
+        msg += "No inactive live setups with trade history."
+    else:
+        msg += f"Found {len(inactive_strategies)} inactive setup(s).\nSelect one to view performance:"
+    
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
+    for strat in inactive_strategies:
+        has_archive = "📦 " if strat in archived_by_name else "📁 "
+        keyboard.append([
+            InlineKeyboardButton(f"{has_archive}{strat}", callback_data=f"lj_strat_{strat}"),
+            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}")
+        ])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"lj_api_{api_name}")])
+    
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
@@ -451,7 +560,7 @@ async def journal_export_callback(update: Update, context: ContextTypes.DEFAULT_
 # ============================================================
 
 async def paper_journal_dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the Level 1 paper journal dashboard (Overall Stats & Strategy List)."""
+    """Displays the Level 1 paper journal dashboard with Active/Inactive separation."""
     query = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -483,13 +592,30 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
         msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
         msg += _build_leverage_summary(trades)
-        msg += f"\nSelect a Strategy below to view its specific performance:"
 
-    strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
+    # Separate active vs inactive strategies
+    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
+    
+    # Get active setup names (both algo and screener, paper only)
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_paper_names = set()
+    for s in algo_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    
+    active_strategies = [s for s in all_journal_strategies if s in active_paper_names]
+    inactive_strategies = [s for s in all_journal_strategies if s not in active_paper_names]
+    
     keyboard = [_get_dir_filter_row("pj", current_dir)]
     
-    for strat in strategies:
-        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"pj_strat_{strat}")])
+    if active_strategies:
+        keyboard.append([InlineKeyboardButton(f"🟢 Active Setups ({len(active_strategies)})", callback_data="pj_filter_active")])
+    if inactive_strategies:
+        keyboard.append([InlineKeyboardButton(f"⚪ Inactive / Archived ({len(inactive_strategies)})", callback_data="pj_filter_inactive")])
     
     keyboard.append([
         InlineKeyboardButton("📋 Recent 15 Trades", callback_data="pjournal_recent_15"),
@@ -497,6 +623,88 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
     ])
     keyboard.append([InlineKeyboardButton("🗑️ Reset Journal", callback_data="pjournal_reset_start")])
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")])
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def pj_filter_active_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show only active paper strategies."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    
+    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
+    
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_paper_names = set()
+    for s in algo_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    
+    active_strategies = [s for s in all_journal_strategies if s in active_paper_names]
+    
+    msg = "🟢 **Active Paper Setups**\n"
+    msg += _dir_label(current_dir) + "\n"
+    
+    if not active_strategies:
+        msg += "No active paper setups with trade history."
+    else:
+        msg += f"Found {len(active_strategies)} active setup(s).\nSelect one to view performance:"
+    
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
+    for strat in active_strategies:
+        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"pj_strat_{strat}")])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")])
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def pj_filter_inactive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show only inactive/archived paper strategies."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+    current_dir = context.user_data.get('pj_direction', 'all')
+    
+    all_journal_strategies = await journal_ops.get_traded_strategies(user_id, is_paper_trade=True, direction=current_dir)
+    
+    algo_setups = await get_algo_setups_by_user(user_id)
+    screener_setups = await get_screener_setups_by_user(user_id)
+    active_paper_names = set()
+    for s in algo_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    for s in screener_setups:
+        if s.get("is_paper_trade", False):
+            active_paper_names.add(s.get("setup_name"))
+    
+    inactive_strategies = [s for s in all_journal_strategies if s not in active_paper_names]
+    
+    # Also get archived setups for "View Parameters" feature
+    archived = await get_archived_setups_by_user(user_id, is_paper_trade=True)
+    archived_by_name = {a.get("setup_name"): a for a in archived}
+    
+    msg = "⚪ **Inactive / Archived Paper Setups**\n"
+    msg += _dir_label(current_dir) + "\n"
+    
+    if not inactive_strategies:
+        msg += "No inactive paper setups with trade history."
+    else:
+        msg += f"Found {len(inactive_strategies)} inactive setup(s).\nSelect one to view performance:"
+    
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
+    for strat in inactive_strategies:
+        has_archive = "📦 " if strat in archived_by_name else "📁 "
+        keyboard.append([
+            InlineKeyboardButton(f"{has_archive}{strat}", callback_data=f"pj_strat_{strat}"),
+            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}")
+        ])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")])
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -632,6 +840,90 @@ async def pjournal_asset_callback(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton(f"🔙 Back to {strategy}", callback_data=f"pj_strat_{strategy}")]
     ]
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def view_archived_params_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display the full configuration of an archived/inactive setup."""
+    query = update.callback_query
+    await query.answer()
+    
+    # callback_data = "view_arch_params_{setup_name}"
+    setup_name = query.data.replace("view_arch_params_", "")
+    user_id = str(query.from_user.id)
+    
+    # Try to find in archived_setups by name
+    archived_list = await get_archived_setups_by_user(user_id, is_paper_trade=True)
+    archived_list += await get_archived_setups_by_user(user_id, is_paper_trade=False)
+    
+    setup = None
+    for a in archived_list:
+        if a.get("setup_name") == setup_name:
+            setup = a
+            break
+    
+    # Also check active setups (user might click from active view)
+    if not setup:
+        algo_setups = await get_algo_setups_by_user(user_id)
+        screener_setups = await get_screener_setups_by_user(user_id)
+        for s in algo_setups + screener_setups:
+            if s.get("setup_name") == setup_name:
+                setup = s
+                break
+    
+    if not setup:
+        msg = f"⚠️ **Setup: {setup_name}**\n\n"
+        msg += "No archived parameters found for this setup.\n"
+        msg += "_This setup was deleted before the archiving system was enabled._"
+    else:
+        setup_type = setup.get("setup_type", "algo").upper()
+        msg = f"📦 **Archived Setup Parameters**\n\n"
+        msg += f"**Name:** {setup.get('setup_name', 'N/A')}\n"
+        msg += f"**Type:** {setup_type}\n"
+        msg += f"**Description:** {setup.get('description', 'N/A')}\n"
+        msg += f"**API:** {setup.get('api_name', 'N/A')}\n"
+        msg += f"**Indicator:** {setup.get('indicator', 'N/A')}\n"
+        msg += f"**Direction:** {setup.get('direction', 'N/A')}\n"
+        msg += f"**Timeframe:** {setup.get('timeframe', 'N/A')}\n"
+        
+        if setup_type == "SCREENER":
+            msg += f"**Asset Selection:** {setup.get('asset_selection_type', 'N/A')}\n"
+        else:
+            msg += f"**Asset:** {setup.get('asset', 'N/A')}\n"
+        
+        msg += f"**Lot Size:** {setup.get('lot_size', 'N/A')}\n"
+        msg += f"**Paper Trade:** {'Yes' if setup.get('is_paper_trade') else 'No'}\n"
+        
+        # Indicator parameters
+        params = setup.get("indicator_params", {})
+        if params:
+            msg += f"\n⚙️ **Indicator Parameters:**\n"
+            for k, v in params.items():
+                msg += f"  {k}: {v}\n"
+        
+        # Preset info
+        preset_name = setup.get("preset_name") or setup.get("preset_id")
+        if preset_name:
+            msg += f"\n**Preset:** {preset_name}\n"
+        
+        # Archive date
+        archived_at = setup.get("archived_at")
+        if archived_at:
+            from datetime import timedelta
+            if hasattr(archived_at, 'strftime'):
+                ist = archived_at + timedelta(hours=5, minutes=30)
+                msg += f"\n_Archived: {ist.strftime('%Y-%m-%d %H:%M IST')}_"
+    
+    # Back button - go to the strategy's journal page
+    keyboard = [
+        [InlineKeyboardButton(f"📁 View Trades ({setup_name})", callback_data=f"pj_strat_{setup_name}")],
+        [InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")]
+    ]
+    
+    if len(msg) > 4000:
+        msg = msg[:3997] + "..."
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
 
 async def pjournal_search_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start conversation to search for an asset in a strategy."""
