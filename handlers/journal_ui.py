@@ -21,7 +21,7 @@ from database.journal import journal_ops
 from database.crud import (
     get_algo_setups_by_user, get_screener_setups_by_user,
     get_archived_setups_by_user, get_archived_setup_by_id,
-    get_api_credentials_by_user
+    get_api_credentials_by_user, delete_archived_setup_by_name
 )
 from config.settings import settings
 
@@ -294,7 +294,8 @@ async def lj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
         has_archive = "📦 " if strat in archived_by_name else "📁 "
         keyboard.append([
             InlineKeyboardButton(f"{has_archive}{strat}", callback_data=f"lj_strat_{strat}"),
-            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}")
+            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}"),
+            InlineKeyboardButton("🗑️", callback_data=f"wipe_strat_confirm_live_{strat}")
         ])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"lj_api_{api_name}")])
     
@@ -710,7 +711,8 @@ async def pj_filter_inactive_callback(update: Update, context: ContextTypes.DEFA
         has_archive = "📦 " if strat in archived_by_name else "📁 "
         keyboard.append([
             InlineKeyboardButton(f"{has_archive}{strat}", callback_data=f"pj_strat_{strat}"),
-            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}")
+            InlineKeyboardButton("🔍 Params", callback_data=f"view_arch_params_{strat}"),
+            InlineKeyboardButton("🗑️", callback_data=f"wipe_strat_confirm_paper_{strat}")
         ])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")])
     
@@ -932,6 +934,77 @@ async def view_archived_params_callback(update: Update, context: ContextTypes.DE
     
     if len(msg) > 4000:
         msg = msg[:3997] + "..."
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def wipe_strategy_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation before permanently wiping a strategy."""
+    query = update.callback_query
+    await query.answer()
+    
+    # callback_data = "wipe_strat_confirm_{paper|live}_{strategy_name}"
+    data = query.data.replace("wipe_strat_confirm_", "")
+    if data.startswith("paper_"):
+        mode = "paper"
+        strategy_name = data[6:]
+    elif data.startswith("live_"):
+        mode = "live"
+        strategy_name = data[5:]
+    else:
+        return
+    
+    msg = (
+        f"⚠️ **DELETE STRATEGY PERMANENTLY**\n\n"
+        f"**Strategy:** {strategy_name}\n"
+        f"**Type:** {'Paper' if mode == 'paper' else 'Live'}\n\n"
+        f"This will permanently delete:\n"
+        f"  - All trade history for this strategy\n"
+        f"  - Archived setup parameters\n"
+        f"  - P&L records from your journal\n\n"
+        f"**This action CANNOT be undone.**"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🗑️ Yes, Delete Everything", callback_data=f"wipe_strat_exec_{mode}_{strategy_name}")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="pj_filter_inactive" if mode == "paper" else "journal_dashboard")]
+    ]
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def wipe_strategy_execute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Permanently wipe a strategy: delete all journal trades + archived params."""
+    query = update.callback_query
+    await query.answer("Deleting...")
+    user_id = str(query.from_user.id)
+    
+    data = query.data.replace("wipe_strat_exec_", "")
+    if data.startswith("paper_"):
+        is_paper = True
+        strategy_name = data[6:]
+    elif data.startswith("live_"):
+        is_paper = False
+        strategy_name = data[5:]
+    else:
+        return
+    
+    # Delete journal trades and archived setup in parallel
+    deleted_count, _ = await asyncio.gather(
+        journal_ops.wipe_strategy(user_id, strategy_name, is_paper_trade=is_paper),
+        delete_archived_setup_by_name(user_id, strategy_name)
+    )
+    
+    msg = (
+        f"✅ **Strategy Wiped Successfully**\n\n"
+        f"**Strategy:** {strategy_name}\n"
+        f"**Trades Deleted:** {deleted_count}\n"
+        f"**Archived Params:** Removed\n\n"
+        f"This strategy has been permanently erased."
+    )
+    
+    back_data = "pj_filter_inactive" if is_paper else "journal_dashboard"
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data=back_data)]]
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 

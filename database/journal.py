@@ -176,4 +176,17 @@ class JournalOperations:
             logger.error(f"Failed to clear paper journal: {e}")
             return False
 
+    async def wipe_strategy(self, user_id: str, strategy_name: str, is_paper_trade: bool = True) -> int:
+        """Permanently delete all journal trades for a specific strategy."""
+        try:
+            result = await self.collection.delete_many({
+                "user_id": user_id,
+                "strategy_name": strategy_name,
+                "is_paper_trade": is_paper_trade
+            })
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Failed to wipe strategy '{strategy_name}': {e}")
+            return 0
+
 journal_ops = JournalOperations()

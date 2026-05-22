@@ -331,6 +331,20 @@ async def get_archived_setup_by_id(original_id: str) -> Optional[Dict[str, Any]]
         return None
 
 
+async def delete_archived_setup_by_name(user_id: str, setup_name: str) -> bool:
+    """Delete an archived setup by its name for a user."""
+    try:
+        db = await get_db()
+        result = await db.archived_setups.delete_many({
+            "user_id": user_id,
+            "setup_name": setup_name
+        })
+        return result.deleted_count > 0
+    except Exception as e:
+        logger.error(f"Failed to delete archived setup '{setup_name}': {e}")
+        return False
+
+
 async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     """
     Archive then delete algo setup and cascade delete all related data.

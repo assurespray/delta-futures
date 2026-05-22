@@ -442,7 +442,8 @@ def create_application() -> Application:
         pjournal_reset_start_callback, pjournal_reset_execute_callback,
         pjournal_set_dir_callback,
         pj_filter_active_callback, pj_filter_inactive_callback,
-        view_archived_params_callback
+        view_archived_params_callback,
+        wipe_strategy_confirm_callback, wipe_strategy_execute_callback
     )
     # Live Journal — 4-tier: Overall → API → Strategy → Asset
     application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
@@ -456,6 +457,9 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(journal_export_callback, pattern="^journal_export_csv$"))
     # Archived setup parameters viewer
     application.add_handler(CallbackQueryHandler(view_archived_params_callback, pattern="^view_arch_params_"))
+    # Strategy wipe (delete all trades + archive)
+    application.add_handler(CallbackQueryHandler(wipe_strategy_confirm_callback, pattern="^wipe_strat_confirm_"))
+    application.add_handler(CallbackQueryHandler(wipe_strategy_execute_callback, pattern="^wipe_strat_exec_"))
     # Paper Journal — 3-tier: Overall → Strategy → Asset
     from handlers.journal_ui import (
         pjournal_strategy_callback, pjournal_asset_callback,
