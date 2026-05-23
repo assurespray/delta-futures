@@ -4,9 +4,10 @@ import logging
 import json  # ← MISSING IMPORT!
 from typing import Dict, Any, Optional
 import httpx
+import time
 from config.settings import settings
 from config.constants import REQUEST_RETRY_ATTEMPTS, REQUEST_RETRY_DELAY
-from api.authentication import get_auth_headers
+from api.authentication import get_auth_headers, set_time_offset
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,26 @@ class DeltaExchangeClient:
                 if retry < REQUEST_RETRY_ATTEMPTS:
                     return await self._request(method, endpoint, params, json_data, retry + 1)
         
+            elif response.status_code == 401:
+                # Handle expired signature automatically for clock drift
+                try:
+                    resp_json = response.json()
+                    err = resp_json.get("error", {})
+                    if err.get("code") == "expired_signature":
+                        context = err.get("context", {})
+                        server_time = context.get("server_time")
+                        if server_time:
+                            new_offset = int(server_time) - int(time.time())
+                            set_time_offset(new_offset)
+                            if retry < REQUEST_RETRY_ATTEMPTS:
+                                logger.info("🔄 Retrying request after time drift correction...")
+                                return await self._request(method, endpoint, params, json_data, retry + 1)
+                except Exception:
+                    pass
+                    
+                logger.error(f"❌ API request failed: {response.status_code} - {response.text}")
+                return None
+
             else:
                 logger.error(f"❌ API request failed: {response.status_code} - {response.text}")
                 return None

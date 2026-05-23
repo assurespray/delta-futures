@@ -7,6 +7,16 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Global offset to handle server clock drift (e.g., on Render.com)
+GLOBAL_TIME_OFFSET = 0
+
+def set_time_offset(offset: int):
+    """Update the global time offset for API signatures."""
+    global GLOBAL_TIME_OFFSET
+    if offset != 0:
+        logger.warning(f"🕒 Adjusting global time offset by {offset} seconds to sync with Delta Exchange.")
+    GLOBAL_TIME_OFFSET = offset
+
 
 def generate_signature(method: str, endpoint: str, api_secret: str, 
                       query_string: str = "", body: str = "") -> tuple[str, str]:
@@ -24,7 +34,8 @@ def generate_signature(method: str, endpoint: str, api_secret: str,
         Tuple of (signature, timestamp)
     """
     try:
-        timestamp = str(int(time.time()))
+        # Incorporate global offset to correct clock drift automatically
+        timestamp = str(int(time.time()) + GLOBAL_TIME_OFFSET)
         
         # Build signature string: METHOD + TIMESTAMP + ENDPOINT + QUERY_STRING + BODY
         signature_string = method.upper() + timestamp + endpoint
