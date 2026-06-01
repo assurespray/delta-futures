@@ -18,6 +18,7 @@ class LoggerBot:
             self.chat_id = settings.telegram_logger_chat_id
             self.flip_chat_id = settings.telegram_flip_chat_id
             self.trade_chat_id = settings.telegram_trade_chat_id
+            self.paper_chat_id = settings.telegram_paper_chat_id
             self.enabled = True
             logger.info("✅ Logger bot initialized")
         except Exception as e:
@@ -84,20 +85,17 @@ class LoggerBot:
 
     async def send_trade_alert(self, message: str, parse_mode: str = "Markdown"):
         """
-        Send trade alert to the configured trade chat ID using the MAIN Telegram bot.
-        Falls back to logger bot chat if no trade chat ID is set.
+        Send REAL trade alert to the configured trade chat ID using the Logger bot.
+        Falls back to default logger chat if no trade chat ID is set.
         """
-        if self.trade_chat_id and self.main_bot_enabled:
-            try:
-                await self.main_bot.send_message(
-                    chat_id=self.trade_chat_id,
-                    text=message,
-                    parse_mode=parse_mode
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to send trade alert to {self.trade_chat_id}: {e}")
-        else:
-            await self.send_message(message, parse_mode=parse_mode)
+        await self.send_message(message, parse_mode=parse_mode, chat_id=self.trade_chat_id)
+
+    async def send_paper_alert(self, message: str, parse_mode: str = "Markdown"):
+        """
+        Send PAPER trade alert to the configured paper chat ID using the Logger bot.
+        Falls back to default logger chat if no paper chat ID is set.
+        """
+        await self.send_message(message, parse_mode=parse_mode, chat_id=self.paper_chat_id)
 
     async def send_info(self, message: str):
         """Send info level message."""
@@ -151,7 +149,7 @@ class LoggerBot:
         
         message += f"\n_Time: {self._get_timestamp()}_"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
     
     async def send_trade_exit(self, setup_name: str, asset: str, direction: str,
                              exit_reason: str):
@@ -171,7 +169,7 @@ class LoggerBot:
         message += f"**Exit Reason:** {exit_reason}\n"
         message += f"\n_Time: {self._get_timestamp()}_"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
     
     async def send_pnl_summary(self, setup_name: str, asset: str, pnl_usd: float, pnl_inr: float):
         """
@@ -193,7 +191,7 @@ class LoggerBot:
         message += f"**PnL:** {pnl_usd_str} ({pnl_inr_str})\n"
         message += f"\n_Time: {self._get_timestamp()}_"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
     
     def _get_timestamp(self) -> str:
         """Get formatted timestamp in IST."""
@@ -219,7 +217,7 @@ class LoggerBot:
             f"_No bad trade - signal protection active!_\n"
             f"_Time: {self._get_timestamp()}_"
         )
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
 
     async def send_indicator_flip(self, setup_name: str, asset: str, timeframe: str,
                                   indicator_name: str, old_signal_text: str, new_signal_text: str,
@@ -408,7 +406,7 @@ class LoggerBot:
         
         message += f"└ Time: {self._get_timestamp()}"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
 
     async def send_trade_exit_detail(self, setup_name: str, asset: str, timeframe: str,
                                     direction: str, entry_price: float, exit_price: float,
@@ -456,7 +454,7 @@ class LoggerBot:
         
         message += f"└ Time: {self._get_timestamp()}"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.trade_chat_id)
 
 # Global logger bot instance
 logger_bot = LoggerBot()

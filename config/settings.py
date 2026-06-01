@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     telegram_logger_chat_id: str = Field(..., env="TELEGRAM_LOGGER_CHAT_ID")
     telegram_flip_chat_id: Optional[str] = Field(default=None, env="TELEGRAM_FLIP_CHAT_ID")
     telegram_trade_chat_id: Optional[str] = Field(default=None, env="TELEGRAM_TRADE_CHAT_ID")
+    telegram_paper_chat_id: Optional[str] = Field(default=None, env="TELEGRAM_PAPER_CHAT_ID")
     
     # MongoDB Configuration
     mongodb_uri: str = Field(..., env="MONGODB_URI")
