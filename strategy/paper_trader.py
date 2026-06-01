@@ -145,8 +145,7 @@ class PaperTrader:
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
                     asyncio.create_task(logger_bot.send_message(msg))
-                    if user_id:
-                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                    asyncio.create_task(logger_bot.send_trade_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Notification error: {e}")
                 
@@ -176,8 +175,7 @@ class PaperTrader:
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
                     asyncio.create_task(logger_bot.send_message(msg))
-                    if user_id:
-                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                    asyncio.create_task(logger_bot.send_trade_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Pending Notification error: {e}")
                 
@@ -261,8 +259,7 @@ class PaperTrader:
                     f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                 )
                 asyncio.create_task(logger_bot.send_message(msg))
-                if user_id:
-                    asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                asyncio.create_task(logger_bot.send_trade_alert(msg))
             except Exception as e:
                 logger.error(f"[PAPER] Exit Notification error: {e}")
             
@@ -342,8 +339,7 @@ class PaperTrader:
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
                     asyncio.create_task(logger_bot.send_message(msg))
-                    if user_id:
-                        asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                    asyncio.create_task(logger_bot.send_trade_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Pending Fill Notification error: {e}")
 
@@ -413,8 +409,7 @@ class PaperTrader:
                     f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                 )
                 asyncio.create_task(logger_bot.send_message(msg))
-                if user_id:
-                    asyncio.create_task(logger_bot.send_to_user(user_id, msg))
+                asyncio.create_task(logger_bot.send_trade_alert(msg))
             except Exception as e:
                 logger.error(f"[PAPER] Cancel Notification error: {e}")
                 

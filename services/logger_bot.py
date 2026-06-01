@@ -16,6 +16,8 @@ class LoggerBot:
         try:
             self.bot = Bot(token=settings.telegram_logger_bot_token)
             self.chat_id = settings.telegram_logger_chat_id
+            self.flip_chat_id = settings.telegram_flip_chat_id
+            self.trade_chat_id = settings.telegram_trade_chat_id
             self.enabled = True
             logger.info("✅ Logger bot initialized")
         except Exception as e:
@@ -31,20 +33,22 @@ class LoggerBot:
             logger.error(f"❌ Failed to initialize main bot reference: {e}")
             self.main_bot_enabled = False
     
-    async def send_message(self, message: str, parse_mode: str = "Markdown"):
+    async def send_message(self, message: str, parse_mode: str = "Markdown", chat_id: Optional[str] = None):
         """
         Send message via logger bot.
         
         Args:
             message: Message to send
             parse_mode: Parse mode (Markdown or HTML)
+            chat_id: Optional target chat ID (defaults to default logger chat_id)
         """
         if not self.enabled:
             return
         
+        target_chat_id = chat_id if chat_id else self.chat_id
         try:
             await self.bot.send_message(
-                chat_id=self.chat_id,
+                chat_id=target_chat_id,
                 text=message,
                 parse_mode=parse_mode
             )
@@ -77,6 +81,23 @@ class LoggerBot:
             logger.error(f"❌ Failed to send main bot message to {user_id}: {e}")
         except Exception as e:
             logger.error(f"❌ Exception sending main bot message to {user_id}: {e}")
+
+    async def send_trade_alert(self, message: str, parse_mode: str = "Markdown"):
+        """
+        Send trade alert to the configured trade chat ID using the MAIN Telegram bot.
+        Falls back to logger bot chat if no trade chat ID is set.
+        """
+        if self.trade_chat_id and self.main_bot_enabled:
+            try:
+                await self.main_bot.send_message(
+                    chat_id=self.trade_chat_id,
+                    text=message,
+                    parse_mode=parse_mode
+                )
+            except Exception as e:
+                logger.error(f"❌ Failed to send trade alert to {self.trade_chat_id}: {e}")
+        else:
+            await self.send_message(message, parse_mode=parse_mode)
 
     async def send_info(self, message: str):
         """Send info level message."""
@@ -259,7 +280,7 @@ class LoggerBot:
         
         message += f"\n_Time: {self._get_timestamp()}_"
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.flip_chat_id)
 
     async def send_flip_log(self, setup_name: str, asset: str, timeframe: str,
                            indicator_name: str, old_signal_text: str, new_signal_text: str,
@@ -316,7 +337,7 @@ class LoggerBot:
             f"_Time: {self._get_timestamp()}_"
         )
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.flip_chat_id)
 
     async def send_no_signal_log(self, setup_name: str, asset: str, timeframe: str,
                                 primary_signal: int, secondary_signal: int,
@@ -341,7 +362,7 @@ class LoggerBot:
             f"_Time: {self._get_timestamp()}_"
         )
         
-        await self.send_message(message)
+        await self.send_message(message, chat_id=self.flip_chat_id)
 
     async def send_trade_entry_detail(self, setup_name: str, asset: str, timeframe: str,
                                      direction: str, entry_price: float, lot_size: int,
