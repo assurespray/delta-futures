@@ -443,7 +443,9 @@ def create_application() -> Application:
         pjournal_set_dir_callback,
         pj_filter_active_callback, pj_filter_inactive_callback,
         view_archived_params_callback,
-        wipe_strategy_confirm_callback, wipe_strategy_execute_callback
+        wipe_strategy_confirm_callback, wipe_strategy_execute_callback,
+        pj_all_assets_callback, pj_global_asset_callback,
+        pj_gsearch_start_callback, pj_gsearch_receive_callback
     )
     # Live Journal — 4-tier: Overall → API → Strategy → Asset
     application.add_handler(CallbackQueryHandler(journal_dashboard_callback, pattern="^journal_dashboard$"))
@@ -476,7 +478,11 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(pjournal_reset_start_callback, pattern="^pjournal_reset_start$"))
     application.add_handler(CallbackQueryHandler(pjournal_reset_execute_callback, pattern="^pjournal_reset_execute$"))
 
-    # Paper Journal Search Conversation
+    # Paper Journal — Global Asset Browse & Search
+    application.add_handler(CallbackQueryHandler(pj_all_assets_callback, pattern="^pj_all_assets"))
+    application.add_handler(CallbackQueryHandler(pj_global_asset_callback, pattern="^pj_global_asset_"))
+
+    # Paper Journal Search Conversation (strategy-scoped)
     pjournal_search_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(pjournal_search_start_callback, pattern="^pj_search_start_")],
         states={
@@ -490,6 +496,21 @@ def create_application() -> Application:
         allow_reentry=True
     )
     application.add_handler(pjournal_search_conv)
+
+    # Paper Journal Global Search Conversation (cross-strategy)
+    pjournal_gsearch_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(pj_gsearch_start_callback, pattern="^pj_gsearch_start$")],
+        states={
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, pj_gsearch_receive_callback)]
+        },
+        fallbacks=[
+            CallbackQueryHandler(paper_journal_dashboard_callback, pattern="^paper_journal_dashboard$"),
+            CommandHandler("cancel", cancel_conversation)
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(pjournal_gsearch_conv)
     
     # Indicator Tracker
     application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))

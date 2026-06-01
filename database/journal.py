@@ -153,13 +153,17 @@ class JournalOperations:
             logger.error(f"Failed to fetch traded assets for strategy {strategy}: {e}")
             return []
 
-    async def get_traded_assets(self, user_id: str, is_paper_trade: bool = False) -> List[str]:
-        """Get unique list of assets traded by a user."""
+    async def get_traded_assets(self, user_id: str, is_paper_trade: bool = False, direction: str = None) -> List[str]:
+        """Get unique list of assets traded by a user, optionally filtered by direction."""
         try:
-            return await self.collection.distinct("asset", {
+            query = {
                 "user_id": user_id,
-                "is_paper_trade": is_paper_trade
-            })
+                "is_paper_trade": is_paper_trade,
+                "status": "closed"
+            }
+            if direction and direction != "all":
+                query["direction"] = direction
+            return await self.collection.distinct("asset", query)
         except Exception as e:
             logger.error(f"Failed to fetch traded assets: {e}")
             return []

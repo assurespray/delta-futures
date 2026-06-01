@@ -625,6 +625,11 @@ async def paper_journal_dashboard_callback(update: Update, context: ContextTypes
         keyboard.append([InlineKeyboardButton(f"⚪ Inactive / Archived ({len(inactive_strategies)})", callback_data="pj_filter_inactive")])
     
     keyboard.append([
+        InlineKeyboardButton("🪙 Browse All Assets", callback_data="pj_all_assets"),
+        InlineKeyboardButton("🔍 Search Asset", callback_data="pj_gsearch_start")
+    ])
+    
+    keyboard.append([
         InlineKeyboardButton("📋 Recent 15 Trades", callback_data="pjournal_recent_15"),
         InlineKeyboardButton("📄 Export CSV", callback_data="pjournal_export_csv")
     ])
@@ -1249,6 +1254,269 @@ async def paper_journal_export_callback(update: Update, context: ContextTypes.DE
 
 
 # ============================================================
+# GLOBAL ASSET FILTER — Browse & Search across ALL strategies
+# ============================================================
+
+async def pj_all_assets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Browse all traded assets across every strategy (paginated grid with stats)."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+
+    # Parse page from callback_data: pj_all_assets or pj_all_assets:p2
+    page = 0
+    if ":p" in query.data:
+        try:
+            page = int(query.data.rsplit(":p", 1)[1])
+        except:
+            page = 0
+
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
+
+    current_dir = context.user_data.get('pj_direction', 'all')
+
+    # Fetch all trades and all unique assets in parallel
+    trades, assets = await asyncio.gather(
+        journal_ops.get_trades_by_asset(user_id, is_paper_trade=True, direction=current_dir),
+        journal_ops.get_traded_assets(user_id, is_paper_trade=True, direction=current_dir)
+    )
+
+    if not assets:
+        keyboard = [
+            _get_dir_filter_row("pj", current_dir),
+            [InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")]
+        ]
+        await query.edit_message_text(
+            "🪙 **Browse All Assets**\n" + _dir_label(current_dir) + "\nNo traded assets found.",
+            reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+        )
+        return
+
+    # Build per-asset stats from trades
+    asset_stats = {}
+    for t in trades:
+        a = t.get("asset", "Unknown")
+        if a not in asset_stats:
+            asset_stats[a] = {"count": 0, "net_pnl": 0.0}
+        asset_stats[a]["count"] += 1
+        asset_stats[a]["net_pnl"] += t.get("net_pnl", 0)
+
+    # Sort assets by trade count descending
+    sorted_assets = sorted(assets, key=lambda a: asset_stats.get(a, {}).get("count", 0), reverse=True)
+
+    total_trades = len(trades)
+    total_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+    ASSETS_PER_PAGE = 14
+    total_assets = len(sorted_assets)
+    total_pages = max(1, (total_assets + ASSETS_PER_PAGE - 1) // ASSETS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * ASSETS_PER_PAGE
+    end = min(start + ASSETS_PER_PAGE, total_assets)
+    page_assets = sorted_assets[start:end]
+
+    msg = "🪙 **Browse All Assets**\n"
+    msg += _dir_label(current_dir)
+    msg += f"📊 {total_assets} assets | {total_trades} trades | Net P&L: ${total_pnl:.2f}\n"
+    if total_pages > 1:
+        msg += f"Page {page + 1}/{total_pages}\n"
+    msg += "\nSelect an asset to view details:"
+
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
+
+    row = []
+    for asset in page_assets:
+        stats = asset_stats.get(asset, {"count": 0, "net_pnl": 0.0})
+        pnl_icon = "🟢" if stats["net_pnl"] >= 0 else "🔴"
+        label = f"{pnl_icon} {asset} ({stats['count']})"
+        row.append(InlineKeyboardButton(label, callback_data=f"pj_global_asset_{asset}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    # Pagination
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"pj_all_assets:p{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"pj_all_assets:p{page + 1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")])
+
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def pj_global_asset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cross-strategy asset detail: stats for one asset across ALL strategies."""
+    query = update.callback_query
+    await query.answer()
+    user_id = str(query.from_user.id)
+
+    asset = query.data.replace("pj_global_asset_", "")
+    current_dir = context.user_data.get('pj_direction', 'all')
+
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data['pj_current_asset'] = asset
+
+    trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, direction=current_dir)
+
+    total_trades = len(trades)
+    wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
+    losses = total_trades - wins
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+    gross_pnl = sum(t.get("gross_pnl", 0) for t in trades)
+    fees = sum(t.get("total_fees", 0) for t in trades)
+    net_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+    msg = f"🪙 **Asset:** {asset}\n"
+    msg += _dir_label(current_dir)
+
+    if total_trades == 0:
+        msg += "No trades found."
+    else:
+        msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
+        msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
+        msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+        msg += _build_leverage_summary(trades)
+
+        # Per-strategy breakdown
+        strat_stats = {}
+        for t in trades:
+            s = t.get("strategy_name", "Unknown")
+            if s not in strat_stats:
+                strat_stats[s] = {"count": 0, "net_pnl": 0.0}
+            strat_stats[s]["count"] += 1
+            strat_stats[s]["net_pnl"] += t.get("net_pnl", 0)
+
+        if len(strat_stats) > 1:
+            msg += f"\n📁 **Per Strategy:**\n"
+            for s, data in sorted(strat_stats.items(), key=lambda x: x[1]["net_pnl"], reverse=True):
+                p = data["net_pnl"]
+                msg += f"  {s}: {data['count']} trades | ${p:+.2f}\n"
+
+    keyboard = [
+        _get_dir_filter_row("pj", current_dir),
+        [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
+        [InlineKeyboardButton("🔙 Back to Assets", callback_data="pj_all_assets")]
+    ]
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def pj_gsearch_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start global asset search (across all strategies)."""
+    query = update.callback_query
+    await query.answer()
+
+    # Clear strategy scope so this is a global search
+    context.user_data.pop('pj_current_strategy', None)
+    context.user_data.pop('pj_current_asset', None)
+
+    keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="paper_journal_dashboard")]]
+    await query.edit_message_text(
+        "🔍 **Search Asset (All Strategies)**\n\n"
+        "Type the asset name or partial match (e.g. BTC, ethusd, SOL):",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    return 1
+
+
+async def pj_gsearch_receive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text input for global asset search."""
+    from telegram.ext import ConversationHandler
+    search_term = update.message.text.strip().upper()
+    user_id = str(update.effective_user.id)
+    current_dir = context.user_data.get('pj_direction', 'all')
+
+    assets = await journal_ops.get_traded_assets(user_id, is_paper_trade=True, direction=current_dir)
+    matches = [a for a in assets if search_term in a.upper()]
+
+    if not matches:
+        keyboard = [
+            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="paper_journal_dashboard")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
+        await update.message.reply_text(
+            f"❌ No assets matching '{search_term}' found.\n"
+            "Try again or go back.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return 1
+
+    if len(matches) == 1:
+        asset = matches[0]
+        context.user_data['pj_current_asset'] = asset
+        context.user_data.pop('pj_current_strategy', None)
+
+        trades = await journal_ops.get_trades_by_asset(user_id, asset=asset, is_paper_trade=True, direction=current_dir)
+        total_trades = len(trades)
+        wins = sum(1 for t in trades if t.get("net_pnl", 0) > 0)
+        losses = total_trades - wins
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        gross_pnl = sum(t.get("gross_pnl", 0) for t in trades)
+        fees = sum(t.get("total_fees", 0) for t in trades)
+        net_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
+        msg = f"✅ Match found: **{asset}**\n\n"
+        msg += f"🪙 **Asset:** {asset}\n"
+        msg += _dir_label(current_dir)
+        msg += f"📈 Win Rate: {win_rate:.1f}% ({wins}W / {losses}L)\n"
+        msg += f"💵 Gross P&L: ${gross_pnl:.2f}\n"
+        msg += f"🏦 Simulated Fees: ${fees:.2f}\n"
+        msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n"
+        msg += _build_leverage_summary(trades)
+
+        # Per-strategy breakdown
+        strat_stats = {}
+        for t in trades:
+            s = t.get("strategy_name", "Unknown")
+            if s not in strat_stats:
+                strat_stats[s] = {"count": 0, "net_pnl": 0.0}
+            strat_stats[s]["count"] += 1
+            strat_stats[s]["net_pnl"] += t.get("net_pnl", 0)
+
+        if len(strat_stats) > 1:
+            msg += f"\n📁 **Per Strategy:**\n"
+            for s, data in sorted(strat_stats.items(), key=lambda x: x[1]["net_pnl"], reverse=True):
+                p = data["net_pnl"]
+                msg += f"  {s}: {data['count']} trades | ${p:+.2f}\n"
+
+        keyboard = [
+            [InlineKeyboardButton(f"📋 Recent Trades ({asset})", callback_data="pjournal_recent_15")],
+            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="paper_journal_dashboard")]
+        ]
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return ConversationHandler.END
+
+    # Multiple matches — show button grid
+    context.user_data.pop('pj_current_asset', None)
+
+    msg = f"🔍 Multiple assets match '{search_term}'. Select one:\n"
+    keyboard = []
+    row = []
+    for asset in matches:
+        row.append(InlineKeyboardButton(f"🪙 {asset}", callback_data=f"pj_global_asset_{asset}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="paper_journal_dashboard")])
+
+    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return ConversationHandler.END
+
+
+# ============================================================
 # DIRECTION FILTER TOGGLE CALLBACKS
 # ============================================================
 
@@ -1291,5 +1559,8 @@ async def pjournal_set_dir_callback(update: Update, context: ContextTypes.DEFAUL
         await pjournal_asset_callback(update, context)
     elif strategy:
         await pjournal_strategy_callback(update, context)
+    elif asset:
+        # Global asset view (no strategy scope)
+        await pj_global_asset_callback(update, context)
     else:
         await paper_journal_dashboard_callback(update, context)

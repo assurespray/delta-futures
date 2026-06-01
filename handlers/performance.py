@@ -24,9 +24,10 @@ import matplotlib.dates as mdates
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database.crud import (
-    get_paper_balance, get_paper_trade_activities,
+    get_paper_balance,
     get_real_trade_activities
 )
+from database.journal import journal_ops
 from config.settings import settings
 from config.constants import PAPER_TRADE_DEFAULT_BALANCE
 
@@ -168,7 +169,7 @@ async def perf_paper_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer("Calculating...")
     
     user_id = str(query.from_user.id)
-    activities = await get_paper_trade_activities(user_id, closed_only=True)
+    activities = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     paper_bal = await get_paper_balance(user_id)
     
     if not activities:
@@ -203,7 +204,7 @@ async def perf_paper_chart_callback(update: Update, context: ContextTypes.DEFAUL
     await query.answer("Generating chart...")
     
     user_id = str(query.from_user.id)
-    activities = await get_paper_trade_activities(user_id, closed_only=True)
+    activities = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     paper_bal = await get_paper_balance(user_id)
     
     if not activities:
@@ -229,7 +230,7 @@ async def perf_paper_pnl_chart_callback(update: Update, context: ContextTypes.DE
     await query.answer("Generating chart...")
     
     user_id = str(query.from_user.id)
-    activities = await get_paper_trade_activities(user_id, closed_only=True)
+    activities = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     
     if not activities:
         back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_paper")]])
@@ -253,7 +254,7 @@ async def perf_paper_csv_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer("Generating CSV...")
     
     user_id = str(query.from_user.id)
-    activities = await get_paper_trade_activities(user_id)
+    activities = await journal_ops.get_trades_by_asset(user_id, is_paper_trade=True)
     
     if not activities:
         back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="perf_paper")]])
@@ -283,7 +284,7 @@ def get_actual_pnl(trade: Dict[str, Any]) -> float:
     if not entry or not exit_p:
         return 0.0
     mult = get_contract_multiplier(trade.get('asset', ''))
-    lot = trade.get('lot_size', 0)
+    lot = trade.get('lot_size', 0) or trade.get('quantity', 0)
     if trade.get('direction', trade.get('current_position', '')) == 'long':
         return (exit_p - entry) * lot * mult
     else:
@@ -361,7 +362,7 @@ def _build_performance_message(
             margins = []
             for a in valid_trades:
                 asset = a.get("asset", "")
-                qty = a.get("quantity", a.get("lot_size", 0))
+                qty = a.get("lot_size", 0) or a.get("quantity", 0)
                 entry_price = a.get("entry_price", 0)
                 leverage = a["paper_leverage"]
                 if qty and entry_price and leverage:
@@ -595,10 +596,10 @@ def _generate_csv(
             
             row = [
                 act.get("trade_date", ""),
-                act.get("setup_name", ""),
+                act.get("setup_name", "") or act.get("strategy_name", ""),
                 act.get("asset", ""),
                 act.get("direction", ""),
-                act.get("lot_size", ""),
+                act.get("lot_size", "") or act.get("quantity", ""),
                 entry_time,
                 act.get("entry_price", ""),
                 exit_time,

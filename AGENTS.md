@@ -1,9 +1,9 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **delta-futures** (2729 symbols, 4853 relationships, 172 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **delta-futures** (2712 symbols, 4951 relationships, 202 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> **CRITICAL:** This is a Termux proot environment. If the index is stale, you MUST run `gitnexus-proot analyze` in terminal first (never use npx or gitnexus directly, or it will cause a memory corruption crash).
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
 ## Always Do
 
