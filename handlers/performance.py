@@ -533,7 +533,8 @@ def _generate_pnl_bar_chart(
         ]
         colors = ['#4CAF50' if p >= 0 else '#F44336' for p in pnls]
         
-        fig, ax = plt.subplots(figsize=(max(8, len(pnls) * 0.5), 5))
+        width = min(max(8, len(pnls) * 0.5), 30)
+        fig, ax = plt.subplots(figsize=(width, 5))
         
         x = range(len(pnls))
         ax.bar(x, pnls, color=colors, alpha=0.8, edgecolor='white', linewidth=0.5)
