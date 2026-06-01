@@ -144,7 +144,6 @@ class PaperTrader:
                         msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
-                    asyncio.create_task(logger_bot.send_message(msg))
                     asyncio.create_task(logger_bot.send_paper_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Notification error: {e}")
@@ -174,7 +173,6 @@ class PaperTrader:
                         msg += f"**Stop Loss:** ${float(stop_loss_price):.5f}\n"
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
-                    asyncio.create_task(logger_bot.send_message(msg))
                     asyncio.create_task(logger_bot.send_paper_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Pending Notification error: {e}")
@@ -258,7 +256,6 @@ class PaperTrader:
                     f"**{pnl_emoji} Net PnL:** ${net_pnl:.2f} (₹{pnl_inr:.2f})\n"
                     f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                 )
-                asyncio.create_task(logger_bot.send_message(msg))
                 asyncio.create_task(logger_bot.send_paper_alert(msg))
             except Exception as e:
                 logger.error(f"[PAPER] Exit Notification error: {e}")
@@ -338,7 +335,6 @@ class PaperTrader:
                         msg += f"**Stop Loss:** ${float(sl_price):.5f}\n"
                     msg += f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                     
-                    asyncio.create_task(logger_bot.send_message(msg))
                     asyncio.create_task(logger_bot.send_paper_alert(msg))
                 except Exception as e:
                     logger.error(f"[PAPER] Pending Fill Notification error: {e}")
@@ -408,7 +404,6 @@ class PaperTrader:
                     f"**Reason:** Setup invalidated (e.g. price reversed before entry hit)\n"
                     f"\n_Time: {to_ist_str(datetime.utcnow())}_"
                 )
-                asyncio.create_task(logger_bot.send_message(msg))
                 asyncio.create_task(logger_bot.send_paper_alert(msg))
             except Exception as e:
                 logger.error(f"[PAPER] Cancel Notification error: {e}")
