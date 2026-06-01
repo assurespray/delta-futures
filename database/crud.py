@@ -1072,7 +1072,7 @@ async def get_paper_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["is_closed"] = True
+            query["status"] = "closed"
         
         cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
@@ -1107,7 +1107,7 @@ async def get_real_trade_activities(
             query["trade_date"] = {"$gte": cutoff_date}
         
         if closed_only:
-            query["is_closed"] = True
+            query["status"] = "closed"
         
         cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
         activities = await cursor.to_list(length=5000)
