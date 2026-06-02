@@ -3,7 +3,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from database.crud import (
-    get_api_credentials_by_user, get_algo_setups_by_user,
+    get_api_credentials_by_user, get_algo_setups_by_paper_mode,
     create_algo_setup, delete_algo_setup, get_algo_setup_by_id,
     get_api_credential_by_id, update_algo_setup,
     get_strategy_presets_by_user, get_strategy_preset_by_id, ensure_default_presets,
@@ -33,7 +33,7 @@ async def algo_setups_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(query.from_user.id)
     
     # Get existing setups
-    setups = await get_algo_setups_by_user(user_id)
+    setups = await get_algo_setups_by_paper_mode(user_id, is_paper=False)
     
     message = "⚙️ **Algo Setups Management**\n\n"
     
@@ -445,7 +445,7 @@ async def algo_view_list_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_algo_setups_by_user(user_id)
+    setups = await get_algo_setups_by_paper_mode(user_id, is_paper=False)
     
     if not setups:
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_algo_setups")]]
@@ -978,7 +978,7 @@ async def algo_delete_list_callback(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_algo_setups_by_user(user_id)
+    setups = await get_algo_setups_by_paper_mode(user_id, is_paper=False)
     
     if not setups:
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_algo_setups")]]

@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from database.crud import (
     get_api_credentials_by_user, 
     create_screener_setup,
-    get_screener_setups_by_user,
+    get_screener_setups_by_paper_mode,
     delete_screener_setup,
     get_screener_setup_by_id,
     get_api_credential_by_id,
@@ -31,7 +31,7 @@ async def screener_setups_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_screener_setups_by_user(user_id)
+    setups = await get_screener_setups_by_paper_mode(user_id, is_paper=False)
     
     message = "📊 **Screener Setups (Multi-Asset Trading)**\n\n"
     
@@ -439,7 +439,7 @@ async def screener_view_list_callback(update: Update, context: ContextTypes.DEFA
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_screener_setups_by_user(user_id)
+    setups = await get_screener_setups_by_paper_mode(user_id, is_paper=False)
     
     if not setups:
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_screener_setups")]]
@@ -518,7 +518,7 @@ async def screener_delete_list_callback(update: Update, context: ContextTypes.DE
     await query.answer()
     
     user_id = str(query.from_user.id)
-    setups = await get_screener_setups_by_user(user_id)
+    setups = await get_screener_setups_by_paper_mode(user_id, is_paper=False)
     
     if not setups:
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_screener_setups")]]

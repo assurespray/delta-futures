@@ -369,16 +369,19 @@ class ScreenerEngine:
                 )
                 
                 if success:
-                    await self.logger_bot.send_trade_entry(
-                        setup_name=f"[SCREENER] {setup_name}",
-                        asset=asset,
-                        direction=entry_signal.side,
-                        entry_price=mapping["current_price"],
-                        lot_size=screener_setup.get("lot_size", 1),
-                        signal_text=mapping["primary_signal_text"],
-                        stop_loss=mapping["secondary_value"],
-                        api_name=screener_setup.get("api_name")
-                    )
+                    # Paper trades send their own notification via
+                    # paper_trader → send_paper_alert; only log for real trades.
+                    if not screener_setup.get("is_paper_trade", False):
+                        await self.logger_bot.send_trade_entry(
+                            setup_name=f"[SCREENER] {setup_name}",
+                            asset=asset,
+                            direction=entry_signal.side,
+                            entry_price=mapping["current_price"],
+                            lot_size=screener_setup.get("lot_size", 1),
+                            signal_text=mapping["primary_signal_text"],
+                            stop_loss=mapping["secondary_value"],
+                            api_name=screener_setup.get("api_name")
+                        )
                 else:
                     logger.warning(f"Entry placement failed for {asset} - keeping old screener cache for retry")
                     return
