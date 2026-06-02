@@ -94,6 +94,67 @@ def _build_leverage_summary(trades: list) -> str:
 # Level 1: Overall → Level 2: API → Level 3: Strategy → Level 4: Asset
 # ============================================================
 
+def _format_indicator_params(indicator: str, params: dict) -> str:
+    if not isinstance(params, dict):
+        params = {}
+        
+    if indicator == 'dual_supertrend':
+        return f"Dual ST (P:{params.get('perusu_atr','?')},{params.get('perusu_factor','?')} / S:{params.get('sirusu_atr','?')},{params.get('sirusu_factor','?')})"
+    elif indicator == 'supertrend':
+        return f"Single ST ({params.get('atr_length','?')}, {params.get('factor','?')})"
+    elif indicator == 'range_breakout':
+        return f"Range Breakout LB (EMA:{params.get('ema_length','?')})"
+    elif indicator == 'donchian_breakout':
+        return f"Donchian ({params.get('period','?')})"
+    
+    return indicator.replace('_', ' ').title()
+
+def _group_strategies(strategies: list, all_setups: list) -> tuple:
+    setup_map = {s.get("setup_name"): s for s in all_setups if s.get("setup_name")}
+    
+    groups = {}
+    ungrouped = []
+    
+    for strat in strategies:
+        setup = setup_map.get(strat)
+        if not setup:
+            ungrouped.append(strat)
+            continue
+            
+        indicator = setup.get("indicator", "")
+        params = setup.get("indicator_params", {})
+        
+        if isinstance(params, dict):
+            param_key = tuple(sorted(str(v) for k, v in params.items()))
+        else:
+            param_key = str(params)
+            
+        group_key = (indicator, param_key)
+        
+        if group_key not in groups:
+            groups[group_key] = {
+                "label": _format_indicator_params(indicator, params),
+                "strategies": []
+            }
+            
+        groups[group_key]["strategies"].append(strat)
+        
+    final_groups = {}
+    final_ungrouped = list(ungrouped)
+    
+    for key, data in groups.items():
+        if len(data["strategies"]) == 1:
+            final_ungrouped.append(data["strategies"][0])
+        else:
+            label = data["label"]
+            counter = 2
+            while label in final_groups:
+                label = f"{data['label']} ({counter})"
+                counter += 1
+            final_groups[label] = sorted(data["strategies"])
+            
+    return final_groups, sorted(final_ungrouped)
+
 async def journal_dashboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Level 1: Overall Dashboard — stats across all APIs, lists API buttons."""
     query = update.callback_query
@@ -237,6 +298,12 @@ async def lj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
     
     active_strategies = [s for s in all_strategies if s in active_live_names]
     
+    all_setups = algo_setups + screener_setups
+    final_groups, final_ungrouped = _group_strategies(active_strategies, all_setups)
+    
+    if "lj_groups" not in context.user_data:
+        context.user_data["lj_groups"] = {}
+    
     msg = f"🟢 **Active Live Setups ({api_name})**\n"
     msg += _dir_label(current_dir) + "\n"
     
@@ -246,12 +313,50 @@ async def lj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
         msg += f"Found {len(active_strategies)} active setup(s).\nSelect one to view performance:"
     
     keyboard = [_get_dir_filter_row("lj", current_dir)]
-    for strat in active_strategies:
+    
+    for idx, (label, strats) in enumerate(final_groups.items()):
+        grp_key = f"active_{idx}"
+        context.user_data["lj_groups"][grp_key] = strats
+        keyboard.append([InlineKeyboardButton(f"📁 {label} ({len(strats)})", callback_data=f"lj_grp_{grp_key}")])
+        
+    for strat in final_ungrouped:
         keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
+        
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=f"lj_api_{api_name}")])
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+async def lj_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    grp_key = query.data.replace("lj_grp_", "")
+    
+    if "lj_groups" not in context.user_data or grp_key not in context.user_data["lj_groups"]:
+        api_name = context.user_data.get('lj_current_api', '')
+        await query.edit_message_text(
+            "❌ Session expired. Please return to the dashboard.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data=f"lj_api_{api_name}" if api_name else "journal_dashboard")]])
+        )
+        return
+        
+    strats = context.user_data["lj_groups"][grp_key]
+    current_dir = context.user_data.get('lj_direction', 'all')
+    api_name = context.user_data.get('lj_current_api', '')
+    
+    msg = f"📁 **Strategy Group ({api_name})**\n"
+    msg += _dir_label(current_dir) + "\n"
+    msg += f"Select a specific setup variation:"
+    
+    keyboard = [_get_dir_filter_row("lj", current_dir)]
+    
+    for strat in strats:
+        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"lj_strat_{strat}")])
+        
+    back_data = "lj_filter_inactive_" + api_name if "inactive" in grp_key else "lj_filter_active_" + api_name
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=back_data)])
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def lj_filter_inactive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show only inactive/archived live strategies for the current API."""
@@ -667,6 +772,12 @@ async def pj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
     
     active_strategies = [s for s in all_journal_strategies if s in active_paper_names]
     
+    all_setups = algo_setups + screener_setups
+    final_groups, final_ungrouped = _group_strategies(active_strategies, all_setups)
+    
+    if "pj_groups" not in context.user_data:
+        context.user_data["pj_groups"] = {}
+    
     msg = "🟢 **Active Paper Setups**\n"
     msg += _dir_label(current_dir) + "\n"
     
@@ -676,12 +787,49 @@ async def pj_filter_active_callback(update: Update, context: ContextTypes.DEFAUL
         msg += f"Found {len(active_strategies)} active setup(s).\nSelect one to view performance:"
     
     keyboard = [_get_dir_filter_row("pj", current_dir)]
-    for strat in active_strategies:
+    
+    for idx, (label, strats) in enumerate(final_groups.items()):
+        grp_key = f"active_{idx}"
+        context.user_data["pj_groups"][grp_key] = strats
+        keyboard.append([InlineKeyboardButton(f"📁 {label} ({len(strats)})", callback_data=f"pj_grp_{grp_key}")])
+        
+    for strat in final_ungrouped:
         keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"pj_strat_{strat}")])
+        
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_journal_dashboard")])
     
     await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+
+async def pj_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    grp_key = query.data.replace("pj_grp_", "")
+    
+    if "pj_groups" not in context.user_data or grp_key not in context.user_data["pj_groups"]:
+        await query.edit_message_text(
+            "❌ Session expired. Please return to the dashboard.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Dashboard", callback_data="paper_journal_dashboard")]])
+        )
+        return
+        
+    strats = context.user_data["pj_groups"][grp_key]
+    current_dir = context.user_data.get('pj_direction', 'all')
+    
+    msg = f"📁 **Strategy Group**\n"
+    msg += _dir_label(current_dir) + "\n"
+    msg += f"Select a specific setup variation:"
+    
+    keyboard = [_get_dir_filter_row("pj", current_dir)]
+    
+    for strat in strats:
+        keyboard.append([InlineKeyboardButton(f"📁 {strat}", callback_data=f"pj_strat_{strat}")])
+        
+    back_data = "pj_filter_inactive" if "inactive" in grp_key else "pj_filter_active"
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=back_data)])
+    
+    await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def pj_filter_inactive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show only inactive/archived paper strategies."""
