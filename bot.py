@@ -68,7 +68,7 @@ from handlers.paper_trading import (
     paper_direction_selected,
     paper_timeframe_selected, paper_asset_received, paper_lot_size_received,
     paper_leverage_selected, paper_protection_selected, paper_confirmed,
-    cancel_paper_setup, paper_view_list_callback, paper_detail_callback,
+    cancel_paper_setup, paper_view_list_callback, paper_setup_group_callback, paper_detail_callback,
     paper_toggle_callback, paper_cancel_callback, paper_close_callback,
     paper_delete_list_callback, paper_delete_confirm_callback,
     paper_set_balance_callback, paper_set_balance_amount_received,
@@ -410,6 +410,7 @@ def create_application() -> Application:
     # Paper Trading menu and action handlers
     application.add_handler(CallbackQueryHandler(paper_trading_menu_callback, pattern="^menu_paper_trading$"))
     application.add_handler(CallbackQueryHandler(paper_view_list_callback, pattern="^paper_view_list$"))
+    application.add_handler(CallbackQueryHandler(paper_setup_group_callback, pattern="^paper_setup_grp_"))
     application.add_handler(CallbackQueryHandler(paper_detail_callback, pattern="^paper_detail_"))
     application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
     application.add_handler(CallbackQueryHandler(paper_cancel_callback, pattern="^paper_cancel_"))

@@ -954,6 +954,47 @@ async def paper_close_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ==================== VIEW PAPER SETUPS (UNIFIED: Individual + Screener) ====================
 
+from handlers.journal_ui import _format_indicator_params
+
+def _group_paper_setups(all_setups: list) -> tuple:
+    groups = {}
+    ungrouped = []
+    
+    for setup in all_setups:
+        indicator = setup.get("indicator", "")
+        params = setup.get("indicator_params", {})
+        
+        if isinstance(params, dict):
+            param_key = tuple(sorted(str(v) for k, v in params.items()))
+        else:
+            param_key = str(params)
+            
+        group_key = (indicator, param_key)
+        
+        if group_key not in groups:
+            groups[group_key] = {
+                "label": _format_indicator_params(indicator, params),
+                "setups": []
+            }
+            
+        groups[group_key]["setups"].append(setup)
+        
+    final_groups = {}
+    final_ungrouped = []
+    
+    for key, data in groups.items():
+        if len(data["setups"]) == 1:
+            final_ungrouped.append(data["setups"][0])
+        else:
+            label = data["label"]
+            counter = 2
+            while label in final_groups:
+                label = f"{data['label']} ({counter})"
+                counter += 1
+            final_groups[label] = data["setups"]
+            
+    return final_groups, final_ungrouped
+
 async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View combined list of individual and screener paper setups."""
     query = update.callback_query
@@ -968,46 +1009,118 @@ async def paper_view_list_callback(update: Update, context: ContextTypes.DEFAULT
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("No paper trading setups found.", reply_markup=reply_markup)
         return
+        
+    all_setups = []
+    for s in algo_setups:
+        s["_internal_type"] = "algo"
+        all_setups.append(s)
+    for s in scr_setups:
+        s["_internal_type"] = "scr"
+        all_setups.append(s)
+        
+    final_groups, final_ungrouped = _group_paper_setups(all_setups)
+    
+    if "paper_setups_groups" not in context.user_data:
+        context.user_data["paper_setups_groups"] = {}
     
     message = "**Paper Trading Setups**\n\n"
     keyboard = []
     
-    for setup in algo_setups:
-        status = "Active" if setup.get("is_active") else "Inactive"
-        open_trade = await get_open_trade_by_setup(str(setup["_id"]))
-        position = open_trade.get("direction") if open_trade else None
-        pos_text = f" | {position.upper()}" if position else ""
-        
-        message += (
-            f"[Single] **{setup['setup_name']}**\n"
-            f"  {setup['asset']} @ {setup['timeframe']} | "
-            f"{_lev_display(setup.get('paper_leverage', 10))} | {status}{pos_text}\n\n"
-        )
-        
-        keyboard.append([InlineKeyboardButton(
-            f"[Single] {setup['setup_name']} - {setup['asset']}",
-            callback_data=f"paper_detail_algo_{setup['_id']}"
-        )])
+    for idx, (label, setups) in enumerate(final_groups.items()):
+        grp_key = f"paper_grp_{idx}"
+        context.user_data["paper_setups_groups"][grp_key] = setups
+        keyboard.append([InlineKeyboardButton(f"📁 {label} ({len(setups)})", callback_data=f"paper_setup_grp_{grp_key}")])
     
-    for setup in scr_setups:
+    for setup in final_ungrouped:
         status = "Active" if setup.get("is_active") else "Inactive"
-        atype = ASSET_TYPE_TEXT_SHORT.get(setup.get("asset_selection_type", ""), "?")
-        
-        message += (
-            f"[Screener] **{setup['setup_name']}**\n"
-            f"  {atype} @ {setup.get('timeframe', '?')} | "
-            f"{_lev_display(setup.get('paper_leverage', 10))} | {status}\n\n"
-        )
-        
-        keyboard.append([InlineKeyboardButton(
-            f"[Screener] {setup['setup_name']} - {atype}",
-            callback_data=f"paper_detail_scr_{setup['_id']}"
-        )])
+        if setup["_internal_type"] == "algo":
+            open_trade = await get_open_trade_by_setup(str(setup["_id"]))
+            position = open_trade.get("direction") if open_trade else None
+            pos_text = f" | {position.upper()}" if position else ""
+            
+            message += (
+                f"[Single] **{setup['setup_name']}**\n"
+                f"  {setup['asset']} @ {setup['timeframe']} | "
+                f"{_lev_display(setup.get('paper_leverage', 10))} | {status}{pos_text}\n\n"
+            )
+            
+            keyboard.append([InlineKeyboardButton(
+                f"[Single] {setup['setup_name']} - {setup['asset']}",
+                callback_data=f"paper_detail_algo_{setup['_id']}"
+            )])
+        else:
+            atype = ASSET_TYPE_TEXT_SHORT.get(setup.get("asset_selection_type", ""), "?")
+            
+            message += (
+                f"[Screener] **{setup['setup_name']}**\n"
+                f"  {atype} @ {setup.get('timeframe', '?')} | "
+                f"{_lev_display(setup.get('paper_leverage', 10))} | {status}\n\n"
+            )
+            
+            keyboard.append([InlineKeyboardButton(
+                f"[Screener] {setup['setup_name']} - {atype}",
+                callback_data=f"paper_detail_scr_{setup['_id']}"
+            )])
     
+    if not final_ungrouped and final_groups:
+        message += "Select a strategy group below to view its specific timeframe and asset variations.\n"
+        
     keyboard.append([InlineKeyboardButton("Back", callback_data="menu_paper_trading")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
+async def paper_setup_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    grp_key = query.data.replace("paper_setup_grp_", "")
+    
+    if "paper_setups_groups" not in context.user_data or grp_key not in context.user_data["paper_setups_groups"]:
+        await query.edit_message_text(
+            "❌ Session expired. Please return to setups.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="paper_view_list")]])
+        )
+        return
+        
+    setups = context.user_data["paper_setups_groups"][grp_key]
+    
+    message = f"📁 **Strategy Group**\n\n"
+    keyboard = []
+    
+    for setup in setups:
+        status = "Active" if setup.get("is_active") else "Inactive"
+        
+        if setup["_internal_type"] == "algo":
+            open_trade = await get_open_trade_by_setup(str(setup["_id"]))
+            position = open_trade.get("direction") if open_trade else None
+            pos_text = f" | {position.upper()}" if position else ""
+            
+            message += (
+                f"[Single] **{setup['setup_name']}**\n"
+                f"  {setup['asset']} @ {setup['timeframe']} | "
+                f"{_lev_display(setup.get('paper_leverage', 10))} | {status}{pos_text}\n\n"
+            )
+            
+            keyboard.append([InlineKeyboardButton(
+                f"[Single] {setup['setup_name']} - {setup['asset']}",
+                callback_data=f"paper_detail_algo_{setup['_id']}"
+            )])
+        else:
+            atype = ASSET_TYPE_TEXT_SHORT.get(setup.get("asset_selection_type", ""), "?")
+            
+            message += (
+                f"[Screener] **{setup['setup_name']}**\n"
+                f"  {atype} @ {setup.get('timeframe', '?')} | "
+                f"{_lev_display(setup.get('paper_leverage', 10))} | {status}\n\n"
+            )
+            
+            keyboard.append([InlineKeyboardButton(
+                f"[Screener] {setup['setup_name']} - {atype}",
+                callback_data=f"paper_detail_scr_{setup['_id']}"
+            )])
+            
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="paper_view_list")])
+    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View detail of a single paper setup (individual or screener)."""
