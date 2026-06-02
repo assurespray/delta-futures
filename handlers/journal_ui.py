@@ -362,11 +362,17 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
     end = min(start + ASSETS_PER_PAGE, total_assets)
     page_assets = assets[start:end]
 
+    asset_pnl = {}
+    for t in trades:
+        a = t.get("asset", "Unknown")
+        asset_pnl[a] = asset_pnl.get(a, 0.0) + t.get("net_pnl", 0)
+
     keyboard = [_get_dir_filter_row("lj", current_dir)]
 
     row = []
     for asset in page_assets:
-        row.append(InlineKeyboardButton(f"🪙 {asset}", callback_data=f"lj_asset_{strategy}_{asset}"))
+        pnl_icon = "🟢" if asset_pnl.get(asset, 0) >= 0 else "🔴"
+        row.append(InlineKeyboardButton(f"{pnl_icon} {asset}", callback_data=f"lj_asset_{strategy}_{asset}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -779,12 +785,18 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     end = min(start + ASSETS_PER_PAGE, total_assets)
     page_assets = assets[start:end]
     
+    asset_pnl = {}
+    for t in trades:
+        a = t.get("asset", "Unknown")
+        asset_pnl[a] = asset_pnl.get(a, 0.0) + t.get("net_pnl", 0)
+
     keyboard = [_get_dir_filter_row("pj", current_dir)]
     keyboard.append([InlineKeyboardButton("🔍 Search Asset", callback_data=f"pj_search_start_{strategy}")])
     
     row = []
     for asset in page_assets:
-        row.append(InlineKeyboardButton(f"🪙 {asset}", callback_data=f"pj_asset_{strategy}_{asset}"))
+        pnl_icon = "🟢" if asset_pnl.get(asset, 0) >= 0 else "🔴"
+        row.append(InlineKeyboardButton(f"{pnl_icon} {asset}", callback_data=f"pj_asset_{strategy}_{asset}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
