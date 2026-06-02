@@ -100,9 +100,9 @@ def _format_indicator_params(indicator: str, params: dict) -> str:
         
     if indicator == 'dual_supertrend':
         return f"Dual ST (P:{params.get('perusu_atr','?')},{params.get('perusu_factor','?')} / S:{params.get('sirusu_atr','?')},{params.get('sirusu_factor','?')})"
-    elif indicator == 'supertrend':
+    elif indicator == 'single_supertrend' or indicator == 'supertrend':
         return f"Single ST ({params.get('atr_length','?')}, {params.get('factor','?')})"
-    elif indicator == 'range_breakout':
+    elif indicator == 'range_breakout_lazybear' or indicator == 'range_breakout':
         return f"Range Breakout LB (EMA:{params.get('ema_length','?')})"
     elif indicator == 'donchian_breakout':
         return f"Donchian ({params.get('period','?')})"
