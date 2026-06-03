@@ -456,7 +456,8 @@ async def journal_strategy_callback(update: Update, context: ContextTypes.DEFAUL
     msg += f"🔥 **Net P&L: ${net_pnl:.2f}**\n\n"
     msg += "Select an asset below:"
 
-    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=False, api_name=api_name, direction=current_dir)
+    unique_assets = set(t.get("asset") for t in trades if t.get("asset"))
+    assets = sorted(list(unique_assets))
 
     ASSETS_PER_PAGE = 14
     total_assets = len(assets)
@@ -922,7 +923,8 @@ async def pjournal_strategy_callback(update: Update, context: ContextTypes.DEFAU
     msg += _build_leverage_summary(trades)
     msg += f"\nSelect an asset below:"
 
-    assets = await journal_ops.get_traded_assets_by_strategy(user_id, strategy, is_paper_trade=True, direction=current_dir)
+    unique_assets = set(t.get("asset") for t in trades if t.get("asset"))
+    assets = sorted(list(unique_assets))
     
     ASSETS_PER_PAGE = 14
     total_assets = len(assets)
