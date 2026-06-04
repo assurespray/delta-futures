@@ -502,7 +502,21 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))
     application.add_handler(CallbackQueryHandler(tracker_view_callback, pattern="^tracker_"))
     
+
+    # ===== GLOBAL FALLBACKS FOR ORPHANED FSM BUTTONS =====
+    application.add_handler(CallbackQueryHandler(screener_cancel_handler, pattern="^screener_cancel$"))
+    application.add_handler(CallbackQueryHandler(paper_cancel_handler, pattern="^paper_fsm_cancel$"))
+    application.add_handler(CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_fsm_cancel$"))
+    application.add_handler(CallbackQueryHandler(algo_cancel_handler, pattern="^algo_cancel$"))
+    
+    # For "Back" buttons on expired sessions, we'll route them to cancel as well so they don't get stuck
+    application.add_handler(CallbackQueryHandler(screener_cancel_handler, pattern="^screener_back_to_"))
+    application.add_handler(CallbackQueryHandler(paper_cancel_handler, pattern="^paper_back_to_"))
+    application.add_handler(CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_back_to_"))
+    application.add_handler(CallbackQueryHandler(algo_cancel_handler, pattern="^algo_back_to_"))
+    
     # Main menu - registered LAST so ConversationHandler fallbacks get priority
+
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     
     logger.info("✅ Bot handlers registered")
