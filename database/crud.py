@@ -1206,3 +1206,31 @@ async def get_screener_setups_by_paper_mode(
     except Exception as e:
         logger.error(f"Failed to get screener setups by paper mode: {e}")
         return []
+
+
+# ==================== CUSTOM LISTS ====================
+
+async def get_custom_list(list_name: str) -> list:
+    """Get a custom token list by name."""
+    doc = await db.custom_lists.find_one({"list_name": list_name})
+    if doc and "tokens" in doc:
+        return doc["tokens"]
+    return []
+
+async def update_custom_list(list_name: str, tokens: list) -> bool:
+    """Update or create a custom token list."""
+    try:
+        # Ensure uppercase and stripped
+        tokens = [t.strip().upper() for t in tokens if t.strip()]
+        # Remove duplicates while preserving order
+        tokens = list(dict.fromkeys(tokens))
+        
+        await db.custom_lists.update_one(
+            {"list_name": list_name},
+            {"$set": {"tokens": tokens, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error updating custom list {list_name}: {e}")
+        return False

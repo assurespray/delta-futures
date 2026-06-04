@@ -1,5 +1,6 @@
 """Market screener for fetching gainers/losers from Delta Exchange."""
 import logging
+from database.crud import get_custom_list, update_custom_list
 from typing import List, Dict
 from api.delta_client import DeltaExchangeClient
 
@@ -231,7 +232,11 @@ async def get_assets_by_tag(
         
         # Hardcoded fallback for RWA if Delta API tag is missing or empty
         if tag == "rwa" and not matched:
-            rwa_symbols = ["ONDOUSD", "TRUUSD", "OMUSD", "POLYXUSD", "PENDLEUSD", "MKRUSD", "LINKUSD", "SNXUSD", "TOKENUSD", "RSRUSD"]
+            rwa_symbols = await get_custom_list("rwa")
+            if not rwa_symbols:
+                rwa_symbols = ["ONDOUSD", "TRUUSD", "OMUSD", "POLYXUSD", "PENDLEUSD", "MKRUSD", "LINKUSD", "SNXUSD", "TOKENUSD", "RSRUSD"]
+                await update_custom_list("rwa", rwa_symbols)
+                
             for ticker in tickers:
                 symbol = ticker.get("symbol")
                 if symbol in rwa_symbols:

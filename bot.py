@@ -91,6 +91,11 @@ from handlers.performance import (
     perf_paper_callback, perf_paper_chart_callback,
     perf_paper_pnl_chart_callback, perf_paper_csv_callback
 )
+from handlers.custom_tokens import (
+    manage_rwa_callback, rwa_add_start, rwa_add_received,
+    rwa_remove_list, rwa_remove_confirm, rwa_cancel, cancel_rwa_setup,
+    RWA_ADD_TOKEN
+)
 
 logger = logging.getLogger(__name__)
 
@@ -498,6 +503,27 @@ def create_application() -> Application:
     )
     application.add_handler(pjournal_gsearch_conv)
     
+
+    # ===== CUSTOM TOKENS (RWA) HANDLERS =====
+    rwa_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(rwa_add_start, pattern="^rwa_add_start$")],
+        states={
+            RWA_ADD_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, rwa_add_received)]
+        },
+        fallbacks=[
+            CallbackQueryHandler(rwa_cancel, pattern="^rwa_cancel$"),
+            CommandHandler("cancel", cancel_rwa_setup),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(rwa_conv_handler)
+    
+    application.add_handler(CallbackQueryHandler(manage_rwa_callback, pattern="^menu_manage_rwa$"))
+    application.add_handler(CallbackQueryHandler(rwa_remove_list, pattern="^rwa_remove_list$"))
+    application.add_handler(CallbackQueryHandler(rwa_remove_confirm, pattern="^rwa_rem_"))
+
     # Indicator Tracker
     application.add_handler(CallbackQueryHandler(tracker_menu_callback, pattern="^menu_indicator_tracker$"))
     application.add_handler(CallbackQueryHandler(tracker_view_callback, pattern="^tracker_"))
