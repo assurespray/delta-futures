@@ -186,7 +186,8 @@ async def render_screener_asset_type_selection(update, context):
         ],
         [
             InlineKeyboardButton("🔗 Layer 1", callback_data="screener_atype_layer1"),
-            InlineKeyboardButton("⚡ Layer 2", callback_data="screener_atype_layer2")
+            InlineKeyboardButton("⚡ Layer 2", callback_data="screener_atype_layer2"),
+            InlineKeyboardButton("🌐 RWA", callback_data="screener_atype_rwa")
         ],
         [
             InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_INDICATOR"),

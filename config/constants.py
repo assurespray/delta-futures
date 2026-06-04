@@ -180,6 +180,7 @@ ASSET_TYPE_TEXT = {
     "layer1": "Layer 1 Chains",
     "layer2": "Layer 2 Chains",
     "gaming": "Gaming Tokens",
+    "rwa": "RWA (Real World Assets)",
 }
 
 # Short labels for compact list views
@@ -198,4 +199,5 @@ ASSET_TYPE_TEXT_SHORT = {
     "layer1": "L1",
     "layer2": "L2",
     "gaming": "Gaming",
+    "rwa": "RWA",
 }

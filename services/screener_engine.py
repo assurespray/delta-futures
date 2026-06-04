@@ -93,7 +93,7 @@ class ScreenerEngine:
             elif mode == "top_oi":
                 return await get_top_oi(client, timeframe, top_n)
             
-            elif mode in ("meme", "solana", "new", "ai", "defi", "layer1", "layer2", "gaming"):
+            elif mode in ("meme", "solana", "new", "ai", "defi", "layer1", "layer2", "gaming", "rwa"):
                 # Map mode to Delta Exchange API tag
                 tag_map = {
                     "meme": "meme",
@@ -104,6 +104,7 @@ class ScreenerEngine:
                     "layer1": "layer_1",
                     "layer2": "layer_2",
                     "gaming": "gaming",
+                    "rwa": "rwa",
                 }
                 tag = tag_map[mode]
                 return await get_assets_by_tag(client, tag)

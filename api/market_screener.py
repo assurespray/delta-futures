@@ -225,8 +225,23 @@ async def get_assets_by_tag(
                     "volume_usd": turnover
                 })
         
+
         # Sort by volume descending (most active first)
         matched.sort(key=lambda x: x["volume_usd"], reverse=True)
+        
+        # Hardcoded fallback for RWA if Delta API tag is missing or empty
+        if tag == "rwa" and not matched:
+            rwa_symbols = ["ONDOUSD", "TRUUSD", "OMUSD", "POLYXUSD", "PENDLEUSD", "MKRUSD", "LINKUSD", "SNXUSD", "TOKENUSD", "RSRUSD"]
+            for ticker in tickers:
+                symbol = ticker.get("symbol")
+                if symbol in rwa_symbols:
+                    turnover = float(ticker.get("turnover_usd", 0) or 0)
+                    matched.append({
+                        "symbol": symbol,
+                        "volume_usd": turnover
+                    })
+            matched.sort(key=lambda x: x["volume_usd"], reverse=True)
+
         
         if top_n > 0:
             result = [a["symbol"] for a in matched[:top_n]]
