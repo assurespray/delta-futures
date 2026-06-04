@@ -111,10 +111,13 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    context.user_data.clear()
+    
     await query.edit_message_text(
         "🏠 Main Menu\n\nSelect an option:",
         reply_markup=reply_markup
     )
+    return ConversationHandler.END
     
     return ConversationHandler.END
 
