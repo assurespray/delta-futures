@@ -234,7 +234,7 @@ async def get_assets_by_tag(
         if tag == "rwa" and not matched:
             rwa_symbols = await get_custom_list("rwa")
             if not rwa_symbols:
-                rwa_symbols = ["ONDOUSD", "TRUUSD", "OMUSD", "POLYXUSD", "PENDLEUSD", "MKRUSD", "LINKUSD", "SNXUSD", "TOKENUSD", "RSRUSD"]
+                rwa_symbols = ["PAXGUSD", "XAUTUSD", "SLVONUSD", "METAXUSD", "QQQXUSD", "SPYXUSD", "CRCLXUSD", "GOOGLXUSD", "NVDAXUSD", "COINXUSD", "TSLAXUSD", "AAPLXUSD", "AMZNXUSD"]
                 await update_custom_list("rwa", rwa_symbols)
                 
             for ticker in tickers:

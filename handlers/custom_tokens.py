@@ -14,9 +14,14 @@ async def manage_rwa_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
 
     rwa_tokens = await get_custom_list("rwa")
+    
+    # Auto-migrate away from the old crypto-native RWA list to the real tokenized assets
+    if rwa_tokens and "ONDOUSD" in rwa_tokens and "METAXUSD" not in rwa_tokens:
+        rwa_tokens = [] # Force reset
+        
     if not rwa_tokens:
         # Initialize default list
-        rwa_tokens = ["ONDOUSD", "TRUUSD", "OMUSD", "POLYXUSD", "PENDLEUSD", "MKRUSD", "LINKUSD", "SNXUSD", "TOKENUSD", "RSRUSD"]
+        rwa_tokens = ["PAXGUSD", "XAUTUSD", "SLVONUSD", "METAXUSD", "QQQXUSD", "SPYXUSD", "CRCLXUSD", "GOOGLXUSD", "NVDAXUSD", "COINXUSD", "TSLAXUSD", "AAPLXUSD", "AMZNXUSD"]
         await update_custom_list("rwa", rwa_tokens)
 
     token_list_str = ", ".join(rwa_tokens) if rwa_tokens else "None"
