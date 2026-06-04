@@ -267,10 +267,29 @@ async def render_screener_lot_size_prompt(update, context):
     dir_text = direction_map.get(context.user_data.get('screener_direction', ''), '?')
     text = (
         f"✅ Direction: {dir_text}\n\n"
-        f"Step 8/9: Enter Lot Size (per trade):\n\n"
+        f"Step 8/9: Enter Lot Size (per trade):\n"
+        f"*(Type a custom number or select an option below)*\n\n"
         f"Send /cancel to abort."
     )
     keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="screener_lot_1"),
+            InlineKeyboardButton("2", callback_data="screener_lot_2"),
+            InlineKeyboardButton("5", callback_data="screener_lot_5"),
+            InlineKeyboardButton("10", callback_data="screener_lot_10")
+        ],
+        [
+            InlineKeyboardButton("15", callback_data="screener_lot_15"),
+            InlineKeyboardButton("20", callback_data="screener_lot_20"),
+            InlineKeyboardButton("25", callback_data="screener_lot_25"),
+            InlineKeyboardButton("50", callback_data="screener_lot_50")
+        ],
+        [
+            InlineKeyboardButton("100", callback_data="screener_lot_100"),
+            InlineKeyboardButton("200", callback_data="screener_lot_200"),
+            InlineKeyboardButton("500", callback_data="screener_lot_500"),
+            InlineKeyboardButton("1000", callback_data="screener_lot_1000")
+        ],
         [
             InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_DIRECTION"),
             InlineKeyboardButton("❌ Cancel", callback_data="screener_cancel")
@@ -435,6 +454,13 @@ async def screener_direction_selected(update: Update, context: ContextTypes.DEFA
     
     return await render_screener_lot_size_prompt(update, context)
 
+
+async def screener_lot_size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lot_size = int(query.data.replace("screener_lot_", ""))
+    context.user_data['screener_lot_size'] = lot_size
+    return await render_screener_protection_selection(update, context)
 
 async def screener_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:

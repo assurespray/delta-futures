@@ -237,10 +237,29 @@ async def render_lot_size_prompt(update, context):
     asset = context.user_data.get('asset', '?')
     text = (
         f"✅ Asset: {asset}\n\n"
-        f"Step 8/9: Enter Lot Size (number of contracts):\n\n"
+        f"Step 8/9: Enter Lot Size (number of contracts):\n"
+        f"*(Type a custom number or select an option below)*\n\n"
         f"Send /cancel to abort."
     )
     keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="algo_lot_1"),
+            InlineKeyboardButton("2", callback_data="algo_lot_2"),
+            InlineKeyboardButton("5", callback_data="algo_lot_5"),
+            InlineKeyboardButton("10", callback_data="algo_lot_10")
+        ],
+        [
+            InlineKeyboardButton("15", callback_data="algo_lot_15"),
+            InlineKeyboardButton("20", callback_data="algo_lot_20"),
+            InlineKeyboardButton("25", callback_data="algo_lot_25"),
+            InlineKeyboardButton("50", callback_data="algo_lot_50")
+        ],
+        [
+            InlineKeyboardButton("100", callback_data="algo_lot_100"),
+            InlineKeyboardButton("200", callback_data="algo_lot_200"),
+            InlineKeyboardButton("500", callback_data="algo_lot_500"),
+            InlineKeyboardButton("1000", callback_data="algo_lot_1000")
+        ],
         [
             InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_ASSET"),
             InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
@@ -386,6 +405,13 @@ async def setup_asset_received(update: Update, context: ContextTypes.DEFAULT_TYP
         return SETUP_ASSET
     context.user_data['asset'] = asset
     return await render_lot_size_prompt(update, context)
+
+async def setup_lot_size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lot_size = int(query.data.replace("algo_lot_", ""))
+    context.user_data['lot_size'] = lot_size
+    return await render_protection_selection(update, context)
 
 async def setup_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive lot size."""

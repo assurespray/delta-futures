@@ -210,13 +210,34 @@ async def render_paper_lot_size_prompt(update, context):
     asset = context.user_data.get('paper_asset', '?')
     text = (
         f"Asset: {asset}\n\n"
-        "Step 8/10: Enter Lot Size (number of contracts):\n\n"
+        "Step 8/10: Enter Lot Size (number of contracts):\n"
+        "*(Type a custom number or select an option below)*\n\n"
         "Send /cancel to abort."
     )
-    keyboard = [[
-        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_ASSET"),
-        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
-    ]]
+    keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="paper_lot_1"),
+            InlineKeyboardButton("2", callback_data="paper_lot_2"),
+            InlineKeyboardButton("5", callback_data="paper_lot_5"),
+            InlineKeyboardButton("10", callback_data="paper_lot_10")
+        ],
+        [
+            InlineKeyboardButton("15", callback_data="paper_lot_15"),
+            InlineKeyboardButton("20", callback_data="paper_lot_20"),
+            InlineKeyboardButton("25", callback_data="paper_lot_25"),
+            InlineKeyboardButton("50", callback_data="paper_lot_50")
+        ],
+        [
+            InlineKeyboardButton("100", callback_data="paper_lot_100"),
+            InlineKeyboardButton("200", callback_data="paper_lot_200"),
+            InlineKeyboardButton("500", callback_data="paper_lot_500"),
+            InlineKeyboardButton("1000", callback_data="paper_lot_1000")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_ASSET"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -486,13 +507,34 @@ async def render_pscr_lot_size_prompt(update, context):
     direction = context.user_data.get('pscr_direction', '?')
     text = (
         f"Direction: {direction.replace('_', ' ').title()}\n\n"
-        "Step 8/11: Enter Lot Size (per trade):\n\n"
+        "Step 8/11: Enter Lot Size (per trade):\n"
+        "*(Type a custom number or select an option below)*\n\n"
         "Send /cancel to abort."
     )
-    keyboard = [[
-        InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_DIRECTION"),
-        InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
-    ]]
+    keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="pscr_lot_1"),
+            InlineKeyboardButton("2", callback_data="pscr_lot_2"),
+            InlineKeyboardButton("5", callback_data="pscr_lot_5"),
+            InlineKeyboardButton("10", callback_data="pscr_lot_10")
+        ],
+        [
+            InlineKeyboardButton("15", callback_data="pscr_lot_15"),
+            InlineKeyboardButton("20", callback_data="pscr_lot_20"),
+            InlineKeyboardButton("25", callback_data="pscr_lot_25"),
+            InlineKeyboardButton("50", callback_data="pscr_lot_50")
+        ],
+        [
+            InlineKeyboardButton("100", callback_data="pscr_lot_100"),
+            InlineKeyboardButton("200", callback_data="pscr_lot_200"),
+            InlineKeyboardButton("500", callback_data="pscr_lot_500"),
+            InlineKeyboardButton("1000", callback_data="pscr_lot_1000")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_DIRECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -709,6 +751,13 @@ async def paper_asset_received(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['paper_asset'] = asset
     return await render_paper_lot_size_prompt(update, context)
 
+async def paper_lot_size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lot_size = int(query.data.replace("paper_lot_", ""))
+    context.user_data['paper_lot_size'] = lot_size
+    return await render_paper_leverage_selection(update, context)
+
 async def paper_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         lot_size = int(update.message.text.strip())
@@ -880,6 +929,13 @@ async def pscr_direction_selected(update: Update, context: ContextTypes.DEFAULT_
     direction = query.data.replace("pscr_dir_", "")
     context.user_data['pscr_direction'] = direction
     return await render_pscr_lot_size_prompt(update, context)
+
+async def pscr_lot_size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lot_size = int(query.data.replace("pscr_lot_", ""))
+    context.user_data['pscr_lot_size'] = lot_size
+    return await render_pscr_leverage_selection(update, context)
 
 async def pscr_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
