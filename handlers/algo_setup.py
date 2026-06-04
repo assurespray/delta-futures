@@ -57,166 +57,132 @@ async def algo_setups_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-async def algo_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start algo setup addition conversation."""
-    query = update.callback_query
-    await query.answer()
-    
-    await query.edit_message_text(
+
+# ==================== Render Functions ====================
+
+async def render_name_prompt(update, context):
+    text = (
         "➕ **Create New Algo Setup**\n\n"
         "Step 1/9: Enter a name for this setup:\n\n"
-        "Send /cancel to abort.",
-        parse_mode="Markdown"
+        "Send /cancel to abort."
     )
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     return SETUP_NAME
 
-
-async def setup_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive setup name."""
-    setup_name = update.message.text.strip()
-    
-    if len(setup_name) < 3:
-        await update.message.reply_text("❌ Setup name must be at least 3 characters. Please try again:")
-        return SETUP_NAME
-    
-    context.user_data['setup_name'] = setup_name
-    
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="setup_back_name")]]
-    await update.message.reply_text(
+async def render_desc_prompt(update, context):
+    setup_name = context.user_data.get('setup_name', '?')
+    text = (
         f"✅ Setup Name: {setup_name}\n\n"
         f"Step 2/9: Enter a description for this setup:\n\n"
-        f"Send /cancel to abort.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"Send /cancel to abort."
     )
+    keyboard = [
+        [InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_NAME"),
+         InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
     return SETUP_DESC
 
-
-async def setup_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive setup description."""
-    description = update.message.text.strip()
-    
-    context.user_data['description'] = description
-    
-    # Get user's APIs
+async def render_api_selection(update, context):
     user_id = str(update.effective_user.id)
     credentials = await get_api_credentials_by_user(user_id)
     
     if not credentials:
-        await update.message.reply_text(
+        text = (
             "❌ No API credentials found.\n\n"
             "Please add API credentials first from the API Menu.\n\n"
             "Use /start to return to main menu."
         )
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text)
+        else:
+            await update.message.reply_text(text)
         context.user_data.clear()
+        from telegram.ext import ConversationHandler
         return ConversationHandler.END
-    
-    # Show API selection
-    message = f"✅ Description saved\n\n"
-    message += f"Step 3/9: Select API account:\n"
-    
+        
+    text = f"✅ Description saved\n\nStep 3/9: Select API account:\n"
     keyboard = []
     for cred in credentials:
         cred_id = str(cred['_id'])
         api_name = cred['api_name']
         keyboard.append([InlineKeyboardButton(api_name, callback_data=f"setup_api_{cred_id}")])
-    
+        
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_DESC"),
+        InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+    ])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(message, reply_markup=reply_markup)
-    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
     return SETUP_API
 
-
-async def setup_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection."""
-    query = update.callback_query
-    await query.answer()
-    
-    api_id = query.data.replace("setup_api_", "")
-    context.user_data['api_id'] = api_id
-    
-    # Get API name
-    cred = await get_api_credential_by_id(api_id, decrypt=False)
-    api_name = cred['api_name'] if cred else "Unknown"
-    context.user_data['api_name'] = api_name
-    
-    # Show indicator presets selection
-    message = f"✅ API: {api_name}\n\n"
-    message += f"Step 4/9: Select Indicator Strategy:\n"
-    
-    user_id = str(query.from_user.id)
+async def render_indicator_selection(update, context):
+    user_id = str(update.effective_user.id)
     await ensure_default_presets(user_id)
     presets = await get_strategy_presets_by_user(user_id)
+    
+    api_name = context.user_data.get('api_name', '?')
+    text = f"✅ API: {api_name}\n\nStep 4/9: Select Indicator Strategy:\n"
     
     keyboard = []
     for preset in presets:
         pid = str(preset['_id'])
         name = preset.get('preset_name', 'Strategy')
         keyboard.append([InlineKeyboardButton(name, callback_data=f"setup_ind_{pid}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="setup_back_api")])
-    
+        
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_API"),
+        InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+    ])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup)
-    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
     return SETUP_INDICATOR
 
-
-async def setup_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle indicator selection."""
-    query = update.callback_query
-    await query.answer()
-    
-    preset_id = query.data.replace("setup_ind_", "")
-    preset = await get_strategy_preset_by_id(preset_id)
-    
-    if not preset:
-        await query.edit_message_text("❌ Preset not found. Use /start to return.")
-        context.user_data.clear()
-        return ConversationHandler.END
-    
-    context.user_data['indicator'] = preset['strategy_type']
-    context.user_data['preset_id'] = preset_id
-    context.user_data['indicator_params'] = preset.get('parameters', {})
-    context.user_data['preset_name'] = preset.get('preset_name', 'Unknown')
-    
-    # Show direction selection
-    message = f"✅ Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
-    message += f"Step 5/9: Select Trading Direction:\n"
+async def render_direction_selection(update, context):
+    preset_name = context.user_data.get('preset_name', '?')
+    text = f"✅ Indicator: {preset_name}\n\nStep 5/9: Select Trading Direction:\n"
     
     keyboard = [
         [InlineKeyboardButton("↕️ Both Long and Short", callback_data="setup_dir_both")],
         [InlineKeyboardButton("📈 Long Entry Only", callback_data="setup_dir_long")],
         [InlineKeyboardButton("📉 Short Entry Only", callback_data="setup_dir_short")],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_indicator")]
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_INDICATOR"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
     ]
-    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup)
-    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
     return SETUP_DIRECTION
 
-
-async def setup_direction_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle direction selection."""
-    query = update.callback_query
-    await query.answer()
+async def render_timeframe_selection(update, context):
+    direction_labels = {"both": "Both Long and Short", "long_only": "Long Entry Only", "short_only": "Short Entry Only"}
+    dir_text = direction_labels.get(context.user_data.get('direction', ''), '?')
     
-    direction_map = {
-        "setup_dir_both": ("both", "Both Long and Short"),
-        "setup_dir_long": ("long_only", "Long Entry Only"),
-        "setup_dir_short": ("short_only", "Short Entry Only")
-    }
-    
-    direction_code, direction_text = direction_map[query.data]
-    context.user_data['direction'] = direction_code
-    
-    # Show timeframe selection
-    message = f"✅ Direction: {direction_text}\n\n"
-    message += f"Step 6/9: Select Timeframe:\n"
+    text = f"✅ Direction: {dir_text}\n\nStep 6/9: Select Timeframe:\n"
     
     keyboard = [
         [
@@ -233,123 +199,213 @@ async def setup_direction_selected(update: Update, context: ContextTypes.DEFAULT
             InlineKeyboardButton("4h", callback_data="setup_tf_4h"),
             InlineKeyboardButton("1d", callback_data="setup_tf_1d")
         ],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_direction")]
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_DIRECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
     ]
-    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message, reply_markup=reply_markup)
-    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
     return SETUP_TIMEFRAME
 
+async def render_asset_prompt(update, context):
+    timeframe = context.user_data.get('timeframe', '?')
+    text = (
+        f"✅ Timeframe: {timeframe}\n\n"
+        f"Step 7/9: Enter Asset Symbol (e.g., BTCUSD, ETHUSD):\n\n"
+        f"Send /cancel to abort."
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_TIMEFRAME"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return SETUP_ASSET
+
+async def render_lot_size_prompt(update, context):
+    asset = context.user_data.get('asset', '?')
+    text = (
+        f"✅ Asset: {asset}\n\n"
+        f"Step 8/9: Enter Lot Size (number of contracts):\n\n"
+        f"Send /cancel to abort."
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_ASSET"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return SETUP_LOT_SIZE
+
+async def render_protection_selection(update, context):
+    lot_size = context.user_data.get('lot_size', '?')
+    text = (
+        f"✅ Lot Size: {lot_size}\n\n"
+        f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
+        f"If enabled, a stop-loss order will be placed at the secondary indicator price during entry."
+    )
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes (Enable Protection)", callback_data="setup_prot_yes")],
+        [InlineKeyboardButton("❌ No (Disable Protection)", callback_data="setup_prot_no")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_LOT_SIZE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return SETUP_PROTECTION
+
+async def render_confirm_selection(update, context):
+    user_data = context.user_data
+    additional_protection = user_data.get('additional_protection', False)
+    
+    text = "✅ **Algo Setup Summary**\n\n"
+    text += f"**Name:** {user_data.get('setup_name', '?')}\n"
+    text += f"**Description:** {user_data.get('description', '?')}\n"
+    text += f"**API Account:** {user_data.get('api_name', '?')}\n"
+    text += f"**Indicator:** {user_data.get('preset_name', user_data.get('indicator', 'Unknown'))}\n"
+    text += f"**Direction:** {user_data.get('direction', '').replace('_', ' ').title()}\n"
+    text += f"**Timeframe:** {user_data.get('timeframe', '?')}\n"
+    text += f"**Asset:** {user_data.get('asset', '?')}\n"
+    text += f"**Lot Size:** {user_data.get('lot_size', '?')}\n"
+    text += f"**Stop-Loss Protection:** {'✅ Enabled' if additional_protection else '❌ Disabled'}\n\n"
+    text += f"Confirm to save and activate this setup?"
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirm and Activate", callback_data="setup_confirm_yes")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return SETUP_CONFIRM
+
+# ==================== State Handlers ====================
+
+async def algo_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start algo setup addition conversation."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    return await render_name_prompt(update, context)
+
+async def setup_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive setup name."""
+    setup_name = update.message.text.strip()
+    if len(setup_name) < 3:
+        await update.message.reply_text("❌ Setup name must be at least 3 characters. Please try again:")
+        return SETUP_NAME
+    context.user_data['setup_name'] = setup_name
+    return await render_desc_prompt(update, context)
+
+async def setup_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive setup description."""
+    description = update.message.text.strip()
+    context.user_data['description'] = description
+    return await render_api_selection(update, context)
+
+async def setup_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle API selection."""
+    query = update.callback_query
+    await query.answer()
+    api_id = query.data.replace("setup_api_", "")
+    context.user_data['api_id'] = api_id
+    cred = await get_api_credential_by_id(api_id, decrypt=False)
+    context.user_data['api_name'] = cred['api_name'] if cred else "Unknown"
+    return await render_indicator_selection(update, context)
+
+async def setup_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle indicator selection."""
+    query = update.callback_query
+    await query.answer()
+    preset_id = query.data.replace("setup_ind_", "")
+    preset = await get_strategy_preset_by_id(preset_id)
+    from telegram.ext import ConversationHandler
+    if not preset:
+        await query.edit_message_text("❌ Preset not found. Use /start to return.")
+        context.user_data.clear()
+        return ConversationHandler.END
+    context.user_data['indicator'] = preset['strategy_type']
+    context.user_data['preset_id'] = preset_id
+    context.user_data['indicator_params'] = preset.get('parameters', {})
+    context.user_data['preset_name'] = preset.get('preset_name', 'Unknown')
+    return await render_direction_selection(update, context)
+
+async def setup_direction_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle direction selection."""
+    query = update.callback_query
+    await query.answer()
+    direction_map = {
+        "setup_dir_both": "both",
+        "setup_dir_long": "long_only",
+        "setup_dir_short": "short_only"
+    }
+    context.user_data['direction'] = direction_map[query.data]
+    return await render_timeframe_selection(update, context)
 
 async def setup_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle timeframe selection."""
     query = update.callback_query
     await query.answer()
-    
-    timeframe = query.data.replace("setup_tf_", "")
-    context.user_data['timeframe'] = timeframe
-    
-    message = f"✅ Timeframe: {timeframe}\n\n"
-    message += f"Step 7/9: Enter Asset Symbol (e.g., BTCUSD, ETHUSD):\n\n"
-    message += f"Send /cancel to abort."
-    
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="setup_back_timeframe")]]
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    
-    return SETUP_ASSET
-
+    context.user_data['timeframe'] = query.data.replace("setup_tf_", "")
+    return await render_asset_prompt(update, context)
 
 async def setup_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive asset symbol."""
     asset = update.message.text.strip().upper()
-    
     if len(asset) < 3:
         await update.message.reply_text("❌ Invalid asset symbol. Please try again:")
         return SETUP_ASSET
-    
     context.user_data['asset'] = asset
-    
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="setup_back_asset")]]
-    await update.message.reply_text(
-        f"✅ Asset: {asset}\n\n"
-        f"Step 8/9: Enter Lot Size (number of contracts):\n\n"
-        f"Send /cancel to abort.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    
-    return SETUP_LOT_SIZE
-
+    return await render_lot_size_prompt(update, context)
 
 async def setup_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive lot size."""
     try:
         lot_size = int(update.message.text.strip())
-        
         if lot_size < 1:
             await update.message.reply_text("❌ Lot size must be at least 1. Please try again:")
             return SETUP_LOT_SIZE
-        
         context.user_data['lot_size'] = lot_size
-        
-        # Show protection selection
-        message = f"✅ Lot Size: {lot_size}\n\n"
-        message += f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
-        message += f"If enabled, a stop-loss order will be placed at the secondary indicator price during entry."
-        
-        keyboard = [
-            [InlineKeyboardButton("✅ Yes (Enable Protection)", callback_data="setup_prot_yes")],
-            [InlineKeyboardButton("❌ No (Disable Protection)", callback_data="setup_prot_no")],
-            [InlineKeyboardButton("🔙 Back", callback_data="setup_back_lotsize")]
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(message, reply_markup=reply_markup)
-        
-        return SETUP_PROTECTION
-    
+        return await render_protection_selection(update, context)
     except ValueError:
         await update.message.reply_text("❌ Invalid number. Please enter a valid lot size:")
         return SETUP_LOT_SIZE
-
 
 async def setup_protection_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle protection selection and show confirmation."""
     query = update.callback_query
     await query.answer()
-    
-    additional_protection = query.data == "setup_prot_yes"
-    context.user_data['additional_protection'] = additional_protection
-    
-    # Show confirmation
-    user_data = context.user_data
-    
-    message = "✅ **Algo Setup Summary**\n\n"
-    message += f"**Name:** {user_data['setup_name']}\n"
-    message += f"**Description:** {user_data['description']}\n"
-    message += f"**API Account:** {user_data['api_name']}\n"
-    message += f"**Indicator:** {user_data.get('preset_name', user_data.get('indicator', 'Unknown'))}\n"
-    message += f"**Direction:** {user_data['direction'].replace('_', ' ').title()}\n"
-    message += f"**Timeframe:** {user_data['timeframe']}\n"
-    message += f"**Asset:** {user_data['asset']}\n"
-    message += f"**Lot Size:** {user_data['lot_size']}\n"
-    message += f"**Stop-Loss Protection:** {'✅ Enabled' if additional_protection else '❌ Disabled'}\n\n"
-    message += f"Confirm to save and activate this setup?"
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Confirm and Activate", callback_data="setup_confirm_yes")],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_protection")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="setup_confirm_no")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-    
-    return SETUP_CONFIRM
-
+    context.user_data['additional_protection'] = query.data == "setup_prot_yes"
+    return await render_confirm_selection(update, context)
 
 async def setup_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle setup confirmation and save to database."""
@@ -414,14 +470,21 @@ async def setup_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         setup_id = await create_algo_setup(setup_data)
         
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Another Setup", callback_data="algo_add_start")],
+            [InlineKeyboardButton("🔙 Back to Algo Menu", callback_data="menu_algo_setups")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             f"✅ **Algo Setup Created Successfully!**\n\n"
             f"Setup ID: {setup_id}\n"
             f"Name: {user_data['setup_name']}\n"
             f"Status: 🟢 Active\n\n"
             f"The bot will now monitor {user_data['asset']} on {user_data['timeframe']} timeframe "
-            f"and execute trades automatically based on your strategy.\n\n"
-            f"Use /start to return to main menu.",
+            f"and execute trades automatically based on your strategy.",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
         
@@ -813,164 +876,44 @@ async def cancel_edit_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== Back Button Handlers (Algo Setup Wizard) ====================
 
-async def setup_back_to_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 2 (Desc) to Step 1 (Name)."""
+async def algo_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle back button in algo setup."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "➕ **Create New Algo Setup**\n\n"
-        "Step 1/9: Enter a name for this setup:\n\n"
-        "Send /cancel to abort.",
-        parse_mode="Markdown"
-    )
-    return SETUP_NAME
+    state = query.data.replace("algo_back_to_", "")
+    
+    if state == "SETUP_NAME":
+        return await render_name_prompt(update, context)
+    elif state == "SETUP_DESC":
+        return await render_desc_prompt(update, context)
+    elif state == "SETUP_API":
+        return await render_api_selection(update, context)
+    elif state == "SETUP_INDICATOR":
+        return await render_indicator_selection(update, context)
+    elif state == "SETUP_DIRECTION":
+        return await render_direction_selection(update, context)
+    elif state == "SETUP_TIMEFRAME":
+        return await render_timeframe_selection(update, context)
+    elif state == "SETUP_ASSET":
+        return await render_asset_prompt(update, context)
+    elif state == "SETUP_LOT_SIZE":
+        return await render_lot_size_prompt(update, context)
+    elif state == "SETUP_PROTECTION":
+        return await render_protection_selection(update, context)
+    
+    from telegram.ext import ConversationHandler
+    return ConversationHandler.END
 
-
-async def setup_back_to_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 3 (API) to Step 2 (Desc)."""
+async def algo_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle cancel button in algo setup."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        f"✅ Setup Name: {context.user_data.get('setup_name', '?')}\n\n"
-        f"Step 2/9: Enter a description for this setup:\n\n"
-        f"Send /cancel to abort."
-    )
-    return SETUP_DESC
-
-
-async def setup_back_to_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 4 (Indicator) to Step 3 (API)."""
-    query = update.callback_query
-    await query.answer()
+    context.user_data.clear()
     
-    user_id = str(query.from_user.id)
-    credentials = await get_api_credentials_by_user(user_id)
-    
-    message = f"✅ Description saved\n\nStep 3/9: Select API account:\n"
-    keyboard = []
-    for cred in credentials:
-        cred_id = str(cred['_id'])
-        api_name = cred['api_name']
-        keyboard.append([InlineKeyboardButton(api_name, callback_data=f"setup_api_{cred_id}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="setup_back_desc")])
-    
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    return SETUP_API
-
-
-async def setup_back_to_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 5 (Direction) to Step 4 (Indicator)."""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = str(query.from_user.id)
-    await ensure_default_presets(user_id)
-    presets = await get_strategy_presets_by_user(user_id)
-    
-    message = f"✅ API: {context.user_data.get('api_name', '?')}\n\nStep 4/9: Select Indicator Strategy:\n"
-    keyboard = []
-    for preset in presets:
-        pid = str(preset['_id'])
-        name = preset.get('preset_name', 'Strategy')
-        keyboard.append([InlineKeyboardButton(name, callback_data=f"setup_ind_{pid}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="setup_back_api")])
-    
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    return SETUP_INDICATOR
-
-
-async def setup_back_to_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 6 (Timeframe) to Step 5 (Direction)."""
-    query = update.callback_query
-    await query.answer()
-    
-    message = f"✅ Indicator: {context.user_data.get('preset_name', '?')}\n\nStep 5/9: Select Trading Direction:\n"
-    keyboard = [
-        [InlineKeyboardButton("↕️ Both Long and Short", callback_data="setup_dir_both")],
-        [InlineKeyboardButton("📈 Long Entry Only", callback_data="setup_dir_long")],
-        [InlineKeyboardButton("📉 Short Entry Only", callback_data="setup_dir_short")],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_indicator")],
-    ]
-    
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    return SETUP_DIRECTION
-
-
-async def setup_back_to_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 7 (Asset) to Step 6 (Timeframe)."""
-    query = update.callback_query
-    await query.answer()
-    
-    direction_labels = {"both": "Both", "long_only": "Long Only", "short_only": "Short Only"}
-    dir_text = direction_labels.get(context.user_data.get('direction', ''), '?')
-    
-    message = f"✅ Direction: {dir_text}\n\nStep 6/9: Select Timeframe:\n"
-    keyboard = [
-        [
-            InlineKeyboardButton("1m", callback_data="setup_tf_1m"),
-            InlineKeyboardButton("3m", callback_data="setup_tf_3m"),
-            InlineKeyboardButton("5m", callback_data="setup_tf_5m")
-        ],
-        [
-            InlineKeyboardButton("15m", callback_data="setup_tf_15m"),
-            InlineKeyboardButton("30m", callback_data="setup_tf_30m"),
-            InlineKeyboardButton("1h", callback_data="setup_tf_1h")
-        ],
-        [
-            InlineKeyboardButton("4h", callback_data="setup_tf_4h"),
-            InlineKeyboardButton("1d", callback_data="setup_tf_1d")
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_direction")],
-    ]
-    
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    return SETUP_TIMEFRAME
-
-
-async def setup_back_to_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 8 (Lot Size) to Step 7 (Asset)."""
-    query = update.callback_query
-    await query.answer()
-    
-    message = f"✅ Timeframe: {context.user_data.get('timeframe', '?')}\n\n"
-    message += f"Step 7/9: Enter Asset Symbol (e.g., BTCUSD, ETHUSD):\n\n"
-    message += f"Send /cancel to abort."
-    
-    await query.edit_message_text(message)
-    return SETUP_ASSET
-
-
-async def setup_back_to_lotsize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Step 9 (Protection) to Step 8 (Lot Size)."""
-    query = update.callback_query
-    await query.answer()
-    
-    await query.edit_message_text(
-        f"✅ Asset: {context.user_data.get('asset', '?')}\n\n"
-        f"Step 8/9: Enter Lot Size (number of contracts):\n\n"
-        f"Send /cancel to abort."
-    )
-    return SETUP_LOT_SIZE
-
-
-async def setup_back_to_protection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Back from Confirm to Step 9 (Protection)."""
-    query = update.callback_query
-    await query.answer()
-    
-    message = f"✅ Lot Size: {context.user_data.get('lot_size', '?')}\n\n"
-    message += f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
-    message += f"If enabled, a stop-loss order will be placed at Sirusu price during entry."
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Yes (Enable Protection)", callback_data="setup_prot_yes")],
-        [InlineKeyboardButton("❌ No (Disable Protection)", callback_data="setup_prot_no")],
-        [InlineKeyboardButton("🔙 Back", callback_data="setup_back_lotsize")],
-    ]
-    
-    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
-    return SETUP_PROTECTION
-
+    # Return to algo setups menu
+    await algo_setups_callback(update, context)
+    from telegram.ext import ConversationHandler
+    return ConversationHandler.END
 
 async def algo_delete_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display list of setups to delete."""

@@ -43,9 +43,7 @@ from handlers.algo_setup import (
     algo_edit_preset_callback, algo_edit_preset_set,
     algo_edit_protection_callback, algo_edit_protection_set,
     algo_edit_lotsize_callback, algo_edit_lotsize_received, cancel_edit_setup,
-    setup_back_to_name, setup_back_to_desc, setup_back_to_api,
-    setup_back_to_indicator, setup_back_to_direction, setup_back_to_timeframe,
-    setup_back_to_asset, setup_back_to_lotsize, setup_back_to_protection,
+    algo_back_handler, algo_cancel_handler,
     SETUP_NAME, SETUP_DESC, SETUP_API, SETUP_INDICATOR, SETUP_DIRECTION,
     SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM,
     EDIT_LOT_SIZE
@@ -58,6 +56,7 @@ from handlers.screener_setup import (
     screener_confirmed, cancel_screener_setup,
     screener_view_list_callback, screener_view_detail_callback,
     screener_delete_list_callback, screener_delete_confirm_callback,
+    screener_back_handler, screener_cancel_handler,
     SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_INDICATOR, SCREENER_ASSET_TYPE,
     SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
 )
@@ -77,6 +76,7 @@ from handlers.paper_trading import (
     pscr_timeframe_selected,
     pscr_direction_selected, pscr_lot_size_received, pscr_leverage_selected,
     pscr_protection_selected, pscr_confirmed,
+    paper_back_handler, paper_cancel_handler, pscr_back_handler, pscr_cancel_handler,
     PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_INDICATOR, PAPER_DIRECTION,
     PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
     PAPER_PROTECTION, PAPER_CONFIRM,
@@ -189,44 +189,19 @@ def create_application() -> Application:
         entry_points=[CallbackQueryHandler(algo_add_start, pattern="^algo_add_start$")],
         states={
             SETUP_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_name_received)],
-            SETUP_DESC: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_desc_received),
-                CallbackQueryHandler(setup_back_to_name, pattern="^setup_back_name$"),
-            ],
-            SETUP_API: [
-                CallbackQueryHandler(setup_api_selected, pattern="^setup_api_"),
-                CallbackQueryHandler(setup_back_to_desc, pattern="^setup_back_desc$"),
-            ],
-            SETUP_INDICATOR: [
-                CallbackQueryHandler(setup_indicator_selected, pattern="^setup_ind_"),
-                CallbackQueryHandler(setup_back_to_api, pattern="^setup_back_api$"),
-            ],
-            SETUP_DIRECTION: [
-                CallbackQueryHandler(setup_direction_selected, pattern="^setup_dir_"),
-                CallbackQueryHandler(setup_back_to_indicator, pattern="^setup_back_indicator$"),
-            ],
-            SETUP_TIMEFRAME: [
-                CallbackQueryHandler(setup_timeframe_selected, pattern="^setup_tf_"),
-                CallbackQueryHandler(setup_back_to_direction, pattern="^setup_back_direction$"),
-            ],
-            SETUP_ASSET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_asset_received),
-                CallbackQueryHandler(setup_back_to_timeframe, pattern="^setup_back_timeframe$"),
-            ],
-            SETUP_LOT_SIZE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, setup_lot_size_received),
-                CallbackQueryHandler(setup_back_to_asset, pattern="^setup_back_asset$"),
-            ],
-            SETUP_PROTECTION: [
-                CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_"),
-                CallbackQueryHandler(setup_back_to_lotsize, pattern="^setup_back_lotsize$"),
-            ],
-            SETUP_CONFIRM: [
-                CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_"),
-                CallbackQueryHandler(setup_back_to_protection, pattern="^setup_back_protection$"),
-            ]
+            SETUP_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_desc_received)],
+            SETUP_API: [CallbackQueryHandler(setup_api_selected, pattern="^setup_api_")],
+            SETUP_INDICATOR: [CallbackQueryHandler(setup_indicator_selected, pattern="^setup_ind_")],
+            SETUP_DIRECTION: [CallbackQueryHandler(setup_direction_selected, pattern="^setup_dir_")],
+            SETUP_TIMEFRAME: [CallbackQueryHandler(setup_timeframe_selected, pattern="^setup_tf_")],
+            SETUP_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_asset_received)],
+            SETUP_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_lot_size_received)],
+            SETUP_PROTECTION: [CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_")],
+            SETUP_CONFIRM: [CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_")]
         },
         fallbacks=[
+            CallbackQueryHandler(algo_back_handler, pattern="^algo_back_to_"),
+            CallbackQueryHandler(algo_cancel_handler, pattern="^algo_cancel$"),
             CommandHandler("cancel", cancel_algo_setup),
             CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
@@ -322,6 +297,8 @@ def create_application() -> Application:
             SCREENER_CONFIRM: [CallbackQueryHandler(screener_confirmed, pattern="^screener_confirm_")]
         },
         fallbacks=[
+            CallbackQueryHandler(screener_back_handler, pattern="^screener_back_to_"),
+            CallbackQueryHandler(screener_cancel_handler, pattern="^screener_cancel$"),
             CommandHandler("cancel", cancel_screener_setup),
             CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
@@ -359,6 +336,8 @@ def create_application() -> Application:
             PAPER_CONFIRM: [CallbackQueryHandler(paper_confirmed, pattern="^paper_confirm_")],
         },
         fallbacks=[
+            CallbackQueryHandler(paper_back_handler, pattern="^paper_back_to_"),
+            CallbackQueryHandler(paper_cancel_handler, pattern="^paper_fsm_cancel$"),
             CommandHandler("cancel", cancel_paper_setup),
             CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
@@ -384,6 +363,8 @@ def create_application() -> Application:
             PSCR_CONFIRM: [CallbackQueryHandler(pscr_confirmed, pattern="^pscr_confirm_")],
         },
         fallbacks=[
+            CallbackQueryHandler(pscr_back_handler, pattern="^pscr_back_to_"),
+            CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_fsm_cancel$"),
             CommandHandler("cancel", cancel_paper_setup),
             CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],
@@ -399,6 +380,8 @@ def create_application() -> Application:
             PAPER_SET_BALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_set_balance_amount_received)],
         },
         fallbacks=[
+            CallbackQueryHandler(pscr_back_handler, pattern="^pscr_back_to_"),
+            CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_fsm_cancel$"),
             CommandHandler("cancel", cancel_paper_setup),
             CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
         ],

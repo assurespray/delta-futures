@@ -56,6 +56,537 @@ PAPER_INDICATOR = 121
 PSCR_INDICATOR = 122
 
 
+# ==================== Paper Individual Setup Render Functions ====================
+
+async def render_paper_name_prompt(update, context):
+    text = (
+        "**Create Paper Trading Setup (Individual)**\n\n"
+        "Step 1/9: Enter a name for this paper setup:\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return PAPER_NAME
+
+async def render_paper_desc_prompt(update, context):
+    name = context.user_data.get('paper_setup_name', '?')
+    text = (
+        f"Name: {name}\n\n"
+        "Step 2/9: Enter a description:\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_NAME"),
+        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_DESC
+
+async def render_paper_api_selection(update, context):
+    user_id = str(update.effective_user.id)
+    credentials = await get_api_credentials_by_user(user_id)
+    if not credentials:
+        text = "You need at least one API credential for price data.\nGo to API Menu to add one first."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text)
+        else:
+            await update.message.reply_text(text)
+        return ConversationHandler.END
+
+    text = "Step 3/9: Select API credential (for price data):"
+    keyboard = []
+    for cred in credentials:
+        keyboard.append([InlineKeyboardButton(cred['api_name'], callback_data=f"paper_api_{cred['_id']}")])
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_DESC"),
+        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+    ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_API
+
+async def render_paper_indicator_selection(update, context):
+    user_id = str(update.effective_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+
+    api_name = context.user_data.get('paper_api_name', '?')
+    text = f"API: {api_name}\n\nStep 4/10: Select Indicator Strategy:"
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Strategy')
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"paper_ind_{pid}")])
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_API"),
+        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+    ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_INDICATOR
+
+async def render_paper_direction_selection(update, context):
+    preset_name = context.user_data.get('paper_preset_name', '?')
+    text = f"Indicator: {preset_name}\n\nStep 5/10: Select trading direction:"
+    keyboard = [
+        [InlineKeyboardButton("Both (Long & Short)", callback_data="paper_dir_both")],
+        [InlineKeyboardButton("Long Only", callback_data="paper_dir_long_only")],
+        [InlineKeyboardButton("Short Only", callback_data="paper_dir_short_only")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_INDICATOR"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_DIRECTION
+
+async def render_paper_timeframe_selection(update, context):
+    direction = context.user_data.get('paper_direction', '?')
+    text = f"Direction: {direction.replace('_', ' ').title()}\n\nStep 6/10: Select timeframe:"
+    keyboard = [
+        [
+            InlineKeyboardButton("1m", callback_data="paper_tf_1m"),
+            InlineKeyboardButton("3m", callback_data="paper_tf_3m"),
+            InlineKeyboardButton("5m", callback_data="paper_tf_5m")
+        ],
+        [
+            InlineKeyboardButton("15m", callback_data="paper_tf_15m"),
+            InlineKeyboardButton("30m", callback_data="paper_tf_30m"),
+            InlineKeyboardButton("1h", callback_data="paper_tf_1h")
+        ],
+        [
+            InlineKeyboardButton("4h", callback_data="paper_tf_4h"),
+            InlineKeyboardButton("1d", callback_data="paper_tf_1d")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_DIRECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_TIMEFRAME
+
+async def render_paper_asset_prompt(update, context):
+    timeframe = context.user_data.get('paper_timeframe', '?')
+    text = (
+        f"Timeframe: {timeframe}\n\n"
+        "Step 7/10: Enter Asset Symbol (e.g., BTCUSD, ETHUSD):\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_TIMEFRAME"),
+        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_ASSET
+
+async def render_paper_lot_size_prompt(update, context):
+    asset = context.user_data.get('paper_asset', '?')
+    text = (
+        f"Asset: {asset}\n\n"
+        "Step 8/10: Enter Lot Size (number of contracts):\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_ASSET"),
+        InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_LOT_SIZE
+
+async def render_paper_leverage_selection(update, context):
+    lot_size = context.user_data.get('paper_lot_size', '?')
+    text = (
+        f"Lot Size: {lot_size}\n\n"
+        "Step 9/10: Select Leverage:\n"
+        "(Max = highest allowed by the exchange for this asset)"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("5x", callback_data="paper_lev_5"),
+            InlineKeyboardButton("10x", callback_data="paper_lev_10"),
+            InlineKeyboardButton("25x", callback_data="paper_lev_25"),
+        ],
+        [
+            InlineKeyboardButton("50x", callback_data="paper_lev_50"),
+            InlineKeyboardButton("100x", callback_data="paper_lev_100"),
+            InlineKeyboardButton("Max", callback_data="paper_lev_0"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_LOT_SIZE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_LEVERAGE
+
+async def render_paper_protection_selection(update, context):
+    leverage = context.user_data.get('paper_leverage', 10)
+    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
+    text = (
+        f"Leverage: {lev_display}\n\n"
+        "Step 10/10: Additional Protection (Stop-Loss)?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Yes (Enable SL)", callback_data="paper_prot_yes")],
+        [InlineKeyboardButton("No (Disable SL)", callback_data="paper_prot_no")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_LEVERAGE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_PROTECTION
+
+async def render_paper_confirm(update, context):
+    ud = context.user_data
+    protection = ud.get('paper_protection', False)
+    text = (
+        "**Paper Setup Summary**\n\n"
+        f"**Name:** {ud.get('paper_setup_name', '?')}\n"
+        f"**Description:** {ud.get('paper_description', '?')}\n"
+        f"**API:** {ud.get('paper_api_name', '?')}\n"
+        f"**Indicator:** {ud.get('paper_preset_name', ud.get('paper_indicator', 'Unknown'))}\n"
+        f"**Direction:** {ud.get('paper_direction', '').replace('_', ' ').title()}\n"
+        f"**Timeframe:** {ud.get('paper_timeframe', '?')}\n"
+        f"**Asset:** {ud.get('paper_asset', '?')}\n"
+        f"**Lot Size:** {ud.get('paper_lot_size', '?')}\n"
+        f"**Leverage:** {_lev_display(ud.get('paper_leverage', 10))}\n"
+        f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
+        f"**Mode:** PAPER TRADE (Virtual)\n\n"
+        "Confirm to save and activate?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Confirm and Activate", callback_data="paper_confirm_yes")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return PAPER_CONFIRM
+
+
+# ==================== Paper Screener Setup Render Functions ====================
+
+async def render_pscr_name_prompt(update, context):
+    text = (
+        "**Create Paper Screener Setup (Multi-Asset)**\n\n"
+        "Step 1/11: Enter a name for this paper screener:\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return PSCR_NAME
+
+async def render_pscr_desc_prompt(update, context):
+    name = context.user_data.get('pscr_name', '?')
+    text = (
+        f"Name: {name}\n\n"
+        "Step 2/11: Enter a description:\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_NAME"),
+        InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_DESC
+
+async def render_pscr_api_selection(update, context):
+    user_id = str(update.effective_user.id)
+    credentials = await get_api_credentials_by_user(user_id)
+    if not credentials:
+        text = "You need at least one API credential for price data.\nGo to API Menu to add one first."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text)
+        else:
+            await update.message.reply_text(text)
+        return ConversationHandler.END
+
+    text = "Step 3/11: Select API credential (for price data):"
+    keyboard = []
+    for cred in credentials:
+        keyboard.append([InlineKeyboardButton(cred['api_name'], callback_data=f"pscr_api_{cred['_id']}")])
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_DESC"),
+        InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+    ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_API
+
+async def render_pscr_indicator_selection(update, context):
+    user_id = str(update.effective_user.id)
+    await ensure_default_presets(user_id)
+    presets = await get_strategy_presets_by_user(user_id)
+
+    api_name = context.user_data.get('pscr_api_name', '?')
+    text = f"API: {api_name}\n\nStep 4/11: Select Indicator Strategy:"
+    keyboard = []
+    for preset in presets:
+        pid = str(preset['_id'])
+        name = preset.get('preset_name', 'Strategy')
+        keyboard.append([InlineKeyboardButton(name, callback_data=f"pscr_ind_{pid}")])
+    keyboard.append([
+        InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_API"),
+        InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+    ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_INDICATOR
+
+async def render_pscr_asset_type_selection(update, context):
+    preset_name = context.user_data.get('pscr_preset_name', '?')
+    text = f"Indicator: {preset_name}\n\nStep 5/11: Select Asset Selection Type:"
+    keyboard = [
+        [InlineKeyboardButton("Every Available Asset", callback_data="pscr_atype_every")],
+        [
+            InlineKeyboardButton("Top Gainers", callback_data="pscr_atype_gainers"),
+            InlineKeyboardButton("Top Losers", callback_data="pscr_atype_losers")
+        ],
+        [
+            InlineKeyboardButton("Gainers + Losers", callback_data="pscr_atype_mixed"),
+            InlineKeyboardButton("Top Volume", callback_data="pscr_atype_volume")
+        ],
+        [InlineKeyboardButton("Top Open Interest", callback_data="pscr_atype_top_oi")],
+        [
+            InlineKeyboardButton("Meme", callback_data="pscr_atype_meme"),
+            InlineKeyboardButton("Solana", callback_data="pscr_atype_solana"),
+            InlineKeyboardButton("New", callback_data="pscr_atype_new")
+        ],
+        [
+            InlineKeyboardButton("AI", callback_data="pscr_atype_ai"),
+            InlineKeyboardButton("DeFi", callback_data="pscr_atype_defi"),
+            InlineKeyboardButton("Gaming", callback_data="pscr_atype_gaming")
+        ],
+        [
+            InlineKeyboardButton("Layer 1", callback_data="pscr_atype_layer1"),
+            InlineKeyboardButton("Layer 2", callback_data="pscr_atype_layer2")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_INDICATOR"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_ASSET_TYPE
+
+async def render_pscr_timeframe_selection(update, context):
+    asset_type = context.user_data.get('pscr_asset_type', '?')
+    type_text = ASSET_TYPE_TEXT.get(asset_type, asset_type)
+    text = f"Asset Type: {type_text}\n\nStep 6/11: Select Timeframe:"
+    keyboard = [
+        [
+            InlineKeyboardButton("1m", callback_data="pscr_tf_1m"),
+            InlineKeyboardButton("3m", callback_data="pscr_tf_3m"),
+            InlineKeyboardButton("5m", callback_data="pscr_tf_5m")
+        ],
+        [
+            InlineKeyboardButton("15m", callback_data="pscr_tf_15m"),
+            InlineKeyboardButton("30m", callback_data="pscr_tf_30m"),
+            InlineKeyboardButton("1h", callback_data="pscr_tf_1h")
+        ],
+        [
+            InlineKeyboardButton("4h", callback_data="pscr_tf_4h"),
+            InlineKeyboardButton("1d", callback_data="pscr_tf_1d")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_ASSET_TYPE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_TIMEFRAME
+
+async def render_pscr_direction_selection(update, context):
+    timeframe = context.user_data.get('pscr_timeframe', '?')
+    text = f"Timeframe: {timeframe}\n\nStep 7/11: Select Trading Direction:"
+    keyboard = [
+        [InlineKeyboardButton("Both (Long & Short)", callback_data="pscr_dir_both")],
+        [InlineKeyboardButton("Long Only", callback_data="pscr_dir_long_only")],
+        [InlineKeyboardButton("Short Only", callback_data="pscr_dir_short_only")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_TIMEFRAME"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_DIRECTION
+
+async def render_pscr_lot_size_prompt(update, context):
+    direction = context.user_data.get('pscr_direction', '?')
+    text = (
+        f"Direction: {direction.replace('_', ' ').title()}\n\n"
+        "Step 8/11: Enter Lot Size (per trade):\n\n"
+        "Send /cancel to abort."
+    )
+    keyboard = [[
+        InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_DIRECTION"),
+        InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_LOT_SIZE
+
+async def render_pscr_leverage_selection(update, context):
+    lot_size = context.user_data.get('pscr_lot_size', '?')
+    text = (
+        f"Lot Size: {lot_size}\n\n"
+        "Step 9/11: Select Leverage:\n"
+        "(Max = highest allowed by the exchange per asset)"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("5x", callback_data="pscr_lev_5"),
+            InlineKeyboardButton("10x", callback_data="pscr_lev_10"),
+            InlineKeyboardButton("25x", callback_data="pscr_lev_25"),
+        ],
+        [
+            InlineKeyboardButton("50x", callback_data="pscr_lev_50"),
+            InlineKeyboardButton("100x", callback_data="pscr_lev_100"),
+            InlineKeyboardButton("Max", callback_data="pscr_lev_0"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_LOT_SIZE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_LEVERAGE
+
+async def render_pscr_protection_selection(update, context):
+    leverage = context.user_data.get('pscr_leverage', 10)
+    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
+    text = (
+        f"Leverage: {lev_display}\n\n"
+        "Step 10/11: Additional Protection (Stop-Loss)?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Yes (Enable SL)", callback_data="pscr_prot_yes")],
+        [InlineKeyboardButton("No (Disable SL)", callback_data="pscr_prot_no")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_LEVERAGE"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_PROTECTION
+
+async def render_pscr_confirm(update, context):
+    ud = context.user_data
+    protection = ud.get('pscr_protection', False)
+    asset_type_text = ASSET_TYPE_TEXT.get(ud.get('pscr_asset_type', ''), ud.get('pscr_asset_type', 'Unknown'))
+    
+    text = (
+        "**Paper Screener Summary**\n\n"
+        f"**Name:** {ud.get('pscr_name', '?')}\n"
+        f"**Description:** {ud.get('pscr_description', '?')}\n"
+        f"**API:** {ud.get('pscr_api_name', '?')}\n"
+        f"**Indicator:** {ud.get('pscr_preset_name', ud.get('pscr_indicator', 'Unknown'))}\n"
+        f"**Asset Selection:** {asset_type_text}\n"
+        f"**Direction:** {ud.get('pscr_direction', '').replace('_', ' ').title()}\n"
+        f"**Timeframe:** {ud.get('pscr_timeframe', '?')}\n"
+        f"**Lot Size:** {ud.get('pscr_lot_size', '?')}\n"
+        f"**Leverage:** {_lev_display(ud.get('pscr_leverage', 10))}\n"
+        f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
+        f"**Mode:** PAPER SCREENER (Virtual)\n\n"
+        "Confirm to save and activate?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Confirm and Activate", callback_data="pscr_confirm_yes")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return PSCR_CONFIRM
+
+
 # ==================== MAIN PAPER TRADING MENU ====================
 
 async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -112,292 +643,98 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
 # ==================== CREATE INDIVIDUAL PAPER SETUP (CONVERSATION) ====================
 
 async def paper_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start paper setup creation."""
     query = update.callback_query
     await query.answer()
-    
-    await query.edit_message_text(
-        "**Create Paper Trading Setup (Individual)**\n\n"
-        "Step 1/9: Enter a name for this paper setup:\n\n"
-        "Send /cancel to abort.",
-        parse_mode="Markdown"
-    )
-    return PAPER_NAME
-
+    context.user_data.clear()
+    return await render_paper_name_prompt(update, context)
 
 async def paper_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive paper setup name."""
     name = update.message.text.strip()
     if len(name) < 3:
-        await update.message.reply_text("Name must be at least 3 characters. Try again:")
+        await update.message.reply_text("❌ Name must be at least 3 characters. Try again:")
         return PAPER_NAME
-    
     context.user_data['paper_setup_name'] = name
-    await update.message.reply_text(
-        f"Name: {name}\n\n"
-        "Step 2/9: Enter a description:\n\n"
-        "Send /cancel to abort."
-    )
-    return PAPER_DESC
-
+    return await render_paper_desc_prompt(update, context)
 
 async def paper_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive paper setup description."""
     desc = update.message.text.strip()
     context.user_data['paper_description'] = desc
-    
-    user_id = str(update.effective_user.id)
-    credentials = await get_api_credentials_by_user(user_id)
-    
-    if not credentials:
-        await update.message.reply_text(
-            "You need at least one API credential for price data.\n"
-            "Go to API Menu to add one first."
-        )
-        return ConversationHandler.END
-    
-    keyboard = []
-    for cred in credentials:
-        keyboard.append([InlineKeyboardButton(
-            cred['api_name'],
-            callback_data=f"paper_api_{cred['_id']}"
-        )])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Step 3/9: Select API credential (for price data):",
-        reply_markup=reply_markup
-    )
-    return PAPER_API
-
+    return await render_paper_api_selection(update, context)
 
 async def paper_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection — show indicator presets."""
     query = update.callback_query
     await query.answer()
-    
     api_id = query.data.replace("paper_api_", "")
     cred = await get_api_credential_by_id(api_id, decrypt=False)
-    
     if not cred:
-        await query.edit_message_text("API credential not found. Try again.")
+        await query.edit_message_text("❌ API credential not found. Try again.")
         return ConversationHandler.END
-    
     context.user_data['paper_api_id'] = api_id
     context.user_data['paper_api_name'] = cred['api_name']
-    
-    user_id = str(query.from_user.id)
-    await ensure_default_presets(user_id)
-    presets = await get_strategy_presets_by_user(user_id)
-    
-    keyboard = []
-    for preset in presets:
-        pid = str(preset['_id'])
-        name = preset.get('preset_name', 'Strategy')
-        keyboard.append([InlineKeyboardButton(name, callback_data=f"paper_ind_{pid}")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"API: {cred['api_name']}\n\n"
-        "Step 4/10: Select Indicator Strategy:",
-        reply_markup=reply_markup
-    )
-    return PAPER_INDICATOR
-
+    return await render_paper_indicator_selection(update, context)
 
 async def paper_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle indicator preset selection for paper setup."""
     query = update.callback_query
     await query.answer()
-    
     preset_id = query.data.replace("paper_ind_", "")
     preset = await get_strategy_preset_by_id(preset_id)
-    
     if not preset:
-        await query.edit_message_text("Preset not found. Use /start to return.")
+        await query.edit_message_text("❌ Preset not found. Use /start to return.")
         return ConversationHandler.END
-    
     context.user_data['paper_indicator'] = preset['strategy_type']
     context.user_data['paper_preset_id'] = preset_id
     context.user_data['paper_indicator_params'] = preset.get('parameters', {})
     context.user_data['paper_preset_name'] = preset.get('preset_name', 'Unknown')
-    
-    keyboard = [
-        [InlineKeyboardButton("Both (Long & Short)", callback_data="paper_dir_both")],
-        [InlineKeyboardButton("Long Only", callback_data="paper_dir_long_only")],
-        [InlineKeyboardButton("Short Only", callback_data="paper_dir_short_only")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
-        "Step 5/10: Select trading direction:",
-        reply_markup=reply_markup
-    )
-    return PAPER_DIRECTION
-
+    return await render_paper_direction_selection(update, context)
 
 async def paper_direction_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle direction selection."""
     query = update.callback_query
     await query.answer()
-    
     direction = query.data.replace("paper_dir_", "")
     context.user_data['paper_direction'] = direction
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("1m", callback_data="paper_tf_1m"),
-            InlineKeyboardButton("3m", callback_data="paper_tf_3m"),
-            InlineKeyboardButton("5m", callback_data="paper_tf_5m")
-        ],
-        [
-            InlineKeyboardButton("15m", callback_data="paper_tf_15m"),
-            InlineKeyboardButton("30m", callback_data="paper_tf_30m"),
-            InlineKeyboardButton("1h", callback_data="paper_tf_1h")
-        ],
-        [
-            InlineKeyboardButton("4h", callback_data="paper_tf_4h"),
-            InlineKeyboardButton("1d", callback_data="paper_tf_1d")
-        ]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Direction: {direction.replace('_', ' ').title()}\n\n"
-        "Step 5/9: Select timeframe:",
-        reply_markup=reply_markup
-    )
-    return PAPER_TIMEFRAME
-
+    return await render_paper_timeframe_selection(update, context)
 
 async def paper_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle timeframe selection."""
     query = update.callback_query
     await query.answer()
-    
     timeframe = query.data.replace("paper_tf_", "")
     context.user_data['paper_timeframe'] = timeframe
-    
-    await query.edit_message_text(
-        f"Timeframe: {timeframe}\n\n"
-        "Step 6/9: Enter Asset Symbol (e.g., BTCUSD, ETHUSD):\n\n"
-        "Send /cancel to abort."
-    )
-    return PAPER_ASSET
-
+    return await render_paper_asset_prompt(update, context)
 
 async def paper_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive asset symbol."""
     asset = update.message.text.strip().upper()
     if len(asset) < 3:
-        await update.message.reply_text("Invalid asset symbol. Try again:")
+        await update.message.reply_text("❌ Invalid asset symbol. Try again:")
         return PAPER_ASSET
-    
     context.user_data['paper_asset'] = asset
-    
-    await update.message.reply_text(
-        f"Asset: {asset}\n\n"
-        "Step 7/9: Enter Lot Size (number of contracts):\n\n"
-        "Send /cancel to abort."
-    )
-    return PAPER_LOT_SIZE
-
+    return await render_paper_lot_size_prompt(update, context)
 
 async def paper_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive lot size."""
     try:
         lot_size = int(update.message.text.strip())
         if lot_size < 1:
-            await update.message.reply_text("Lot size must be at least 1. Try again:")
+            await update.message.reply_text("❌ Lot size must be at least 1. Try again:")
             return PAPER_LOT_SIZE
-        
         context.user_data['paper_lot_size'] = lot_size
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("5x", callback_data="paper_lev_5"),
-                InlineKeyboardButton("10x", callback_data="paper_lev_10"),
-                InlineKeyboardButton("25x", callback_data="paper_lev_25"),
-            ],
-            [
-                InlineKeyboardButton("50x", callback_data="paper_lev_50"),
-                InlineKeyboardButton("100x", callback_data="paper_lev_100"),
-                InlineKeyboardButton("Max", callback_data="paper_lev_0"),
-            ]
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"Lot Size: {lot_size}\n\n"
-            "Step 8/9: Select Leverage:\n"
-            "(Max = highest allowed by the exchange for this asset)",
-            reply_markup=reply_markup
-        )
-        return PAPER_LEVERAGE
-        
+        return await render_paper_leverage_selection(update, context)
     except ValueError:
-        await update.message.reply_text("Invalid number. Enter a valid lot size:")
+        await update.message.reply_text("❌ Invalid number. Enter a valid lot size:")
         return PAPER_LOT_SIZE
 
-
 async def paper_leverage_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle leverage selection."""
     query = update.callback_query
     await query.answer()
-    
     leverage = int(query.data.replace("paper_lev_", ""))
     context.user_data['paper_leverage'] = leverage
-    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
-    
-    keyboard = [
-        [InlineKeyboardButton("Yes (Enable SL)", callback_data="paper_prot_yes")],
-        [InlineKeyboardButton("No (Disable SL)", callback_data="paper_prot_no")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Leverage: {lev_display}\n\n"
-        "Step 9/9: Additional Protection (Stop-Loss)?",
-        reply_markup=reply_markup
-    )
-    return PAPER_PROTECTION
-
+    return await render_paper_protection_selection(update, context)
 
 async def paper_protection_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle protection selection and show confirmation."""
     query = update.callback_query
     await query.answer()
-    
     protection = query.data == "paper_prot_yes"
     context.user_data['paper_protection'] = protection
-    
-    ud = context.user_data
-    
-    message = (
-        "**Paper Setup Summary**\n\n"
-        f"**Name:** {ud['paper_setup_name']}\n"
-        f"**Description:** {ud['paper_description']}\n"
-        f"**API:** {ud['paper_api_name']}\n"
-        f"**Indicator:** {ud.get('paper_preset_name', ud.get('paper_indicator', 'Unknown'))}\n"
-        f"**Direction:** {ud['paper_direction'].replace('_', ' ').title()}\n"
-        f"**Timeframe:** {ud['paper_timeframe']}\n"
-        f"**Asset:** {ud['paper_asset']}\n"
-        f"**Lot Size:** {ud['paper_lot_size']}\n"
-        f"**Leverage:** {_lev_display(ud['paper_leverage'])}\n"
-        f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
-        f"**Mode:** PAPER TRADE (Virtual)\n\n"
-        "Confirm to save and activate?"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("Confirm and Activate", callback_data="paper_confirm_yes")],
-        [InlineKeyboardButton("Cancel", callback_data="paper_confirm_no")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-    return PAPER_CONFIRM
+    return await render_paper_confirm(update, context)
+
 
 
 async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -450,6 +787,13 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Ensure paper balance exists
         await get_paper_balance(user_id)
         
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Another Setup", callback_data="paper_add_start")],
+            [InlineKeyboardButton("🔙 Back to Paper Menu", callback_data="menu_paper_trading")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             f"**Paper Setup Created!**\n\n"
             f"**Name:** {ud['paper_setup_name']}\n"
@@ -458,6 +802,7 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**Mode:** PAPER TRADE\n\n"
             f"The setup is now active and monitoring for signals.\n"
             f"Virtual trades will be executed automatically.",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
         
@@ -471,323 +816,97 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== CREATE PAPER SCREENER SETUP (CONVERSATION) ====================
 
 async def pscr_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start paper screener setup creation."""
     query = update.callback_query
     await query.answer()
-    
-    await query.edit_message_text(
-        "**Create Paper Screener Setup (Multi-Asset)**\n\n"
-        "Step 1/10: Enter a name for this paper screener:\n\n"
-        "Send /cancel to abort.",
-        parse_mode="Markdown"
-    )
-    return PSCR_NAME
-
+    context.user_data.clear()
+    return await render_pscr_name_prompt(update, context)
 
 async def pscr_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive paper screener name."""
     name = update.message.text.strip()
     if len(name) < 3:
-        await update.message.reply_text("Name must be at least 3 characters. Try again:")
+        await update.message.reply_text("❌ Name must be at least 3 characters. Try again:")
         return PSCR_NAME
-    
     context.user_data['pscr_name'] = name
-    await update.message.reply_text(
-        f"Name: {name}\n\n"
-        "Step 2/10: Enter a description:\n\n"
-        "Send /cancel to abort."
-    )
-    return PSCR_DESC
-
+    return await render_pscr_desc_prompt(update, context)
 
 async def pscr_desc_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive paper screener description."""
     desc = update.message.text.strip()
     context.user_data['pscr_description'] = desc
-    
-    user_id = str(update.effective_user.id)
-    credentials = await get_api_credentials_by_user(user_id)
-    
-    if not credentials:
-        await update.message.reply_text(
-            "You need at least one API credential for price data.\n"
-            "Go to API Menu to add one first."
-        )
-        return ConversationHandler.END
-    
-    keyboard = []
-    for cred in credentials:
-        keyboard.append([InlineKeyboardButton(
-            cred['api_name'],
-            callback_data=f"pscr_api_{cred['_id']}"
-        )])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Step 3/10: Select API credential (for price data):",
-        reply_markup=reply_markup
-    )
-    return PSCR_API
-
+    return await render_pscr_api_selection(update, context)
 
 async def pscr_api_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle API selection for paper screener — show indicator presets."""
     query = update.callback_query
     await query.answer()
-    
     api_id = query.data.replace("pscr_api_", "")
     cred = await get_api_credential_by_id(api_id, decrypt=False)
-    
     if not cred:
-        await query.edit_message_text("API credential not found. Try again.")
+        await query.edit_message_text("❌ API credential not found. Try again.")
         return ConversationHandler.END
-    
     context.user_data['pscr_api_id'] = api_id
     context.user_data['pscr_api_name'] = cred['api_name']
-    
-    user_id = str(query.from_user.id)
-    await ensure_default_presets(user_id)
-    presets = await get_strategy_presets_by_user(user_id)
-    
-    keyboard = []
-    for preset in presets:
-        pid = str(preset['_id'])
-        name = preset.get('preset_name', 'Strategy')
-        keyboard.append([InlineKeyboardButton(name, callback_data=f"pscr_ind_{pid}")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"API: {cred['api_name']}\n\n"
-        "Step 4/11: Select Indicator Strategy:",
-        reply_markup=reply_markup
-    )
-    return PSCR_INDICATOR
-
+    return await render_pscr_indicator_selection(update, context)
 
 async def pscr_indicator_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle indicator preset selection for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     preset_id = query.data.replace("pscr_ind_", "")
     preset = await get_strategy_preset_by_id(preset_id)
-    
     if not preset:
-        await query.edit_message_text("Preset not found. Use /start to return.")
+        await query.edit_message_text("❌ Preset not found. Use /start to return.")
         return ConversationHandler.END
-    
     context.user_data['pscr_indicator'] = preset['strategy_type']
     context.user_data['pscr_preset_id'] = preset_id
     context.user_data['pscr_indicator_params'] = preset.get('parameters', {})
     context.user_data['pscr_preset_name'] = preset.get('preset_name', 'Unknown')
-    
-    keyboard = [
-        [InlineKeyboardButton("Every Available Asset", callback_data="pscr_atype_every")],
-        [
-            InlineKeyboardButton("Top Gainers", callback_data="pscr_atype_gainers"),
-            InlineKeyboardButton("Top Losers", callback_data="pscr_atype_losers")
-        ],
-        [
-            InlineKeyboardButton("Gainers + Losers", callback_data="pscr_atype_mixed"),
-            InlineKeyboardButton("Top Volume", callback_data="pscr_atype_volume")
-        ],
-        [InlineKeyboardButton("Top Open Interest", callback_data="pscr_atype_top_oi")],
-        [
-            InlineKeyboardButton("Meme", callback_data="pscr_atype_meme"),
-            InlineKeyboardButton("Solana", callback_data="pscr_atype_solana"),
-            InlineKeyboardButton("New", callback_data="pscr_atype_new")
-        ],
-        [
-            InlineKeyboardButton("AI", callback_data="pscr_atype_ai"),
-            InlineKeyboardButton("DeFi", callback_data="pscr_atype_defi"),
-            InlineKeyboardButton("Gaming", callback_data="pscr_atype_gaming")
-        ],
-        [
-            InlineKeyboardButton("Layer 1", callback_data="pscr_atype_layer1"),
-            InlineKeyboardButton("Layer 2", callback_data="pscr_atype_layer2")
-        ]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Indicator: {preset.get('preset_name', 'Unknown')}\n\n"
-        "Step 5/11: Select Asset Selection Type:",
-        reply_markup=reply_markup
-    )
-    return PSCR_ASSET_TYPE
-
+    return await render_pscr_asset_type_selection(update, context)
 
 async def pscr_asset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle asset selection type for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     asset_type = query.data.replace("pscr_atype_", "")
     context.user_data['pscr_asset_type'] = asset_type
-    
-    type_text = ASSET_TYPE_TEXT.get(asset_type, asset_type)
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("1m", callback_data="pscr_tf_1m"),
-            InlineKeyboardButton("3m", callback_data="pscr_tf_3m"),
-            InlineKeyboardButton("5m", callback_data="pscr_tf_5m")
-        ],
-        [
-            InlineKeyboardButton("15m", callback_data="pscr_tf_15m"),
-            InlineKeyboardButton("30m", callback_data="pscr_tf_30m"),
-            InlineKeyboardButton("1h", callback_data="pscr_tf_1h")
-        ],
-        [
-            InlineKeyboardButton("4h", callback_data="pscr_tf_4h"),
-            InlineKeyboardButton("1d", callback_data="pscr_tf_1d")
-        ]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Asset Type: {type_text}\n\n"
-        "Step 5/10: Select Timeframe:",
-        reply_markup=reply_markup
-    )
-    return PSCR_TIMEFRAME
-
+    return await render_pscr_timeframe_selection(update, context)
 
 async def pscr_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle timeframe selection for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     timeframe = query.data.replace("pscr_tf_", "")
     context.user_data['pscr_timeframe'] = timeframe
-    
-    keyboard = [
-        [InlineKeyboardButton("Both (Long & Short)", callback_data="pscr_dir_both")],
-        [InlineKeyboardButton("Long Only", callback_data="pscr_dir_long_only")],
-        [InlineKeyboardButton("Short Only", callback_data="pscr_dir_short_only")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Timeframe: {timeframe}\n\n"
-        "Step 6/10: Select Trading Direction:",
-        reply_markup=reply_markup
-    )
-    return PSCR_DIRECTION
-
+    return await render_pscr_direction_selection(update, context)
 
 async def pscr_direction_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle direction selection for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     direction = query.data.replace("pscr_dir_", "")
     context.user_data['pscr_direction'] = direction
-    
-    await query.edit_message_text(
-        f"Direction: {direction.replace('_', ' ').title()}\n\n"
-        "Step 7/10: Enter Lot Size (per trade):\n\n"
-        "Send /cancel to abort."
-    )
-    return PSCR_LOT_SIZE
-
+    return await render_pscr_lot_size_prompt(update, context)
 
 async def pscr_lot_size_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive lot size for paper screener."""
     try:
         lot_size = int(update.message.text.strip())
         if lot_size < 1:
-            await update.message.reply_text("Lot size must be at least 1. Try again:")
+            await update.message.reply_text("❌ Lot size must be at least 1. Try again:")
             return PSCR_LOT_SIZE
-        
         context.user_data['pscr_lot_size'] = lot_size
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("5x", callback_data="pscr_lev_5"),
-                InlineKeyboardButton("10x", callback_data="pscr_lev_10"),
-                InlineKeyboardButton("25x", callback_data="pscr_lev_25"),
-            ],
-            [
-                InlineKeyboardButton("50x", callback_data="pscr_lev_50"),
-                InlineKeyboardButton("100x", callback_data="pscr_lev_100"),
-                InlineKeyboardButton("Max", callback_data="pscr_lev_0"),
-            ]
-        ]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"Lot Size: {lot_size}\n\n"
-            "Step 8/10: Select Leverage:\n"
-            "(Max = highest allowed by the exchange per asset)",
-            reply_markup=reply_markup
-        )
-        return PSCR_LEVERAGE
-        
+        return await render_pscr_leverage_selection(update, context)
     except ValueError:
-        await update.message.reply_text("Invalid number. Enter a valid lot size:")
+        await update.message.reply_text("❌ Invalid number. Enter a valid lot size:")
         return PSCR_LOT_SIZE
 
-
 async def pscr_leverage_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle leverage selection for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     leverage = int(query.data.replace("pscr_lev_", ""))
     context.user_data['pscr_leverage'] = leverage
-    lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
-    
-    keyboard = [
-        [InlineKeyboardButton("Yes (Enable SL)", callback_data="pscr_prot_yes")],
-        [InlineKeyboardButton("No (Disable SL)", callback_data="pscr_prot_no")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        f"Leverage: {lev_display}\n\n"
-        "Step 9/10: Additional Protection (Stop-Loss)?",
-        reply_markup=reply_markup
-    )
-    return PSCR_PROTECTION
-
+    return await render_pscr_protection_selection(update, context)
 
 async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle protection selection and show confirmation for paper screener."""
     query = update.callback_query
     await query.answer()
-    
     protection = query.data == "pscr_prot_yes"
     context.user_data['pscr_protection'] = protection
-    
-    ud = context.user_data
-    
-    asset_type_text = ASSET_TYPE_TEXT.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
-    
-    message = (
-        "**Paper Screener Summary**\n\n"
-        f"**Name:** {ud['pscr_name']}\n"
-        f"**Description:** {ud['pscr_description']}\n"
-        f"**API:** {ud['pscr_api_name']}\n"
-        f"**Indicator:** {ud.get('pscr_preset_name', ud.get('pscr_indicator', 'Unknown'))}\n"
-        f"**Asset Selection:** {asset_type_text}\n"
-        f"**Direction:** {ud['pscr_direction'].replace('_', ' ').title()}\n"
-        f"**Timeframe:** {ud['pscr_timeframe']}\n"
-        f"**Lot Size:** {ud['pscr_lot_size']}\n"
-        f"**Leverage:** {_lev_display(ud['pscr_leverage'])}\n"
-        f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
-        f"**Mode:** PAPER SCREENER (Virtual)\n\n"
-        "Confirm to save and activate?"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("Confirm and Activate", callback_data="pscr_confirm_yes")],
-        [InlineKeyboardButton("Cancel", callback_data="pscr_confirm_no")]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
-    return PSCR_CONFIRM
+    return await render_pscr_confirm(update, context)
+
 
 
 async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -829,6 +948,13 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         asset_type_text = ASSET_TYPE_TEXT.get(ud['pscr_asset_type'], ud['pscr_asset_type'])
         
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Another Setup", callback_data="pscr_add_start")],
+            [InlineKeyboardButton("🔙 Back to Paper Menu", callback_data="menu_paper_trading")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             f"**Paper Screener Created!**\n\n"
             f"**Name:** {ud['pscr_name']}\n"
@@ -838,6 +964,7 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**Mode:** PAPER SCREENER\n\n"
             f"The screener is now active and scanning for signals.\n"
             f"Virtual trades will be executed automatically.",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
         
@@ -1392,4 +1519,73 @@ async def paper_set_balance_amount_received(update: Update, context: ContextType
 async def cancel_paper_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel paper setup creation."""
     await update.message.reply_text("Paper setup creation cancelled.")
+    return ConversationHandler.END
+
+# ==================== Back/Cancel Handlers ====================
+
+async def paper_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    state = query.data.replace("paper_back_to_", "")
+    
+    if state == "PAPER_NAME":
+        return await render_paper_name_prompt(update, context)
+    elif state == "PAPER_DESC":
+        return await render_paper_desc_prompt(update, context)
+    elif state == "PAPER_API":
+        return await render_paper_api_selection(update, context)
+    elif state == "PAPER_INDICATOR":
+        return await render_paper_indicator_selection(update, context)
+    elif state == "PAPER_DIRECTION":
+        return await render_paper_direction_selection(update, context)
+    elif state == "PAPER_TIMEFRAME":
+        return await render_paper_timeframe_selection(update, context)
+    elif state == "PAPER_ASSET":
+        return await render_paper_asset_prompt(update, context)
+    elif state == "PAPER_LOT_SIZE":
+        return await render_paper_lot_size_prompt(update, context)
+    elif state == "PAPER_LEVERAGE":
+        return await render_paper_leverage_selection(update, context)
+    
+    return ConversationHandler.END
+
+async def paper_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await paper_trading_menu_callback(update, context)
+    return ConversationHandler.END
+
+
+async def pscr_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    state = query.data.replace("pscr_back_to_", "")
+    
+    if state == "PSCR_NAME":
+        return await render_pscr_name_prompt(update, context)
+    elif state == "PSCR_DESC":
+        return await render_pscr_desc_prompt(update, context)
+    elif state == "PSCR_API":
+        return await render_pscr_api_selection(update, context)
+    elif state == "PSCR_INDICATOR":
+        return await render_pscr_indicator_selection(update, context)
+    elif state == "PSCR_ASSET_TYPE":
+        return await render_pscr_asset_type_selection(update, context)
+    elif state == "PSCR_TIMEFRAME":
+        return await render_pscr_timeframe_selection(update, context)
+    elif state == "PSCR_DIRECTION":
+        return await render_pscr_direction_selection(update, context)
+    elif state == "PSCR_LOT_SIZE":
+        return await render_pscr_lot_size_prompt(update, context)
+    elif state == "PSCR_LEVERAGE":
+        return await render_pscr_leverage_selection(update, context)
+    
+    return ConversationHandler.END
+
+async def pscr_cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await paper_trading_menu_callback(update, context)
     return ConversationHandler.END
