@@ -93,23 +93,23 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
     db = await get_db()
 
     # Find all setups linked to this API credential
-    setups = await db.algo_setups.find({"api_id": credential_id}).to_list(100)
+    setups = await mongodb.get_db().algo_setups.find({"api_id": credential_id}).to_list(100)
 
     # For each setup, delete all related records by setup ID
     for setup in setups:
         setup_id = str(setup["_id"])
-        await db.orders.delete_many({"algo_setup_id": setup_id})
-        await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.trade_states.delete_many({"setup_id": setup_id})
-        await db.position_locks.delete_many({"setup_id": setup_id})
-        await db.indicator_cache.delete_many({"setup_id": setup_id})
-        await db.screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
+        await mongodb.get_db().orders.delete_many({"algo_setup_id": setup_id})
+        await mongodb.get_db().positions.delete_many({"algo_setup_id": setup_id})
+        await mongodb.get_db().trade_states.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().position_locks.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().indicator_cache.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
 
     # Delete setups linked to this credential
-    await db.algo_setups.delete_many({"api_id": credential_id})
+    await mongodb.get_db().algo_setups.delete_many({"api_id": credential_id})
 
     # Finally, delete the credential itself
-    result = await db.api_credentials.delete_one({
+    result = await mongodb.get_db().api_credentials.delete_one({
         "_id": ObjectId(credential_id),
         "user_id": user_id
     })
@@ -124,21 +124,18 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
 # ==================== Strategy Presets CRUD ====================
 
 async def create_strategy_preset(preset_data: Dict[str, Any]) -> str:
-    db = mongodb.get_db()
     collection = db["strategy_presets"]
     preset = StrategyPreset(**preset_data)
     result = await collection.insert_one(preset.model_dump(by_alias=True, exclude={"id"}))
     return str(result.inserted_id)
 
 async def get_strategy_presets_by_user(user_id: str) -> List[Dict[str, Any]]:
-    db = mongodb.get_db()
     collection = db["strategy_presets"]
     cursor = collection.find({"user_id": user_id})
     return await cursor.to_list(length=100)
 
 async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
     try:
-        db = mongodb.get_db()
         collection = db["strategy_presets"]
         return await collection.find_one({"_id": ObjectId(preset_id)})
     except Exception as e:
@@ -148,7 +145,6 @@ async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
 async def update_strategy_preset(preset_id: str, update_data: Dict[str, Any]) -> bool:
     """Update a strategy preset's fields."""
     try:
-        db = mongodb.get_db()
         collection = db["strategy_presets"]
         update_data["updated_at"] = datetime.utcnow()
         result = await collection.update_one(
@@ -162,7 +158,6 @@ async def update_strategy_preset(preset_id: str, update_data: Dict[str, Any]) ->
 
 async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
     try:
-        db = mongodb.get_db()
         collection = db["strategy_presets"]
         result = await collection.delete_one({"_id": ObjectId(preset_id), "user_id": user_id})
         return result.deleted_count > 0
@@ -291,7 +286,7 @@ async def archive_setup(setup_doc: dict, setup_type: str) -> bool:
         archive_doc["original_id"] = str(setup_doc.get("_id", ""))
         archive_doc["setup_type"] = setup_type  # "algo" or "screener"
         archive_doc["archived_at"] = datetime.utcnow()
-        await db.archived_setups.update_one(
+        await mongodb.get_db().archived_setups.update_one(
             {"original_id": archive_doc["original_id"]},
             {"$set": archive_doc},
             upsert=True
@@ -308,7 +303,7 @@ async def get_archived_setups_by_user(user_id: str, is_paper_trade: bool = False
     try:
         db = await get_db()
         query = {"user_id": user_id, "is_paper_trade": is_paper_trade}
-        cursor = db.archived_setups.find(query).sort("archived_at", -1)
+        cursor = mongodb.get_db().archived_setups.find(query).sort("archived_at", -1)
         setups = await cursor.to_list(200)
         for s in setups:
             s["_id"] = str(s["_id"])
@@ -322,7 +317,7 @@ async def get_archived_setup_by_id(original_id: str) -> Optional[Dict[str, Any]]
     """Get a single archived setup by its original setup ID."""
     try:
         db = await get_db()
-        doc = await db.archived_setups.find_one({"original_id": original_id})
+        doc = await mongodb.get_db().archived_setups.find_one({"original_id": original_id})
         if doc:
             doc["_id"] = str(doc["_id"])
         return doc
@@ -335,7 +330,7 @@ async def delete_archived_setup_by_name(user_id: str, setup_name: str) -> bool:
     """Delete an archived setup by its name for a user."""
     try:
         db = await get_db()
-        result = await db.archived_setups.delete_many({
+        result = await mongodb.get_db().archived_setups.delete_many({
             "user_id": user_id,
             "setup_name": setup_name
         })
@@ -351,17 +346,17 @@ async def delete_algo_setup(setup_id: str, user_id: str) -> bool:
     """
     db = await get_db()
     # Archive the setup before deletion
-    setup_doc = await db.algo_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
+    setup_doc = await mongodb.get_db().algo_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
     if setup_doc:
         await archive_setup(setup_doc, "algo")
     # Clean up all related DB records first
-    await db.orders.delete_many({"algo_setup_id": setup_id})
-    await db.positions.delete_many({"algo_setup_id": setup_id})
-    await db.trade_states.delete_many({"setup_id": setup_id})
-    await db.position_locks.delete_many({"setup_id": setup_id})
-    await db.indicator_cache.delete_many({"setup_id": setup_id})
+    await mongodb.get_db().orders.delete_many({"algo_setup_id": setup_id})
+    await mongodb.get_db().positions.delete_many({"algo_setup_id": setup_id})
+    await mongodb.get_db().trade_states.delete_many({"setup_id": setup_id})
+    await mongodb.get_db().position_locks.delete_many({"setup_id": setup_id})
+    await mongodb.get_db().indicator_cache.delete_many({"setup_id": setup_id})
     # Delete the setup itself
-    result = await db.algo_setups.delete_one({
+    result = await mongodb.get_db().algo_setups.delete_one({
         "_id": ObjectId(setup_id),
         "user_id": user_id
     })
@@ -510,8 +505,7 @@ async def save_indicator_cache(cache_data: dict) -> bool:
     try:
         from database.models import IndicatorCache
         cache = IndicatorCache(**cache_data)
-        db = mongodb.get_db()
-        await db.indicator_cache.update_one(
+        await mongodb.get_db().indicator_cache.update_one(
             {
                 "setup_id": cache.setup_id,
                 "asset": cache.asset,
@@ -546,8 +540,7 @@ async def get_last_strategy_state(setup_id: str, asset: str, timeframe: str) -> 
     The engine fetches this before saving new cache, then passes it to generate_entry_signal().
     """
     try:
-        db = mongodb.get_db()
-        cache = await db.indicator_cache.find_one({
+        cache = await mongodb.get_db().indicator_cache.find_one({
             "setup_id": setup_id,
             "asset": asset,
             "timeframe": timeframe
@@ -567,11 +560,10 @@ async def get_last_strategy_state(setup_id: str, asset: str, timeframe: str) -> 
 
 async def get_indicator_cache_by_type(setup_type: str, is_paper_trade: bool) -> list:
     try:
-        db = mongodb.get_db()
         from datetime import datetime, timedelta
         one_hour_ago = datetime.utcnow() - timedelta(hours=1)
         
-        cursor = db.indicator_cache.find({
+        cursor = mongodb.get_db().indicator_cache.find({
             "setup_type": setup_type,
             "is_paper_trade": is_paper_trade,
             "calculated_at": {"$gte": one_hour_ago}
@@ -655,18 +647,18 @@ async def delete_screener_setup(setup_id: str, user_id: str) -> bool:
     try:
         db = await get_db()
         # Archive the setup before deletion
-        setup_doc = await db.screener_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
+        setup_doc = await mongodb.get_db().screener_setups.find_one({"_id": ObjectId(setup_id), "user_id": user_id})
         if setup_doc:
             await archive_setup(setup_doc, "screener")
         # Clean up all related DB records first
-        await db.orders.delete_many({"algo_setup_id": setup_id})
-        await db.positions.delete_many({"algo_setup_id": setup_id})
-        await db.trade_states.delete_many({"setup_id": setup_id})
-        await db.position_locks.delete_many({"setup_id": setup_id})
-        await db.indicator_cache.delete_many({"setup_id": setup_id})
-        await db.screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
+        await mongodb.get_db().orders.delete_many({"algo_setup_id": setup_id})
+        await mongodb.get_db().positions.delete_many({"algo_setup_id": setup_id})
+        await mongodb.get_db().trade_states.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().position_locks.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().indicator_cache.delete_many({"setup_id": setup_id})
+        await mongodb.get_db().screener_indicator_cache.delete_many({"screener_setup_id": setup_id})
         
-        result = await db.screener_setups.delete_one({
+        result = await mongodb.get_db().screener_setups.delete_one({
             "_id": ObjectId(setup_id),
             "user_id": user_id
         })
@@ -897,7 +889,7 @@ async def create_position_record(position_data: dict) -> str:
     Save a new position to the `positions` collection.
     """
     db = await get_db()
-    result = await db.positions.insert_one(position_data)
+    result = await mongodb.get_db().positions.insert_one(position_data)
     return str(result.inserted_id)
     
 async def create_position_lock(symbol: str, setup_id: str, api_id: str = "") -> bool:
@@ -948,7 +940,7 @@ async def get_screener_positions_by_asset(
         query["is_paper_trade"] = is_paper
     if api_id is not None:
         query["api_id"] = api_id
-    trades = await db.trade_states.find(query).to_list(None)
+    trades = await mongodb.get_db().trade_states.find(query).to_list(None)
     for t in trades:
         t["_id"] = str(t["_id"])
     return trades
@@ -956,14 +948,14 @@ async def get_screener_positions_by_asset(
 async def create_screener_position_record(position_data: Dict[str, Any]):
     """Create a screener position record."""
     db = await get_db()
-    result = await db.positions.insert_one(position_data)
+    result = await mongodb.get_db().positions.insert_one(position_data)
     logger.info(f"✅ Screener position record created: {result.inserted_id}")
     return result.inserted_id
 
 async def get_screener_indicator_cache(screener_setup_id: str, asset: str, indicator_name: str):
     """Get cached indicator for screener asset."""
     db = await get_db()
-    cache = await db.screener_indicator_cache.find_one({
+    cache = await mongodb.get_db().screener_indicator_cache.find_one({
         "screener_setup_id": screener_setup_id,
         "asset": asset,
         "indicator_name": indicator_name
@@ -973,7 +965,7 @@ async def get_screener_indicator_cache(screener_setup_id: str, asset: str, indic
 async def upsert_screener_indicator_cache(cache_data: Dict[str, Any]):
     """Update or insert screener indicator cache."""
     db = await get_db()
-    await db.screener_indicator_cache.update_one(
+    await mongodb.get_db().screener_indicator_cache.update_one(
         {
             "screener_setup_id": cache_data["screener_setup_id"],
             "asset": cache_data["asset"],
@@ -989,16 +981,15 @@ async def upsert_screener_indicator_cache(cache_data: Dict[str, Any]):
 async def get_paper_balance(user_id: str) -> Optional[Dict[str, Any]]:
     """Get paper trading balance for a user. Creates default if not exists."""
     try:
-        db = mongodb.get_db()
-        balance = await db.paper_balances.find_one({"user_id": user_id})
+        balance = await mongodb.get_db().paper_balances.find_one({"user_id": user_id})
         
         if not balance:
             # Create default paper balance
             default_balance = PaperBalance(user_id=user_id)
-            result = await db.paper_balances.insert_one(
+            result = await mongodb.get_db().paper_balances.insert_one(
                 default_balance.dict(by_alias=True, exclude={"id"})
             )
-            balance = await db.paper_balances.find_one({"_id": result.inserted_id})
+            balance = await mongodb.get_db().paper_balances.find_one({"_id": result.inserted_id})
             logger.info(f"Created default paper balance for user {user_id}")
         
         if balance:
