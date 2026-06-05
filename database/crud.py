@@ -1212,7 +1212,7 @@ async def get_screener_setups_by_paper_mode(
 
 async def get_custom_list(list_name: str) -> list:
     """Get a custom token list by name."""
-    doc = await db.custom_lists.find_one({"list_name": list_name})
+    doc = await mongodb.get_db().custom_lists.find_one({"list_name": list_name})
     if doc and "tokens" in doc:
         return doc["tokens"]
     return []
@@ -1225,7 +1225,7 @@ async def update_custom_list(list_name: str, tokens: list) -> bool:
         # Remove duplicates while preserving order
         tokens = list(dict.fromkeys(tokens))
         
-        await db.custom_lists.update_one(
+        await mongodb.get_db().custom_lists.update_one(
             {"list_name": list_name},
             {"$set": {"tokens": tokens, "updated_at": datetime.utcnow()}},
             upsert=True
