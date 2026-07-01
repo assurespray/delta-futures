@@ -264,7 +264,7 @@ class SuperTrend:
                         supertrend[i] = final_lb[i]
                         signal[i] = SIGNAL_UPTREND
             
-                        if return_series:
+            if return_series:
                 return {
                     "time": [c["time"] for c in candles],
                     "open": df['open'].values,
