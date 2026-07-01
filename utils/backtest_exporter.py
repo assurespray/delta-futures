@@ -8,6 +8,8 @@ and exports Trade Logs to CSV files for deep "Truth Check" verification.
 import os
 import csv
 import logging
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from typing import List, Dict
