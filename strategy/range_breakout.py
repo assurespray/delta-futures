@@ -86,7 +86,7 @@ class RangeBreakoutStrategy(BaseStrategy):
             if historical_candles is not None:
                 candles = historical_candles
             else:
-    latest_candles = await get_candles(client, symbol, timeframe, limit=2)
+                latest_candles = await get_candles(client, symbol, timeframe, limit=2)
                 if not latest_candles:
                     return None
     
