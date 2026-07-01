@@ -11,7 +11,7 @@ Every strategy must inherit from BaseStrategy and implement:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from api.delta_client import DeltaExchangeClient
 
 
