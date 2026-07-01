@@ -142,7 +142,7 @@ class SuperTrend:
         
         return atr_series
     
-    def calculate(self, candles: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def calculate(self, candles: List[Dict[str, Any]], return_series: bool = False) -> Optional[Dict[str, Any]]:
         """
         Calculate SuperTrend indicator with full trailing band logic.
         
@@ -264,6 +264,21 @@ class SuperTrend:
                         supertrend[i] = final_lb[i]
                         signal[i] = SIGNAL_UPTREND
             
+                        if return_series:
+                return {
+                    "time": [c["time"] for c in candles],
+                    "open": df['open'].values,
+                    "high": df['high'].values,
+                    "low": df['low'].values,
+                    "close": df['close'].values,
+                    "volume": df['volume'].values if 'volume' in df.columns else np.zeros(n),
+                    "supertrend": supertrend,
+                    "signal": signal,
+                    "final_upper_band": final_ub,
+                    "final_lower_band": final_lb,
+                    "atr": atr_vals
+                }
+
             # ===== STEP 6: Extract Latest Values =====
             latest_idx = -1
             latest_close = float(close_vals[latest_idx])

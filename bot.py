@@ -91,6 +91,7 @@ from handlers.performance import (
     perf_paper_callback, perf_paper_chart_callback,
     perf_paper_pnl_chart_callback, perf_paper_csv_callback
 )
+from handlers.backtest_menu import get_backtest_handlers
 from handlers.custom_tokens import (
     manage_rwa_callback, rwa_add_start, rwa_add_received,
     rwa_remove_list, rwa_remove_confirm, rwa_cancel, cancel_rwa_setup,
@@ -545,6 +546,10 @@ def create_application() -> Application:
 
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     
+    
+    # Backtester Handlers
+    for handler in get_backtest_handlers():
+        application.add_handler(handler)
     logger.info("✅ Bot handlers registered")
     
     return application

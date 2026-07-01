@@ -108,25 +108,28 @@ class DonchianBreakoutStrategy(BaseStrategy):
             timeframe_seconds = get_timeframe_seconds(timeframe)
 
             # Step 1: Quick check — is the latest candle closed?
-            latest_candles = await get_candles(client, symbol, timeframe, limit=2)
-            if not latest_candles:
-                return None
-
-            candle_status = self._is_candle_closed(latest_candles, timeframe)
-
-            # ENFORCE: Do not calculate on incomplete candle data
-            if not skip_boundary_check and not candle_status['is_closed']:
-                logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
-                return None
-
-            # Step 2: Fetch full candle history
-            end_time = int(datetime.utcnow().timestamp())
-            start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
-            candles = await get_candles(
-                client, symbol, timeframe,
-                start_time=start_time, end_time=end_time,
-                limit=required_candles
-            )
+            if historical_candles is not None:
+                candles = historical_candles
+            else:
+    latest_candles = await get_candles(client, symbol, timeframe, limit=2)
+                if not latest_candles:
+                    return None
+    
+                candle_status = self._is_candle_closed(latest_candles, timeframe)
+    
+                # ENFORCE: Do not calculate on incomplete candle data
+                if not skip_boundary_check and not candle_status['is_closed']:
+                    logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
+                    return None
+    
+                # Step 2: Fetch full candle history
+                end_time = int(datetime.utcnow().timestamp())
+                start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
+                candles = await get_candles(
+                    client, symbol, timeframe,
+                    start_time=start_time, end_time=end_time,
+                    limit=required_candles
+                )
 
             if not candles:
                 logger.error(f"No candles available for {symbol} {timeframe}")

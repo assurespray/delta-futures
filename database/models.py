@@ -1,7 +1,7 @@
 """Pydantic models for database schemas with asset lock support."""
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from bson import ObjectId
 
@@ -319,4 +319,86 @@ class PaperBalance(BaseModel):
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
 
+
+class BacktestResult(BaseModel):
+    """
+    Model for storing backtest results permanently in MongoDB.
+    
+    Stores the configuration used, all 18+ performance metrics,
+    Monte Carlo / curve-fitting statistics, and the full trade log.
+    Raw candle data is NOT stored here (kept in temporary CSV files).
+    """
+    
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    
+    # ===== Configuration Snapshot =====
+    symbol: str                          # e.g. "BTCUSD"
+    timeframe: str                       # e.g. "1m", "15m", "1h"
+    strategy: str                        # e.g. "dual_supertrend"
+    strategy_params: Dict = Field(default_factory=dict)  # Full indicator params
+    direction: str = "both"              # "both", "long_only", "short_only"
+    lot_size: int = 1
+    leverage: int = 1
+    initial_balance: float = 10000.0     # Starting virtual balance
+    
+    # ===== Time Range =====
+    backtest_start: datetime             # Start of historical data window
+    backtest_end: datetime               # End of historical data window
+    total_candles: int = 0               # Number of candles processed
+    
+    # ===== Profitability Metrics =====
+    overall_profit: float = 0.0          # Total PnL (USD)
+    overall_profit_pct: float = 0.0      # Total PnL (%)
+    num_trades: int = 0                  # Total trades executed
+    avg_profit_per_trade: float = 0.0    # Average PnL per trade
+    win_pct: float = 0.0                 # Win percentage
+    loss_pct: float = 0.0               # Loss percentage
+    avg_win: float = 0.0                 # Average profit on winning trades
+    avg_loss: float = 0.0               # Average loss on losing trades
+    max_profit_single: float = 0.0       # Best single trade
+    max_loss_single: float = 0.0         # Worst single trade
+    
+    # ===== Risk & Drawdown Metrics =====
+    max_drawdown: float = 0.0            # Maximum drawdown (USD)
+    max_drawdown_pct: float = 0.0        # Maximum drawdown (%)
+    max_drawdown_duration_days: int = 0  # Duration of max drawdown (days)
+    max_drawdown_start: Optional[str] = None   # Date string: start of max DD
+    max_drawdown_end: Optional[str] = None     # Date string: end of max DD
+    max_trades_in_drawdown: int = 0      # Max trades during any drawdown
+    
+    # ===== Ratios & Streaks =====
+    return_over_max_dd: float = 0.0      # Return / MaxDD ratio
+    reward_to_risk: float = 0.0          # Avg Win / Avg Loss
+    expectancy_ratio: float = 0.0        # (Win% * AvgWin - Loss% * AvgLoss) / AvgLoss
+    max_win_streak: int = 0              # Longest consecutive wins
+    max_loss_streak: int = 0             # Longest consecutive losses
+    profit_factor: float = 0.0           # Gross Profit / Gross Loss
+    
+    # ===== Monte Carlo & Curve Fitting =====
+    monte_carlo_risk_of_ruin: float = 0.0     # % chance of account blowup
+    monte_carlo_max_dd_95: float = 0.0        # 95th percentile max drawdown
+    monte_carlo_max_dd_99: float = 0.0        # 99th percentile max drawdown
+    r_squared: float = 0.0                    # Equity curve R² (curve fitting check)
+    sharpe_ratio: float = 0.0                 # Risk-adjusted return
+    sortino_ratio: float = 0.0                # Downside risk-adjusted return
+    
+    # ===== Final Balance & Equity Curve =====
+    final_balance: float = 0.0           # Ending balance
+    equity_curve: List[float] = Field(default_factory=list)  # Balance after each trade
+    
+    # ===== Trade Log (compact) =====
+    # Each entry: {entry_time, exit_time, direction, entry_price, exit_price,
+    #              pnl, exit_reason, indicator_value}
+    trade_log: List[Dict] = Field(default_factory=list)
+    
+    # ===== Metadata =====
+    debug_mode: bool = False             # Whether indicator dump was generated
+    run_duration_seconds: float = 0.0    # How long the backtest took to run
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        populate_by_name = True
+        arbitrary_types_allowed = True
+        json_encoders = {ObjectId: str, datetime: lambda v: v.isoformat()}
 

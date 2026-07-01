@@ -104,7 +104,7 @@ class DualSuperTrendStrategy(BaseStrategy):
             'reason': 'Candle closed and buffered' if is_ready else f'Waiting {seconds_until_ready}s'
         }
 
-    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False, force_recalc: bool = False) -> Optional[Dict[str, Any]]:
+    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False, force_recalc: bool = False, historical_candles: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
         """Calculate both Perusu and Sirusu indicators with GUARANTEED FRESH DATA."""
         try:
             cache_key = self._get_cache_key(symbol, timeframe)
@@ -123,29 +123,32 @@ class DualSuperTrendStrategy(BaseStrategy):
             required_candles = timeframe_requirements.get(timeframe, 1000)
             timeframe_seconds = get_timeframe_seconds(timeframe)
 
-            # Efficient Step 1: Only fetch TWO latest candles to check last candle status
-            logger.info(f"Checking latest candle close status for {symbol} ({timeframe})")
-            latest_candles = await get_candles(client, symbol, timeframe, limit=2)
-
-            if not latest_candles:
-                logger.info("Market is quiet. Skipping calculation until new volume arrives.")
-                return None
-
-            candle_status = self._is_candle_closed(latest_candles, timeframe)
-            if not candle_status["is_closed"]:
-                if not skip_boundary_check:
-                    wait_time = candle_status["seconds_until_ready"]
-                    logger.debug(
-                        f"Candle for {symbol} {timeframe} not fully closed "
-                        f"(~{wait_time}s remaining). Skipping calculation."
-                    )
+            if historical_candles is not None:
+                candles = historical_candles
+            else:
+    # Efficient Step 1: Only fetch TWO latest candles to check last candle status
+                logger.info(f"Checking latest candle close status for {symbol} ({timeframe})")
+                latest_candles = await get_candles(client, symbol, timeframe, limit=2)
+    
+                if not latest_candles:
+                    logger.info("Market is quiet. Skipping calculation until new volume arrives.")
                     return None
-
-            # Efficient Step 2: Fetch ALL candles
-            logger.info(f"FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
-            end_time = int(datetime.utcnow().timestamp())
-            start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
-            candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
+    
+                candle_status = self._is_candle_closed(latest_candles, timeframe)
+                if not candle_status["is_closed"]:
+                    if not skip_boundary_check:
+                        wait_time = candle_status["seconds_until_ready"]
+                        logger.debug(
+                            f"Candle for {symbol} {timeframe} not fully closed "
+                            f"(~{wait_time}s remaining). Skipping calculation."
+                        )
+                        return None
+    
+                # Efficient Step 2: Fetch ALL candles
+                logger.info(f"FETCHING FRESH candles: {required_candles} candles for {symbol} ({timeframe})")
+                end_time = int(datetime.utcnow().timestamp())
+                start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
+                candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
 
             logger.info(f"Fetched candles for {symbol} {timeframe}: count={len(candles) if candles else 0}")
             if candles:

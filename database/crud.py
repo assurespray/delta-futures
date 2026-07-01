@@ -1225,3 +1225,225 @@ async def update_custom_list(list_name: str, tokens: list) -> bool:
     except Exception as e:
         logger.error(f"Error updating custom list {list_name}: {e}")
         return False
+
+
+# ==================== BACKTEST RESULTS ====================
+
+async def save_backtest_result(result_data: dict) -> Optional[str]:
+    """
+    Save a completed backtest result to MongoDB.
+
+    Args:
+        result_data: Dictionary matching the BacktestResult schema.
+
+    Returns:
+        The inserted document's string ID, or None on failure.
+    """
+    try:
+        db = mongodb.get_db()
+        # Ensure created_at is set
+        if "created_at" not in result_data:
+            result_data["created_at"] = datetime.utcnow()
+
+        inserted = await db.backtest_results.insert_one(result_data)
+        logger.info(f"[BT-CRUD] Saved backtest result: {inserted.inserted_id}")
+        return str(inserted.inserted_id)
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error saving backtest result: {e}")
+        return None
+
+
+async def get_backtest_results(
+    user_id: str,
+    sort_by: str = "created_at",
+    sort_order: int = -1,
+    limit: int = 20,
+    symbol: Optional[str] = None,
+    strategy: Optional[str] = None,
+) -> list:
+    """
+    Retrieve past backtest results for a user with flexible sorting.
+
+    Args:
+        user_id:     Telegram user ID.
+        sort_by:     Field to sort by. Supported values:
+                     "created_at", "overall_profit", "overall_profit_pct",
+                     "win_pct", "max_drawdown", "num_trades",
+                     "sharpe_ratio", "expectancy_ratio", "reward_to_risk".
+        sort_order:  1 for ascending, -1 for descending.
+        limit:       Max results to return (default 20).
+        symbol:      Optional filter by symbol (e.g. "BTCUSD").
+        strategy:    Optional filter by strategy name.
+
+    Returns:
+        List of backtest result dicts.
+    """
+    try:
+        db = mongodb.get_db()
+        query = {"user_id": user_id}
+
+        if symbol:
+            query["symbol"] = symbol.upper()
+        if strategy:
+            query["strategy"] = strategy
+
+        # Validate sort field to prevent injection
+        allowed_sort_fields = {
+            "created_at", "overall_profit", "overall_profit_pct",
+            "win_pct", "max_drawdown", "max_drawdown_pct",
+            "num_trades", "sharpe_ratio", "expectancy_ratio",
+            "reward_to_risk", "return_over_max_dd", "profit_factor",
+            "max_win_streak", "max_loss_streak", "final_balance",
+        }
+        if sort_by not in allowed_sort_fields:
+            sort_by = "created_at"
+
+        cursor = db.backtest_results.find(query).sort(sort_by, sort_order).limit(limit)
+        results = await cursor.to_list(length=limit)
+
+        # Convert ObjectId to string for JSON safety
+        for r in results:
+            r["_id"] = str(r["_id"])
+
+        return results
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error fetching backtest results: {e}")
+        return []
+
+
+async def get_backtest_result_by_id(result_id: str) -> Optional[dict]:
+    """
+    Retrieve a single backtest result by its MongoDB _id.
+
+    Args:
+        result_id: The string representation of the document's ObjectId.
+
+    Returns:
+        The backtest result dict, or None if not found.
+    """
+    try:
+        db = mongodb.get_db()
+        doc = await db.backtest_results.find_one({"_id": ObjectId(result_id)})
+        if doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error fetching backtest result {result_id}: {e}")
+        return None
+
+
+async def delete_backtest_result(result_id: str) -> bool:
+    """
+    Delete a single backtest result by its MongoDB _id.
+
+    Args:
+        result_id: The string representation of the document's ObjectId.
+
+    Returns:
+        True if deleted, False otherwise.
+    """
+    try:
+        db = mongodb.get_db()
+        result = await db.backtest_results.delete_one({"_id": ObjectId(result_id)})
+        if result.deleted_count > 0:
+            logger.info(f"[BT-CRUD] Deleted backtest result: {result_id}")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error deleting backtest result {result_id}: {e}")
+        return False
+
+
+async def delete_all_backtest_results(user_id: str) -> int:
+    """
+    Delete all backtest results for a user.
+
+    Args:
+        user_id: Telegram user ID.
+
+    Returns:
+        Number of documents deleted.
+    """
+    try:
+        db = mongodb.get_db()
+        result = await db.backtest_results.delete_many({"user_id": user_id})
+        logger.info(f"[BT-CRUD] Deleted {result.deleted_count} backtest results for user {user_id}")
+        return result.deleted_count
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error deleting all backtest results: {e}")
+        return 0
+
+
+async def get_backtest_summary(user_id: str) -> dict:
+    """
+    Get a quick summary of a user's backtest history.
+
+    Returns:
+        {
+            "total_backtests": int,
+            "best_profit_pct": float,
+            "worst_drawdown_pct": float,
+            "avg_win_rate": float,
+            "symbols_tested": list[str],
+        }
+    """
+    try:
+        db = mongodb.get_db()
+        cursor = db.backtest_results.find({"user_id": user_id})
+        results = await cursor.to_list(length=500)
+
+        if not results:
+            return {
+                "total_backtests": 0,
+                "best_profit_pct": 0.0,
+                "worst_drawdown_pct": 0.0,
+                "avg_win_rate": 0.0,
+                "symbols_tested": [],
+            }
+
+        symbols = list(set(r.get("symbol", "") for r in results))
+        profits = [r.get("overall_profit_pct", 0.0) for r in results]
+        drawdowns = [r.get("max_drawdown_pct", 0.0) for r in results]
+        win_rates = [r.get("win_pct", 0.0) for r in results]
+
+        return {
+            "total_backtests": len(results),
+            "best_profit_pct": max(profits) if profits else 0.0,
+            "worst_drawdown_pct": min(drawdowns) if drawdowns else 0.0,
+            "avg_win_rate": sum(win_rates) / len(win_rates) if win_rates else 0.0,
+            "symbols_tested": symbols,
+        }
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error getting backtest summary: {e}")
+        return {"total_backtests": 0, "best_profit_pct": 0.0,
+                "worst_drawdown_pct": 0.0, "avg_win_rate": 0.0,
+                "symbols_tested": []}
+
+
+async def setup_backtest_indexes():
+    """
+    Create MongoDB indexes on the backtest_results collection
+    for efficient sorting and filtering.
+
+    Should be called once during bot startup.
+    """
+    try:
+        db = mongodb.get_db()
+        collection = db.backtest_results
+
+        # Index for listing results by user (most common query)
+        await collection.create_index([("user_id", 1), ("created_at", -1)])
+
+        # Sorting indexes
+        await collection.create_index([("user_id", 1), ("overall_profit", -1)])
+        await collection.create_index([("user_id", 1), ("win_pct", -1)])
+        await collection.create_index([("user_id", 1), ("max_drawdown", 1)])
+        await collection.create_index([("user_id", 1), ("sharpe_ratio", -1)])
+
+        # Filter indexes
+        await collection.create_index([("user_id", 1), ("symbol", 1)])
+        await collection.create_index([("user_id", 1), ("strategy", 1)])
+
+        logger.info("[BT-CRUD] Backtest result indexes created successfully")
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error creating backtest indexes: {e}")

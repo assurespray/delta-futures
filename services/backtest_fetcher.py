@@ -1,0 +1,362 @@
+"""
+Backtest Data Fetcher - Memory-Safe Historical Candle Downloader
+
+Downloads historical candles from Delta Exchange in paginated chunks
+and writes them directly to local CSV files on disk, avoiding RAM overload.
+
+Architecture:
+    - Fetches candles in small time-window pages (max 2000 per API call)
+    - Writes each page directly to a CSV file (append mode)
+    - Never holds the full dataset in memory
+    - Supports a progress callback for live UI updates
+
+Usage:
+    fetcher = BacktestFetcher()
+    csv_path, total = await fetcher.fetch_and_cache(
+        client, "BTCUSD", "1m",
+        start_ts=1672531200, end_ts=1704067200,
+        progress_callback=my_callback
+    )
+"""
+
+import os
+import csv
+import logging
+import asyncio
+from typing import Optional, Callable, Awaitable, Tuple
+from datetime import datetime, timezone
+
+from api.delta_client import DeltaExchangeClient
+from api.market_data import get_candles
+from config.constants import TIMEFRAME_SECONDS, TIMEFRAME_MAPPING
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache")
+CSV_COLUMNS = ["time", "open", "high", "low", "close", "volume"]
+
+# Delta Exchange returns at most ~2000 candles per request.
+# We use 1500 as a safe page size to avoid edge-case truncation.
+PAGE_SIZE = 1500
+
+# Minimum pause between consecutive API calls (seconds)
+API_PAUSE = 0.15
+
+
+# ---------------------------------------------------------------------------
+# Helper: build a cache-file path
+# ---------------------------------------------------------------------------
+def _cache_path(symbol: str, timeframe: str) -> str:
+    """Return the absolute path to the CSV cache file for a symbol/timeframe."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return os.path.join(CACHE_DIR, f"{symbol}_{timeframe}.csv")
+
+
+# ---------------------------------------------------------------------------
+# Helper: read existing cache metadata (row count & time range)
+# ---------------------------------------------------------------------------
+def get_cache_info(symbol: str, timeframe: str) -> Optional[dict]:
+    """
+    Return metadata about an existing cache file, or None if missing.
+
+    Returns:
+        {
+            "path": str,
+            "rows": int,
+            "start_time": int,   # earliest Unix timestamp
+            "end_time": int,     # latest Unix timestamp
+        }
+    """
+    path = _cache_path(symbol, timeframe)
+    if not os.path.exists(path):
+        return None
+
+    rows = 0
+    first_time = None
+    last_time = None
+
+    try:
+        with open(path, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                ts = int(row["time"])
+                if first_time is None:
+                    first_time = ts
+                last_time = ts
+                rows += 1
+    except Exception as e:
+        logger.error(f"[BT-FETCH] Error reading cache info: {e}")
+        return None
+
+    if rows == 0:
+        return None
+
+    return {
+        "path": path,
+        "rows": rows,
+        "start_time": first_time,
+        "end_time": last_time,
+    }
+
+
+def delete_cache(symbol: str, timeframe: str) -> bool:
+    """Delete the cache file for a symbol/timeframe. Returns True if deleted."""
+    path = _cache_path(symbol, timeframe)
+    if os.path.exists(path):
+        os.remove(path)
+        logger.info(f"[BT-FETCH] Deleted cache: {path}")
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Core: paginated fetch + write-to-disk
+# ---------------------------------------------------------------------------
+class BacktestFetcher:
+    """
+    Downloads historical candles from Delta Exchange and writes them
+    directly to a CSV file on disk in a memory-efficient, paginated manner.
+    """
+
+    def __init__(self):
+        self._abort = False
+
+    def abort(self):
+        """Signal the fetcher to stop downloading."""
+        self._abort = True
+
+    async def fetch_and_cache(
+        self,
+        client: DeltaExchangeClient,
+        symbol: str,
+        timeframe: str,
+        start_ts: int,
+        end_ts: int,
+        progress_callback: Optional[Callable[[int, int, str], Awaitable[None]]] = None,
+    ) -> Tuple[Optional[str], int]:
+        """
+        Fetch historical candles between *start_ts* and *end_ts* (Unix seconds)
+        and write them to a local CSV file.
+
+        Args:
+            client:             Authenticated Delta Exchange client.
+            symbol:             Trading symbol (e.g. "BTCUSD").
+            timeframe:          Candle timeframe (e.g. "1m", "15m", "1h").
+            start_ts:           Start Unix timestamp (inclusive).
+            end_ts:             End Unix timestamp (inclusive).
+            progress_callback:  Optional async function(fetched, estimated_total, status_msg).
+
+        Returns:
+            (csv_path, total_candles_written)  on success.
+            (None, 0)                          on failure.
+        """
+        self._abort = False
+
+        # Validate timeframe
+        if timeframe not in TIMEFRAME_SECONDS:
+            logger.error(f"[BT-FETCH] Unknown timeframe: {timeframe}")
+            return None, 0
+
+        seconds_per_candle = TIMEFRAME_SECONDS[timeframe]
+        estimated_total = max(1, (end_ts - start_ts) // seconds_per_candle)
+
+        csv_path = _cache_path(symbol, timeframe)
+
+        # If a cache already covers the requested range, reuse it
+        info = get_cache_info(symbol, timeframe)
+        if info and info["start_time"] <= start_ts and info["end_time"] >= end_ts - seconds_per_candle:
+            logger.info(
+                f"[BT-FETCH] Cache hit for {symbol} {timeframe} "
+                f"({info['rows']} candles). Skipping download."
+            )
+            if progress_callback:
+                await progress_callback(info["rows"], info["rows"], "Cache hit - using existing data")
+            return csv_path, info["rows"]
+
+        # Wipe stale cache and start fresh
+        delete_cache(symbol, timeframe)
+
+        logger.info(
+            f"[BT-FETCH] Starting download: {symbol} {timeframe} "
+            f"from {datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()} "
+            f"to {datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()} "
+            f"(~{estimated_total} candles)"
+        )
+
+        total_written = 0
+        seen_timestamps = set()   # deduplicate across pages
+        current_start = start_ts
+        consecutive_empty = 0
+        page_number = 0
+
+        # Open the CSV file in write mode with header
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+
+        # Now append pages
+        while current_start < end_ts:
+            if self._abort:
+                logger.warning("[BT-FETCH] Download aborted by user.")
+                return None, 0
+
+            page_number += 1
+
+            # Calculate the end of this page window
+            page_end = min(
+                current_start + (PAGE_SIZE * seconds_per_candle),
+                end_ts,
+            )
+
+            try:
+                candles = await get_candles(
+                    client=client,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    start_time=current_start,
+                    end_time=page_end,
+                    limit=PAGE_SIZE,
+                )
+            except Exception as e:
+                logger.error(f"[BT-FETCH] API error on page {page_number}: {e}")
+                await asyncio.sleep(1)
+                consecutive_empty += 1
+                if consecutive_empty > 10:
+                    logger.error("[BT-FETCH] Too many consecutive empty pages, stopping.")
+                    break
+                # Slide the window forward to avoid being stuck
+                current_start = page_end
+                continue
+
+            if not candles or len(candles) == 0:
+                consecutive_empty += 1
+                if consecutive_empty > 10:
+                    logger.warning("[BT-FETCH] 10 consecutive empty pages, assuming end of data.")
+                    break
+                current_start = page_end
+                await asyncio.sleep(API_PAUSE)
+                continue
+
+            consecutive_empty = 0
+
+            # Deduplicate and sort
+            new_rows = []
+            for c in candles:
+                ts = c["time"]
+                if ts not in seen_timestamps and start_ts <= ts <= end_ts:
+                    seen_timestamps.add(ts)
+                    new_rows.append({
+                        "time": ts,
+                        "open": c["open"],
+                        "high": c["high"],
+                        "low": c["low"],
+                        "close": c["close"],
+                        "volume": c["volume"],
+                    })
+
+            if new_rows:
+                # Sort by timestamp before writing
+                new_rows.sort(key=lambda r: r["time"])
+
+                # Append to CSV
+                with open(csv_path, "a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                    writer.writerows(new_rows)
+
+                total_written += len(new_rows)
+
+            # Progress callback
+            if progress_callback:
+                pct_msg = f"Fetching data... Page {page_number} ({total_written}/{estimated_total} candles)"
+                try:
+                    await progress_callback(total_written, estimated_total, pct_msg)
+                except Exception:
+                    pass  # Never let a UI error kill the download
+
+            # Advance the window
+            # Use the latest candle timestamp + 1 candle to avoid overlap
+            latest_ts = max(c["time"] for c in candles)
+            next_start = latest_ts + seconds_per_candle
+
+            # Safety: ensure we always move forward
+            if next_start <= current_start:
+                current_start = page_end
+            else:
+                current_start = next_start
+
+            # Respect API rate limits
+            await asyncio.sleep(API_PAUSE)
+
+        # Final sort pass: read, sort, rewrite (ensures perfect chronological order)
+        if total_written > 0:
+            await self._sort_csv(csv_path)
+
+        logger.info(
+            f"[BT-FETCH] Download complete: {symbol} {timeframe} "
+            f"- {total_written} candles written to {csv_path}"
+        )
+
+        if progress_callback:
+            try:
+                await progress_callback(total_written, total_written, "Download complete!")
+            except Exception:
+                pass
+
+        return csv_path, total_written
+
+    @staticmethod
+    async def _sort_csv(csv_path: str) -> None:
+        """
+        Read the CSV, sort all rows by timestamp, and rewrite.
+        Done in a single pass to fix any out-of-order pages.
+        Uses chunked reading to limit peak memory.
+        """
+        try:
+            rows = []
+            with open(csv_path, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append(row)
+
+            rows.sort(key=lambda r: int(r["time"]))
+
+            # Deduplicate (in case of edge overlap)
+            deduped = []
+            seen = set()
+            for row in rows:
+                ts = row["time"]
+                if ts not in seen:
+                    seen.add(ts)
+                    deduped.append(row)
+
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                writer.writeheader()
+                writer.writerows(deduped)
+
+            logger.info(f"[BT-FETCH] Sorted & deduped CSV: {len(deduped)} unique candles")
+
+        except Exception as e:
+            logger.error(f"[BT-FETCH] Error sorting CSV: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Convenience: estimate candle count for a given duration
+# ---------------------------------------------------------------------------
+def estimate_candle_count(timeframe: str, days: int) -> int:
+    """Return the approximate number of candles for *days* trading days."""
+    spc = TIMEFRAME_SECONDS.get(timeframe, 60)
+    return (days * 86400) // spc
+
+
+def estimate_download_time_seconds(timeframe: str, days: int) -> int:
+    """
+    Rough estimate of how long the download will take (in seconds).
+    Based on ~1500 candles per API page and ~0.3s per page.
+    """
+    total_candles = estimate_candle_count(timeframe, days)
+    pages = max(1, total_candles // PAGE_SIZE)
+    return int(pages * 0.3) + 2  # +2s buffer

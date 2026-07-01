@@ -55,7 +55,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
         ],
         [
-            InlineKeyboardButton("🌐 Manage RWA Tokens", callback_data="menu_manage_rwa"),
+            InlineKeyboardButton("🧪 Backtester", callback_data="menu_backtest"),
+            InlineKeyboardButton("🌐 Manage RWA Tokens", callback_data="menu_manage_rwa")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]
@@ -106,7 +109,10 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("🔍 Live Indicator Tracker", callback_data="menu_indicator_tracker")
         ],
         [
-            InlineKeyboardButton("🌐 Manage RWA Tokens", callback_data="menu_manage_rwa"),
+            InlineKeyboardButton("🧪 Backtester", callback_data="menu_backtest"),
+            InlineKeyboardButton("🌐 Manage RWA Tokens", callback_data="menu_manage_rwa")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="menu_help")
         ]
     ]

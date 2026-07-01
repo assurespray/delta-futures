@@ -71,7 +71,7 @@ class RangeBreakoutStrategy(BaseStrategy):
             'reason': 'Ready' if is_ready else f'Waiting {seconds_until_ready}s'
         }
 
-    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False, force_recalc: bool = False) -> Optional[Dict[str, Any]]:
+    async def calculate_indicators(self, client: DeltaExchangeClient, symbol: str, timeframe: str, skip_boundary_check: bool = False, force_recalc: bool = False, historical_candles: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
         try:
             cache_key = self._get_cache_key(symbol, timeframe)
             current_time = datetime.utcnow()
@@ -83,20 +83,23 @@ class RangeBreakoutStrategy(BaseStrategy):
             required_candles = self.ema_length + 250
             timeframe_seconds = get_timeframe_seconds(timeframe)
 
-            latest_candles = await get_candles(client, symbol, timeframe, limit=2)
-            if not latest_candles:
-                return None
-
-            candle_status = self._is_candle_closed(latest_candles, timeframe)
-
-            # ENFORCE: Do not calculate on incomplete candle data
-            if not skip_boundary_check and not candle_status['is_closed']:
-                logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
-                return None
-
-            end_time = int(current_time.timestamp())
-            start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
-            candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
+            if historical_candles is not None:
+                candles = historical_candles
+            else:
+    latest_candles = await get_candles(client, symbol, timeframe, limit=2)
+                if not latest_candles:
+                    return None
+    
+                candle_status = self._is_candle_closed(latest_candles, timeframe)
+    
+                # ENFORCE: Do not calculate on incomplete candle data
+                if not skip_boundary_check and not candle_status['is_closed']:
+                    logger.debug(f"Candle not fully closed for {symbol} ({candle_status['reason']}). Skipping calculation.")
+                    return None
+    
+                end_time = int(current_time.timestamp())
+                start_time = end_time - int(timeframe_seconds * required_candles * 1.2)
+                candles = await get_candles(client, symbol, timeframe, start_time=start_time, end_time=end_time, limit=required_candles)
 
             if not candles:
                 return None
