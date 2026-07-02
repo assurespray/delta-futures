@@ -161,11 +161,12 @@ async def bt_asset_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Convert context to mock query-like object for rendering the next menu
     class MockQuery:
-        message = message
+        def __init__(self, msg):
+            self.message = msg
         async def edit_message_text(self, *args, **kwargs):
-            return await message.edit_text(*args, **kwargs)
+            return await self.message.edit_text(*args, **kwargs)
             
-    return await bt_ask_timeframe(MockQuery(), context)
+    return await bt_ask_timeframe(MockQuery(message), context)
 
 
 async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
