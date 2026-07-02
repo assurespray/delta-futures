@@ -204,10 +204,28 @@ async def run_backtest_task(
 async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, result: dict, chart_path: str, csv_path: str, message_id: int):
     """Format and send the final Telegram report."""
     
-    # Format the exact text layout requested
+
+    # Build configuration string
+    params = result.get('strategy_params', {})
+    config_lines = [
+        f"• Strategy: {result.get('strategy', 'Unknown').replace('_', ' ').title()}",
+        f"• Direction: {result.get('direction', 'both').upper()}",
+        f"• Leverage: {result.get('leverage', 1)}x"
+    ]
+    # Add specific strategy params
+    for k, v in params.items():
+        if k not in ['strategy_name', 'direction', 'lot_size', 'initial_balance', 'leverage', 'paper_leverage']:
+            config_lines.append(f"• {k.replace('_', ' ').title()}: {v}")
+    
+    config_str = "\n".join(config_lines)
+
     text = (
         f"📊 **Backtest Complete: {result['symbol']} ({result['timeframe']})**\n"
         f"⏱️ Analyzed {result['total_candles']:,} candles in {result['run_duration_seconds']:.1f}s\n\n"
+        
+        f"⚙️ **Configuration**\n"
+        f"{config_str}\n\n"
+
         
         f"💰 **Profitability**\n"
         f"• Overall Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
