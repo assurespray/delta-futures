@@ -197,33 +197,26 @@ class BacktestFetcher:
             writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
             writer.writeheader()
 
-        # BACKWARD PAGINATION: Start from end_ts and walk backward to start_ts.
-        # This guarantees we safely stop if we hit the "genesis" of the coin.
+                # BACKWARD PAGINATION: Start from end_ts and walk backward to start_ts.
         current_end = end_ts
         consecutive_empty = 0
         
+        # We will save each page to a separate temp file, then combine them in reverse order.
+        temp_files = []
+
         while current_end > start_ts:
             if self._abort:
                 logger.warning("[BT-FETCH] Download aborted by user.")
+                # Cleanup temp files
+                for tf in temp_files:
+                    if os.path.exists(tf): os.remove(tf)
                 return None, 0
 
             page_number += 1
-
-            # Calculate the start of this page window
-            page_start = max(
-                current_end - (PAGE_SIZE * seconds_per_candle),
-                start_ts
-            )
+            page_start = max(current_end - (PAGE_SIZE * seconds_per_candle), start_ts)
 
             try:
-                candles = await get_candles(
-                    client=client,
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    start_time=page_start,
-                    end_time=current_end,
-                    limit=PAGE_SIZE,
-                )
+                candles = await get_candles(client=client, symbol=symbol, timeframe=timeframe, start_time=page_start, end_time=current_end, limit=PAGE_SIZE)
             except Exception as e:
                 logger.error(f"[BT-FETCH] API error on page {page_number}: {e}")
                 await asyncio.sleep(1)
@@ -245,30 +238,30 @@ class BacktestFetcher:
 
             consecutive_empty = 0
 
-            # Deduplicate
+            # Deduplicate within the chunk
             new_rows = []
             for c in candles:
                 ts = c["time"]
                 if ts not in seen_timestamps and start_ts <= ts <= end_ts:
                     seen_timestamps.add(ts)
                     new_rows.append({
-                        "time": ts,
-                        "open": c["open"],
-                        "high": c["high"],
-                        "low": c["low"],
-                        "close": c["close"],
-                        "volume": c["volume"],
+                        "time": ts, "open": c["open"], "high": c["high"], "low": c["low"], "close": c["close"], "volume": c["volume"]
                     })
 
             if new_rows:
-                # We can just write them in the order received (the final _sort_csv will fix the backward chunk ordering)
-                with open(csv_path, "a", newline="") as f:
+                new_rows.sort(key=lambda r: r["time"])
+                
+                # Write to a temporary file for this specific page
+                temp_file = f"{csv_path}.part{page_number}"
+                temp_files.append(temp_file)
+                
+                with open(temp_file, "w", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                    # No header in temp files
                     writer.writerows(new_rows)
 
                 total_written += len(new_rows)
 
-            # Progress callback
             if progress_callback:
                 pct_msg = f"Fetching historical data... ({total_written}/{estimated_total} candles)"
                 try:
@@ -276,22 +269,29 @@ class BacktestFetcher:
                 except Exception:
                     pass
 
-            # Retreat the window
             earliest_ts = min(c["time"] for c in candles)
             next_end = earliest_ts - seconds_per_candle
 
-            # Safety: ensure we always move backward
             if next_end >= current_end:
                 current_end = page_start
             else:
                 current_end = next_end
 
-            # Respect API rate limits
             await asyncio.sleep(API_PAUSE)
 
-        # Final sort pass: read, sort, rewrite (ensures perfect chronological order)
+        # Combine temp files in reverse order (oldest to newest)
         if total_written > 0:
-            await self._sort_csv(csv_path)
+            with open(csv_path, "w", newline="") as f_out:
+                writer = csv.DictWriter(f_out, fieldnames=CSV_COLUMNS)
+                writer.writeheader()
+                
+                # Reverse the list of temp files so the oldest chunk is written first
+                for tf in reversed(temp_files):
+                    if os.path.exists(tf):
+                        with open(tf, "r", newline="") as f_in:
+                            # Read raw lines and write them
+                            f_out.write(f_in.read())
+                        os.remove(tf)  # Cleanup temp file after merging
 
         logger.info(
             f"[BT-FETCH] Download complete: {symbol} {timeframe} "
@@ -306,40 +306,7 @@ class BacktestFetcher:
 
         return csv_path, total_written
 
-    @staticmethod
-    async def _sort_csv(csv_path: str) -> None:
-        """
-        Read the CSV, sort all rows by timestamp, and rewrite.
-        Done in a single pass to fix any out-of-order pages.
-        Uses chunked reading to limit peak memory.
-        """
-        try:
-            rows = []
-            with open(csv_path, "r", newline="") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    rows.append(row)
 
-            rows.sort(key=lambda r: int(r["time"]))
-
-            # Deduplicate (in case of edge overlap)
-            deduped = []
-            seen = set()
-            for row in rows:
-                ts = row["time"]
-                if ts not in seen:
-                    seen.add(ts)
-                    deduped.append(row)
-
-            with open(csv_path, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-                writer.writeheader()
-                writer.writerows(deduped)
-
-            logger.info(f"[BT-FETCH] Sorted & deduped CSV: {len(deduped)} unique candles")
-
-        except Exception as e:
-            logger.error(f"[BT-FETCH] Error sorting CSV: {e}")
 
 
 # ---------------------------------------------------------------------------
