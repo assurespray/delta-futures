@@ -277,22 +277,26 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         
         # Send Photo (No long caption)
         if chart_path and os.path.exists(chart_path):
-            with open(chart_path, "rb") as photo:
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption="📊 Equity Curve Chart"
-                )
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=open(chart_path, "rb"),
+                caption="📊 Equity Curve Chart",
+                read_timeout=120,
+                write_timeout=120,
+                connect_timeout=120
+            )
             
         # Send CSV Document
         if csv_path and os.path.exists(csv_path):
-            with open(csv_path, "rb") as doc:
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=doc,
-                    filename=os.path.basename(csv_path),
-                    caption="📄 Full Trade Log & Indicator Math Dump"
-                )
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=open(csv_path, "rb"),
+                filename=os.path.basename(csv_path),
+                caption="📄 Full Trade Log & Indicator Math Dump",
+                read_timeout=120,
+                write_timeout=120,
+                connect_timeout=120
+            )
     except Exception as e:
         logger.error(f"[BT-REPORT] Error sending report: {e}")
         await context.bot.send_message(chat_id=chat_id, text="⚠️ Completed, but failed to send files due to Telegram limits.")
