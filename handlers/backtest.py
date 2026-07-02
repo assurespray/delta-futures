@@ -47,8 +47,10 @@ async def run_backtest_task(
     api_id: str,
     symbol: str,
     timeframe: str,
-    days: int,
-    strategy_params: Dict[str, Any]
+    days: Optional[int],
+    strategy_params: Dict[str, Any],
+    custom_start_ts: Optional[int] = None,
+    custom_end_ts: Optional[int] = None
 ):
     """
     The main asynchronous task that runs the backtest.
@@ -115,8 +117,17 @@ async def run_backtest_task(
 
         client = DeltaExchangeClient(api_key=cred["api_key"], api_secret=cred["api_secret"])
         
-        end_ts = int(datetime.utcnow().timestamp())
-        start_ts = end_ts - (days * 86400)
+        if custom_start_ts and custom_end_ts:
+            start_ts = custom_start_ts
+            end_ts = custom_end_ts
+            days = max(1, int((end_ts - start_ts) / 86400))
+        elif days == 5000:
+            # Max Available Data shortcut
+            end_ts = int(datetime.utcnow().timestamp())
+            start_ts = end_ts - (5000 * 86400) # Roughly 13.5 years (effectively genesis)
+        else:
+            end_ts = int(datetime.utcnow().timestamp())
+            start_ts = end_ts - (days * 86400)
         
         # 2. Fetch Data (Phase 1)
         await _update_ui(0, 100, "Connecting to Delta Exchange...")
@@ -261,17 +272,17 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         pass
         
     try:
-        # Send Photo with caption
+        # Send the massive text report as a separate message first (bypasses 1024 char caption limit)
+        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+        
+        # Send Photo (No long caption)
         if chart_path and os.path.exists(chart_path):
             with open(chart_path, "rb") as photo:
                 await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=photo,
-                    caption=text,
-                    parse_mode="Markdown"
+                    caption="📊 Equity Curve Chart"
                 )
-        else:
-            await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
             
         # Send CSV Document
         if csv_path and os.path.exists(csv_path):

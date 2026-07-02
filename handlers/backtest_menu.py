@@ -23,6 +23,7 @@ BT_SELECT_PRESET = 801
 BT_SELECT_ASSET = 802
 BT_SELECT_TIMEFRAME = 803
 BT_SELECT_DURATION = 804
+BT_CUSTOM_DATE = 805
 
 
 async def menu_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -210,64 +211,115 @@ async def bt_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TY
     )
     
     keyboard = [
-        [InlineKeyboardButton("7 Days", callback_data="bt_dur_7"),
-         InlineKeyboardButton("30 Days", callback_data="bt_dur_30")],
-        [InlineKeyboardButton("90 Days", callback_data="bt_dur_90"),
-         InlineKeyboardButton("180 Days", callback_data="bt_dur_180")]
+        [InlineKeyboardButton("7 Days", callback_data="bt_dur_7"), InlineKeyboardButton("30 Days", callback_data="bt_dur_30")],
+        [InlineKeyboardButton("90 Days", callback_data="bt_dur_90"), InlineKeyboardButton("180 Days", callback_data="bt_dur_180")],
+        [InlineKeyboardButton("1 Year", callback_data="bt_dur_365"), InlineKeyboardButton("2 Years", callback_data="bt_dur_730")],
+        [InlineKeyboardButton("♾️ Max Available Data", callback_data="bt_dur_5000")],
+        [InlineKeyboardButton("📅 Custom Date Range", callback_data="bt_dur_custom")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
     ]
-    
-    if tf not in ["1m", "3m", "5m"]:
-        keyboard.append([InlineKeyboardButton("1 Year (365 Days)", callback_data="bt_dur_365")])
-        
-    keyboard.append([InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")])
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return BT_SELECT_DURATION
 
 
 async def bt_duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Launch the background task."""
+    """Launch the background task or ask for custom date."""
     query = update.callback_query
     await query.answer()
     
-    days = int(query.data.replace("bt_dur_", ""))
+    action = query.data.replace("bt_dur_", "")
     
+    if action == "custom":
+        text = (
+            "📅 **Custom Date Range**\n\n"
+            "Please type the start and end dates you want to test.\n"
+            "Format: `YYYY-MM-DD to YYYY-MM-DD`\n"
+            "Example: `2023-01-01 to 2024-01-01`"
+        )
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]]), parse_mode="Markdown")
+        return BT_CUSTOM_DATE
+
+    days = int(action)
+    return await _launch_backtest_task(query.message.message_id, update.effective_chat.id, update.effective_user.id, context, days=days)
+
+
+async def bt_custom_date_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process custom date string and launch."""
+    text = update.message.text.strip()
+    
+    try:
+        parts = text.split(" to ")
+        if len(parts) != 2:
+            raise ValueError()
+        
+        start_date = datetime.strptime(parts[0].strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_date = datetime.strptime(parts[1].strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        
+        if start_date >= end_date:
+            await update.message.reply_text("❌ Start date must be before end date. Try again:")
+            return BT_CUSTOM_DATE
+            
+        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        if end_date > now:
+            end_date = now
+            
+        # Calculate days for the fetcher logic (which still uses days backward implicitly, wait we can just pass specific start/end timestamps to the task!)
+        # Actually our task signature takes `days`. Let's pass the exact days difference.
+        delta = end_date - start_date
+        days = delta.days
+        
+        # We need the bot to stop at the start_date we requested.
+        # But `run_backtest_task` calculates: end_ts = now, start_ts = end_ts - days
+        # To support absolute start/end, we should pass start_ts and end_ts explicitly to `run_backtest_task`!
+        # Let's just calculate the offset. If end_date is 30 days ago, and start_date is 60 days ago...
+        # It's cleaner to update `run_backtest_task` to take `start_ts` and `end_ts` optionally.
+        
+    except ValueError:
+        await update.message.reply_text("❌ Invalid format. Please use `YYYY-MM-DD to YYYY-MM-DD` (e.g. `2023-01-01 to 2024-01-01`):", parse_mode="Markdown")
+        return BT_CUSTOM_DATE
+        
+    message = await update.message.reply_text("Processing...", parse_mode="Markdown")
+    return await _launch_backtest_task(message.message_id, update.effective_chat.id, update.effective_user.id, context, start_ts=int(start_date.timestamp()), end_ts=int(end_date.timestamp()))
+
+
+async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None, start_ts=None, end_ts=None):
     preset = context.user_data['bt_preset']
     asset = context.user_data['bt_asset']
     timeframe = context.user_data['bt_timeframe']
     api_id = context.user_data['bt_api_id']
     
-    # Construct Strategy Params for Engine
     strategy_params = {
         "strategy_name": preset.get("strategy_type", "dual_supertrend"),
         "direction": preset.get("parameters", {}).get("direction", "both"),
         "lot_size": 1,
         "initial_balance": 10000.0,
-        "leverage": 10  # Standard paper leverage for backtesting
+        "leverage": 10
     }
-    # Add all custom indicator params
     if "parameters" in preset:
         strategy_params.update(preset["parameters"])
         
-    chat_id = update.effective_chat.id
-    user_id = str(update.effective_user.id)
+    loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\n\n⏳ Please wait..."
     
-    # Update UI to loading
-    loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\nDuration: {days} days\n\n⏳ Please wait..."
-    await query.edit_message_text(loading_text, parse_mode="Markdown")
+    # We edit the specific message_id to show loading status
+    try:
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=loading_text, parse_mode="Markdown")
+    except:
+        pass
     
-    # Fire and Forget Background Task
     asyncio.create_task(
         run_backtest_task(
             chat_id=chat_id,
-            message_id=query.message.message_id,
+            message_id=message_id,
             context=context,
-            user_id=user_id,
+            user_id=str(user_id),
             api_id=api_id,
             symbol=asset,
             timeframe=timeframe,
             days=days,
-            strategy_params=strategy_params
+            strategy_params=strategy_params,
+            custom_start_ts=start_ts,
+            custom_end_ts=end_ts
         )
     )
     
@@ -381,6 +433,9 @@ def get_backtest_handlers():
             ],
             BT_SELECT_DURATION: [
                 CallbackQueryHandler(bt_duration_selected, pattern="^bt_dur_")
+            ],
+            BT_CUSTOM_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_custom_date_received)
             ]
         },
         fallbacks=[

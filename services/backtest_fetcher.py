@@ -197,18 +197,22 @@ class BacktestFetcher:
             writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
             writer.writeheader()
 
-        # Now append pages
-        while current_start < end_ts:
+        # BACKWARD PAGINATION: Start from end_ts and walk backward to start_ts.
+        # This guarantees we safely stop if we hit the "genesis" of the coin.
+        current_end = end_ts
+        consecutive_empty = 0
+        
+        while current_end > start_ts:
             if self._abort:
                 logger.warning("[BT-FETCH] Download aborted by user.")
                 return None, 0
 
             page_number += 1
 
-            # Calculate the end of this page window
-            page_end = min(
-                current_start + (PAGE_SIZE * seconds_per_candle),
-                end_ts,
+            # Calculate the start of this page window
+            page_start = max(
+                current_end - (PAGE_SIZE * seconds_per_candle),
+                start_ts
             )
 
             try:
@@ -216,33 +220,32 @@ class BacktestFetcher:
                     client=client,
                     symbol=symbol,
                     timeframe=timeframe,
-                    start_time=current_start,
-                    end_time=page_end,
+                    start_time=page_start,
+                    end_time=current_end,
                     limit=PAGE_SIZE,
                 )
             except Exception as e:
                 logger.error(f"[BT-FETCH] API error on page {page_number}: {e}")
                 await asyncio.sleep(1)
                 consecutive_empty += 1
-                if consecutive_empty > 10:
-                    logger.error("[BT-FETCH] Too many consecutive empty pages, stopping.")
+                if consecutive_empty > 5:
+                    logger.error("[BT-FETCH] Too many consecutive errors, stopping.")
                     break
-                # Slide the window forward to avoid being stuck
-                current_start = page_end
+                current_end = page_start
                 continue
 
             if not candles or len(candles) == 0:
                 consecutive_empty += 1
-                if consecutive_empty > 10:
-                    logger.warning("[BT-FETCH] 10 consecutive empty pages, assuming end of data.")
+                if consecutive_empty >= 2:
+                    logger.warning("[BT-FETCH] Hit empty data in the past (Genesis reached). Stopping backward fetch safely.")
                     break
-                current_start = page_end
+                current_end = page_start
                 await asyncio.sleep(API_PAUSE)
                 continue
 
             consecutive_empty = 0
 
-            # Deduplicate and sort
+            # Deduplicate
             new_rows = []
             for c in candles:
                 ts = c["time"]
@@ -258,10 +261,7 @@ class BacktestFetcher:
                     })
 
             if new_rows:
-                # Sort by timestamp before writing
-                new_rows.sort(key=lambda r: r["time"])
-
-                # Append to CSV
+                # We can just write them in the order received (the final _sort_csv will fix the backward chunk ordering)
                 with open(csv_path, "a", newline="") as f:
                     writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
                     writer.writerows(new_rows)
@@ -270,22 +270,21 @@ class BacktestFetcher:
 
             # Progress callback
             if progress_callback:
-                pct_msg = f"Fetching data... Page {page_number} ({total_written}/{estimated_total} candles)"
+                pct_msg = f"Fetching historical data... ({total_written}/{estimated_total} candles)"
                 try:
                     await progress_callback(total_written, estimated_total, pct_msg)
                 except Exception:
-                    pass  # Never let a UI error kill the download
+                    pass
 
-            # Advance the window
-            # Use the latest candle timestamp + 1 candle to avoid overlap
-            latest_ts = max(c["time"] for c in candles)
-            next_start = latest_ts + seconds_per_candle
+            # Retreat the window
+            earliest_ts = min(c["time"] for c in candles)
+            next_end = earliest_ts - seconds_per_candle
 
-            # Safety: ensure we always move forward
-            if next_start <= current_start:
-                current_start = page_end
+            # Safety: ensure we always move backward
+            if next_end >= current_end:
+                current_end = page_start
             else:
-                current_start = next_start
+                current_end = next_end
 
             # Respect API rate limits
             await asyncio.sleep(API_PAUSE)
