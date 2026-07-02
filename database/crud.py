@@ -124,19 +124,19 @@ async def delete_api_credential(credential_id: str, user_id: str) -> bool:
 # ==================== Strategy Presets CRUD ====================
 
 async def create_strategy_preset(preset_data: Dict[str, Any]) -> str:
-    collection = db["strategy_presets"]
+    collection = mongodb.get_db()["strategy_presets"]
     preset = StrategyPreset(**preset_data)
     result = await collection.insert_one(preset.model_dump(by_alias=True, exclude={"id"}))
     return str(result.inserted_id)
 
 async def get_strategy_presets_by_user(user_id: str) -> List[Dict[str, Any]]:
-    collection = db["strategy_presets"]
+    collection = mongodb.get_db()["strategy_presets"]
     cursor = collection.find({"user_id": user_id})
     return await cursor.to_list(length=100)
 
 async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
     try:
-        collection = db["strategy_presets"]
+        collection = mongodb.get_db()["strategy_presets"]
         return await collection.find_one({"_id": ObjectId(preset_id)})
     except Exception as e:
         logger.error(f"Error getting preset by id: {e}")
@@ -145,7 +145,7 @@ async def get_strategy_preset_by_id(preset_id: str) -> Optional[Dict[str, Any]]:
 async def update_strategy_preset(preset_id: str, update_data: Dict[str, Any]) -> bool:
     """Update a strategy preset's fields."""
     try:
-        collection = db["strategy_presets"]
+        collection = mongodb.get_db()["strategy_presets"]
         update_data["updated_at"] = datetime.utcnow()
         result = await collection.update_one(
             {"_id": ObjectId(preset_id)},
@@ -158,7 +158,7 @@ async def update_strategy_preset(preset_id: str, update_data: Dict[str, Any]) ->
 
 async def delete_strategy_preset(preset_id: str, user_id: str) -> bool:
     try:
-        collection = db["strategy_presets"]
+        collection = mongodb.get_db()["strategy_presets"]
         result = await collection.delete_one({"_id": ObjectId(preset_id), "user_id": user_id})
         return result.deleted_count > 0
     except Exception as e:
@@ -714,7 +714,7 @@ async def acquire_position_lock(db: AsyncIOMotorDatabase,
         True if lock acquired, False if already locked by another setup
     """
     try:
-        collection = db["position_locks"]
+        collection = mongodb.get_db()["position_locks"]
         
         # Check if locked by a DIFFERENT setup on the same API account
         existing = await collection.find_one({"symbol": symbol, "api_id": api_id})
@@ -760,7 +760,7 @@ async def get_position_lock(db: AsyncIOMotorDatabase,
         Lock record or None if not locked
     """
     try:
-        collection = db["position_locks"]
+        collection = mongodb.get_db()["position_locks"]
         lock = await collection.find_one({"symbol": symbol, "api_id": api_id})
         return lock
         
@@ -788,7 +788,7 @@ async def release_position_lock(db: AsyncIOMotorDatabase,
     """
     try:
         logger.debug(f"release_position_lock called for symbol={symbol}, setup_id={setup_id}, api_id={api_id}")
-        collection = db["position_locks"]
+        collection = mongodb.get_db()["position_locks"]
         
         result = await collection.delete_one({
             "symbol": symbol,
@@ -821,7 +821,7 @@ async def cleanup_stale_locks(db: AsyncIOMotorDatabase,
         Number of locks cleaned up
     """
     try:
-        collection = db["position_locks"]
+        collection = mongodb.get_db()["position_locks"]
         cutoff_time = datetime.utcnow() - timedelta(minutes=max_age_minutes)
         
         result = await collection.delete_many({
@@ -906,7 +906,7 @@ async def delete_position_lock(symbol: str = None) -> int:
     """
     logger.debug(f"delete_position_lock called with symbol={symbol}")
     db = await get_db()
-    collection = db["position_locks"]
+    collection = mongodb.get_db()["position_locks"]
     if symbol:
         result = await collection.delete_one({"symbol": symbol})
         logger.debug(f"delete_position_lock deleted_count={result.deleted_count} for symbol={symbol}")
