@@ -13,9 +13,12 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from typing import List, Dict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
+
+# IST timezone definition
+IST = timezone(timedelta(hours=5, minutes=30))
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache")
 
@@ -41,13 +44,13 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
             raise ValueError("Trade log is empty")
             
         # Rebuild times and balances
-        times = [datetime.fromtimestamp(trade_log[0]["entry_time"], tz=timezone.utc)]
+        times = [datetime.fromtimestamp(trade_log[0]["entry_time"], tz=IST)]
         balances = [initial_balance]
         
         current_balance = initial_balance
         for t in trade_log:
             current_balance += t["pnl"]
-            dt = datetime.fromtimestamp(t["exit_time"], tz=timezone.utc)
+            dt = datetime.fromtimestamp(t["exit_time"], tz=IST)
             times.append(dt)
             balances.append(current_balance)
             
@@ -114,8 +117,8 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
         columns = [
             "Trade #", 
             "Direction",
-            "Entry Time (UTC)", 
-            "Exit Time (UTC)", 
+            "Entry Time (IST)", 
+            "Exit Time (IST)", 
             "Entry Price", 
             "Exit Price", 
             "PnL (USD)", 
@@ -130,8 +133,8 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
             writer.writerow(columns)
             
             for idx, t in enumerate(trade_log, 1):
-                entry_dt = datetime.fromtimestamp(t["entry_time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-                exit_dt = datetime.fromtimestamp(t["exit_time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                entry_dt = datetime.fromtimestamp(t["entry_time"], tz=IST).strftime('%Y-%m-%d %H:%M:%S')
+                exit_dt = datetime.fromtimestamp(t["exit_time"], tz=IST).strftime('%Y-%m-%d %H:%M:%S')
                 
                 writer.writerow([
                     idx,
