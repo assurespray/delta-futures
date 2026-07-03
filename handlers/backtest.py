@@ -5,6 +5,7 @@ Coordinates the fetcher, engine, and analytics in an asynchronous background tas
 Provides a live-updating Telegram progress bar to prevent webhook timeouts.
 """
 
+import os
 import time
 import asyncio
 import logging
