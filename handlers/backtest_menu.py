@@ -308,7 +308,7 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
     except:
         pass
     
-    asyncio.create_task(
+    task = asyncio.create_task(
         run_backtest_task(
             chat_id=chat_id,
             message_id=message_id,
@@ -323,6 +323,9 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
             custom_end_ts=end_ts
         )
     )
+    
+    # Store task reference so the stop button can cancel it
+    context.user_data['bt_running_task'] = task
     
     return ConversationHandler.END
 
@@ -416,6 +419,23 @@ async def bt_del_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await bt_history_menu(update, context)
 
 
+async def bt_stop_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel a running backtest task."""
+    query = update.callback_query
+    await query.answer("Stopping...")
+    
+    task = context.user_data.get('bt_running_task')
+    if task and not task.done():
+        task.cancel()
+        context.user_data.pop('bt_running_task', None)
+    else:
+        # Task already finished or no task found
+        try:
+            await query.edit_message_text("ℹ️ No backtest is currently running.")
+        except:
+            pass
+
+
 def get_backtest_handlers():
     """Return all handlers for backtesting."""
     
@@ -453,4 +473,5 @@ def get_backtest_handlers():
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history$"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
+        CallbackQueryHandler(bt_stop_backtest, pattern="^bt_stop$"),
     ]

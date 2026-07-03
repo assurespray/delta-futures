@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from telegram import Update, Message
+from telegram import Update, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from api.delta_client import DeltaExchangeClient
@@ -97,12 +97,16 @@ async def run_backtest_task(
                 f"**ETA:** {ui_state['eta']}\n\n"
                 f"⏳ _Please wait, doing heavy math in background..._"
             )
+            stop_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛑 Stop Backtest", callback_data="bt_stop")]
+            ])
             try:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=text,
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    reply_markup=stop_keyboard
                 )
                 last_ui_update = time.time()
             except Exception as e:
@@ -198,6 +202,17 @@ async def run_backtest_task(
         # 8. Send Final Report
         await _send_final_report(chat_id, context, final_result, chart_path, csv_path, message_id)
         
+    except asyncio.CancelledError:
+        logger.info(f"[BT-TASK] Backtest cancelled by user: {symbol} {timeframe}")
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text="🛑 **Backtest Stopped**\n\nThe backtest was cancelled by user request.",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
     except Exception as e:
         logger.error(f"[BT-TASK] Fatal error during backtest: {e}")
         import traceback
