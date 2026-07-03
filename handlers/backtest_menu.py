@@ -443,12 +443,13 @@ def get_backtest_handlers():
             CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
             CallbackQueryHandler(menu_backtest, pattern="^main_menu$")
         ],
-        per_message=False
+        per_message=False,
+        allow_reentry=True
     )
     
     return [
-        CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
         fsm_handler,
+        CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history$"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
