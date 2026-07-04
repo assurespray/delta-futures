@@ -389,13 +389,18 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
             config_lines.append(f"• {k.replace('_', ' ').title()}: {v}")
     config_str = "\n".join(config_lines)
 
+    rs = r.get('rolling_stats') or {}
+    m = rs.get('monthly') or {}
+    
     text = (
         f"📊 **Backtest Record: {r.get('symbol', 'Unknown')} ({r.get('timeframe', 'Unknown')})**\n"
         f"Run Date: `{r.get('created_at', 'Unknown')}`\n\n"
         f"⚙️ **Configuration**\n{config_str}\n\n"
+        f"🏦 **Avg Safe Margin:** `${r.get('avg_max_margin_required', 0):.2f}`\n\n"
         f"💰 **Profit:** `${r.get('overall_profit', 0):.2f}` ({r.get('overall_profit_pct', 0):.2f}%)\n"
         f"📉 **Max DD:** `${r.get('max_drawdown', 0):.2f}` ({r.get('max_drawdown_pct', 0):.2f}%)\n"
         f"🎯 **Win Rate:** `{r.get('win_pct', 0):.2f}%`\n"
+        f"🔄 **Monthly Profitable:** `{m.get('win_rate', 0):.1f}%`\n"
         f"🔮 **R-Squared:** `{r.get('r_squared', 0):.3f}`\n"
     )
     

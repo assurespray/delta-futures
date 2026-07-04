@@ -230,13 +230,18 @@ class BacktestEngine:
         }
 
     def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, indicator_value: float):
-        """Open a mock position and deduct Maker fees."""
-        # Calculate fees (Assume Market orders for entries = Taker fee)
-        # Position size in USD = lot_size * price (Simplified. In reality, contracts have multipliers).
-        # We will use simplified USD notional sizing: Position = $1,000 for standard testing
+        """Open a mock position with exact margin and lot size math."""
+        quantity = self.lot_size
+        position_size_usd = entry_price * quantity
         
-        position_size_usd = 1000.0  # Fixed $1k allocation per trade for baseline math
-        quantity = position_size_usd / entry_price
+        # Initial Margin = Position Notional / Leverage
+        initial_margin = position_size_usd / self.leverage if self.leverage > 0 else position_size_usd
+        
+        # Max Margin Required = Initial Margin + Max Potential Loss (Distance to SL)
+        # Assumes the user wants to avoid liquidation before the SL triggers
+        sl_distance = abs(entry_price - sl_price)
+        max_potential_loss = sl_distance * quantity
+        max_margin_required = initial_margin + max_potential_loss
         
         fee = position_size_usd * PAPER_TRADE_TAKER_FEE
         self.balance -= fee
@@ -248,6 +253,8 @@ class BacktestEngine:
             "sl_price": sl_price,
             "quantity": quantity,
             "position_size_usd": position_size_usd,
+            "initial_margin": initial_margin,
+            "max_margin_required": max_margin_required,
             "indicator_value": indicator_value,
             "entry_fee": fee
         }

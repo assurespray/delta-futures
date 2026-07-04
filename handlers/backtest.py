@@ -246,14 +246,31 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
     
     config_str = "\n".join(config_lines)
 
+    # Rolling stats format
+    rs = result.get('rolling_stats') or {}
+    w = rs.get('weekly') or {}
+    m = rs.get('monthly') or {}
+    
+    rolling_str = (
+        f"🔄 **Rolling Consistency**\n"
+        f"• Profitable: `{w.get('win_rate', 0):.1f}%` (Wk) | `{m.get('win_rate', 0):.1f}%` (Mo)\n"
+        f"• Best Return: `{w.get('best', 0):+.1f}%` (Wk) | `{m.get('best', 0):+.1f}%` (Mo)\n"
+        f"• Worst Return: `{w.get('worst', 0):+.1f}%` (Wk) | `{m.get('worst', 0):+.1f}%` (Mo)\n\n"
+    )
+
     text = (
         f"📊 **Backtest Complete: {result['symbol']} ({result['timeframe']})**\n"
         f"⏱️ Analyzed {result['total_candles']:,} candles in {result['run_duration_seconds']:.1f}s\n\n"
         
         f"⚙️ **Configuration**\n"
         f"{config_str}\n\n"
-
         
+        f"🏦 **Capital & Margin Requirements**\n"
+        f"• Sizing: `{result.get('lot_size', 0)} Contracts` @ `{result.get('leverage', 1)}x Lev`\n"
+        f"• Avg Initial Margin: `${result.get('avg_initial_margin', 0):.2f}`\n"
+        f"• Avg Safe Margin: `${result.get('avg_max_margin_required', 0):.2f}`\n"
+        f"• Peak Margin Req: `${result.get('peak_margin_required', 0):.2f}`\n\n"
+
         f"💰 **Profitability**\n"
         f"• Overall Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
         f"• No. of Trades: `{result['num_trades']}`\n"
@@ -275,9 +292,11 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Max Win Streak: `{result['max_win_streak']}`\n"
         f"• Max Losing Streak: `{result['max_loss_streak']}`\n\n"
         
+        + rolling_str +
+        
         f"🔮 **Advanced Analytics**\n"
-        f"• R-Squared (Curve Fit): `{result['r_squared']:.3f}`\n"
-        f"• Risk of Ruin (MC): `{result['monte_carlo_risk_of_ruin']:.1f}%`\n"
+        f"• R-Squared: `{result['r_squared']:.3f}`\n"
+        f"• Risk of Ruin: `{result['monte_carlo_risk_of_ruin']:.1f}%`\n"
         f"• Sharpe Ratio: `{result['sharpe_ratio']:.2f}`\n"
     )
     

@@ -11,6 +11,60 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+
+def calculate_rolling_stats(trade_log: List[Dict], initial_balance: float) -> Dict[str, Any]:
+    """Calculate Weekly and Monthly rolling returns and consistency."""
+    if not trade_log:
+        return {"weekly": None, "monthly": None}
+    
+    try:
+        # Build daily equity series
+        df = pd.DataFrame(trade_log)
+        df['date'] = pd.to_datetime(df['exit_time'], unit='s', utc=True).dt.floor('D')
+        
+        df['cumulative_pnl'] = df['pnl'].cumsum()
+        df['balance'] = initial_balance + df['cumulative_pnl']
+        
+        # Last balance of each day
+        daily_balances = df.groupby('date')['balance'].last()
+        
+        start_date = daily_balances.index.min()
+        end_date = daily_balances.index.max()
+        
+        if pd.isna(start_date) or pd.isna(end_date):
+            return {"weekly": None, "monthly": None}
+            
+        idx = pd.date_range(start_date, end_date)
+        daily_balances = daily_balances.reindex(idx).ffill()
+        daily_balances = daily_balances.fillna(initial_balance)
+        
+        def get_rolling(days):
+            if len(daily_balances) <= days:
+                return None
+            rolling_returns = daily_balances.pct_change(periods=days) * 100.0
+            rolling_returns = rolling_returns.dropna()
+            
+            if len(rolling_returns) == 0:
+                return None
+                
+            wins = (rolling_returns > 0).sum()
+            total = len(rolling_returns)
+            
+            return {
+                "best": float(rolling_returns.max()),
+                "worst": float(rolling_returns.min()),
+                "avg": float(rolling_returns.mean()),
+                "win_rate": float((wins / total) * 100.0) if total > 0 else 0.0
+            }
+            
+        return {
+            "weekly": get_rolling(7),
+            "monthly": get_rolling(30)
+        }
+    except Exception as e:
+        logger.error(f"[BT-METRICS] Error calculating rolling stats: {e}")
+        return {"weekly": None, "monthly": None}
+
 def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str, Any]:
     """
     Calculate comprehensive performance metrics from a list of executed trades.
