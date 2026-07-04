@@ -17,6 +17,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
+from strategy.factory import StrategyFactory
 from indicators.supertrend import SuperTrend, SIGNAL_UPTREND, SIGNAL_DOWNTREND
 from config.constants import PAPER_TRADE_TAKER_FEE, PAPER_TRADE_MAKER_FEE, BREAKOUT_PIP_OFFSET
 
