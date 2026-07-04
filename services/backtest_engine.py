@@ -290,8 +290,13 @@ class BacktestEngine:
             "direction": direction,
             "entry_price": entry_price,
             "exit_price": exit_price,
+            "quantity": quantity,
+            "notional_size": position_size_usd,
+            "initial_margin": self.open_trade["initial_margin"],
+            "max_margin_required": self.open_trade["max_margin_required"],
             "pnl": net_pnl,
             "pnl_pct": (net_pnl / position_size_usd) * 100.0,
+            "roe_pct": (net_pnl / self.open_trade["initial_margin"]) * 100.0 if self.open_trade["initial_margin"] > 0 else 0.0,
             "exit_reason": reason,
             "entry_indicator": self.open_trade["indicator_value"],
             "exit_indicator": indicator_value

@@ -185,9 +185,22 @@ def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str
 
     return_over_max_dd = overall_profit_pct / max_drawdown_pct if max_drawdown_pct > 0 else float('inf')
 
+    # Calculate rolling stats and margin requirements
+    rolling_stats = calculate_rolling_stats(trade_log, initial_balance)
+    
+    initial_margins = [t.get("initial_margin", 0) for t in trade_log]
+    max_margins = [t.get("max_margin_required", 0) for t in trade_log]
+    avg_initial_margin = sum(initial_margins) / len(initial_margins) if initial_margins else 0.0
+    avg_max_margin = sum(max_margins) / len(max_margins) if max_margins else 0.0
+    peak_margin = max(max_margins) if max_margins else 0.0
+
     return {
         "overall_profit": overall_profit,
         "overall_profit_pct": overall_profit_pct,
+        "avg_initial_margin": avg_initial_margin,
+        "avg_max_margin_required": avg_max_margin,
+        "peak_margin_required": peak_margin,
+        "rolling_stats": rolling_stats,
         "num_trades": num_trades,
         "avg_profit_per_trade": avg_profit_per_trade,
         "win_pct": win_pct,
@@ -221,6 +234,13 @@ def _empty_metrics(initial_balance: float) -> Dict[str, Any]:
     return {
         "overall_profit": 0.0,
         "overall_profit_pct": 0.0,
+        "avg_initial_margin": 0.0,
+        "avg_max_margin_required": 0.0,
+        "peak_margin_required": 0.0,
+        "rolling_stats": {
+            "weekly": None,
+            "monthly": None,
+        },
         "num_trades": 0,
         "avg_profit_per_trade": 0.0,
         "win_pct": 0.0,
