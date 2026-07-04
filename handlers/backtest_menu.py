@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 
+import os
+from utils.backtest_exporter import generate_equity_curve_chart, generate_trade_log_csv
 from database.crud import get_strategy_presets_by_user, get_strategy_preset_by_id, get_backtest_summary, get_backtest_results, get_backtest_result_by_id, get_api_credentials_by_user
 from handlers.backtest import run_backtest_task
 
@@ -394,16 +396,83 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 **Profit:** `${r.get('overall_profit', 0):.2f}` ({r.get('overall_profit_pct', 0):.2f}%)\n"
         f"📉 **Max DD:** `${r.get('max_drawdown', 0):.2f}` ({r.get('max_drawdown_pct', 0):.2f}%)\n"
         f"🎯 **Win Rate:** `{r.get('win_pct', 0):.2f}%`\n"
-        f"🔮 **R-Squared:** `{r.get('r_squared', 0):.3f}`\n\n"
-        f"_Note: Scroll up in your chat history to find the original Equity Curve image and TradeLog file._"
+        f"🔮 **R-Squared:** `{r.get('r_squared', 0):.3f}`\n"
     )
     
     keyboard = [
+        [InlineKeyboardButton("📥 Resend Chart & CSV", callback_data=f"bt_resend_{result_id}")],
         [InlineKeyboardButton("🗑️ Delete Record", callback_data=f"bt_del_{result_id}")],
         [InlineKeyboardButton("🔙 Back to History", callback_data="bt_history")]
     ]
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+
+async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resend the chart and CSV files for a past backtest."""
+    query = update.callback_query
+    await query.answer("Generating files, please wait...")
+    
+    result_id = query.data.replace("bt_resend_", "")
+    r = await get_backtest_result_by_id(result_id)
+    
+    if not r:
+        await query.message.reply_text("❌ Result not found or deleted.")
+        return
+        
+    trade_log = r.get("trade_log", [])
+    if not trade_log:
+        await query.message.reply_text("❌ No trade log data available for this backtest.")
+        return
+        
+    symbol = r.get("symbol", "Unknown")
+    timeframe = r.get("timeframe", "Unknown")
+    initial_balance = r.get("initial_balance", 10000.0)
+    
+    # Generate files
+    chart_path = generate_equity_curve_chart(trade_log, initial_balance, symbol, timeframe)
+    csv_path = generate_trade_log_csv(trade_log, symbol, timeframe)
+    
+    chat_id = update.effective_chat.id
+    
+    try:
+        # Send Photo
+        if chart_path and os.path.exists(chart_path):
+            with open(chart_path, "rb") as photo_file:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_file,
+                    caption=f"📊 Equity Curve Chart: {symbol} ({timeframe})",
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=120
+                )
+            
+        # Send CSV Document
+        if csv_path and os.path.exists(csv_path):
+            with open(csv_path, "rb") as csv_file:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=csv_file,
+                    filename=os.path.basename(csv_path),
+                    caption=f"📄 Full Trade Log: {symbol} ({timeframe})",
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=120
+                )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[BT-RESEND] Error sending files: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ Failed to send files due to Telegram limits.")
+    finally:
+        # Cleanup temp files
+        for fpath in [chart_path, csv_path]:
+            if fpath and os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
 
 
 async def bt_del_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -472,6 +541,7 @@ def get_backtest_handlers():
         CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history$"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
+        CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
         CallbackQueryHandler(bt_stop_backtest, pattern="^bt_stop$"),
     ]
