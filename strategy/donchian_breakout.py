@@ -170,7 +170,8 @@ class DonchianBreakoutStrategy(BaseStrategy):
         symbol: str,
         timeframe: str,
         skip_boundary_check: bool = False,
-        force_recalc: bool = False
+        force_recalc: bool = False,
+        historical_candles: Optional[List[Dict[str, Any]]] = None
     ) -> Optional[Dict[str, Any]]:
         """Fetch candles and calculate Donchian Channels."""
         try:
