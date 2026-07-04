@@ -150,7 +150,7 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
                     f"{t.get('initial_margin', 0):.2f}",
                     f"{t.get('max_margin_required', 0):.2f}",
                     f"{t['pnl']:.2f}",
-                    f"{t.get('pnl_pct', 0.0):.2f}%",
+                    f"{t.get('roe_pct', 0.0):.2f}%",
                     t["exit_reason"],
                     f"{t.get('entry_indicator', 0):.5f}",
                     f"{t.get('exit_indicator', 0):.5f}"
