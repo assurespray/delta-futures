@@ -13,6 +13,7 @@ Exit Logic:
 
 import logging
 import numpy as np
+import pandas as pd
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from indicators.range_identifier import RangeIdentifierLazyBear
@@ -48,15 +49,95 @@ class RangeBreakoutStrategy(BaseStrategy):
 
 
     def generate_backtest_signals(self, df):
-        import numpy as np
+        """
+        Vectorized signal generation for the backtester.
+        
+        Entry Logic (mirrors live indicator exactly):
+        - Range breaks when close exits the previous up/down band
+        - Signal fires when range_count drops from >= min_range_candles to 1
+        - Long breakout: close > prev_up AND trend_phase == 1 (close > EMA)
+        - Short breakout: close < prev_down AND trend_phase == -1 (close < EMA)
+        
+        Exit Logic:
+        - Long exit: close < EMA
+        - Short exit: close > EMA
+        
+        Stop Loss:
+        - sl_type "middle": (prev_up + prev_down) / 2
+        - sl_type "opposite": opposite range boundary
+        """
         n = len(df)
+        closes = df['close'].astype(float).values
+        highs = df['high'].astype(float).values
+        lows = df['low'].astype(float).values
+
+        # Calculate EMA
+        ema = df['close'].astype(float).ewm(span=self.ema_length, adjust=False).mean().values
+
+        # Sequential range calculation (mirrors RangeIdentifierLazyBear.calculate)
+        up = np.zeros(n)
+        down = np.zeros(n)
+        range_count = np.zeros(n, dtype=int)
+
+        up[0] = highs[0]
+        down[0] = lows[0]
+        range_count[0] = 1
+
+        entry_signal = np.zeros(n, dtype=int)
+        sl_price_long = np.zeros(n)
+        sl_price_short = np.zeros(n)
+
+        for i in range(1, n):
+            c = closes[i]
+
+            # Range tracking — same logic as the indicator
+            if c < up[i - 1] and c > down[i - 1]:
+                up[i] = up[i - 1]
+                down[i] = down[i - 1]
+                range_count[i] = range_count[i - 1] + 1
+            else:
+                up[i] = highs[i]
+                down[i] = lows[i]
+                range_count[i] = 1
+
+            # Breakout detection
+            if range_count[i] == 1 and range_count[i - 1] >= self.min_range_candles:
+                trend_phase = 1 if c > ema[i] else -1
+                prev_up = up[i - 1]
+                prev_down = down[i - 1]
+
+                if c > prev_up and trend_phase == 1:
+                    entry_signal[i] = 1
+                    if self.sl_type == "middle":
+                        sl_price_long[i] = (prev_up + prev_down) / 2
+                    else:
+                        sl_price_long[i] = prev_down
+                elif c < prev_down and trend_phase == -1:
+                    entry_signal[i] = -1
+                    if self.sl_type == "middle":
+                        sl_price_short[i] = (prev_up + prev_down) / 2
+                    else:
+                        sl_price_short[i] = prev_up
+
+        # Forward-fill SL values so the engine can read SL for the entry candle
+        # (engine reads sl_price_*[i-1] when signal fires at i-1)
+        for i in range(1, n):
+            if sl_price_long[i] == 0 and sl_price_long[i - 1] != 0:
+                sl_price_long[i] = sl_price_long[i - 1]
+            if sl_price_short[i] == 0 and sl_price_short[i - 1] != 0:
+                sl_price_short[i] = sl_price_short[i - 1]
+
+        # Exit signals: close crosses EMA
+        exit_long = closes < ema
+        exit_short = closes > ema
+
         return {
-            "entry_signal": np.zeros(n, dtype=int),
-            "exit_long": np.zeros(n, dtype=bool),
-            "exit_short": np.zeros(n, dtype=bool),
-            "sl_price_long": np.zeros(n),
-            "sl_price_short": np.zeros(n),
-            "indicator_value": np.zeros(n)
+            "entry_signal": entry_signal,
+            "exit_long": exit_long,
+            "exit_short": exit_short,
+            "sl_price_long": sl_price_long,
+            "sl_price_short": sl_price_short,
+            "indicator_value": ema
         }
 
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:

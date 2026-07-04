@@ -24,6 +24,7 @@ Pending Order Invalidation:
 
 import logging
 import numpy as np
+import pandas as pd
 import traceback
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -61,15 +62,79 @@ class DonchianBreakoutStrategy(BaseStrategy):
 
 
     def generate_backtest_signals(self, df):
-        import numpy as np
+        """
+        Vectorized signal generation for the backtester.
+        
+        Entry Logic (mirrors live indicator + strategy exactly):
+        - Upper Channel = highest high of previous `period` candles (excludes current)
+        - Lower Channel = lowest low of previous `period` candles (excludes current)
+        - Middle Band = (Upper + Lower) / 2
+        - LONG entry: close > Upper Channel (breakout up) AND previous signal was NOT breakout up
+        - SHORT entry: close < Lower Channel (breakout down) AND previous signal was NOT breakout down
+        - Flip detection prevents re-entering on consecutive breakout candles
+        
+        Exit Logic:
+        - LONG exit: close < Middle Band
+        - SHORT exit: close > Middle Band
+        
+        Stop Loss:
+        - SL = Middle Band at the time of entry signal
+        """
         n = len(df)
+        closes = df['close'].astype(float).values
+        highs = df['high'].astype(float).values
+        lows = df['low'].astype(float).values
+
+        # Calculate rolling Donchian Channels
+        # Upper = highest high of the PREVIOUS `period` candles (shift by 1 to exclude current)
+        # Lower = lowest low of the PREVIOUS `period` candles
+        high_series = pd.Series(highs)
+        low_series = pd.Series(lows)
+
+        upper = high_series.rolling(window=self.period).max().shift(1).values
+        lower = low_series.rolling(window=self.period).min().shift(1).values
+        middle = (upper + lower) / 2.0
+
+        # Replace NaN from rolling warmup with 0
+        upper = np.nan_to_num(upper, nan=0.0)
+        lower = np.nan_to_num(lower, nan=0.0)
+        middle = np.nan_to_num(middle, nan=0.0)
+
+        # Determine raw signal per candle (1 = breakout up, -1 = breakout down, 0 = inside)
+        raw_signal = np.zeros(n, dtype=int)
+        raw_signal[closes > upper] = 1
+        raw_signal[closes < lower] = -1
+        # Fix warmup period where upper/lower are 0
+        raw_signal[:self.period + 1] = 0
+
+        # Flip detection — only signal on TRANSITION to breakout state
+        prev_signal = np.roll(raw_signal, 1)
+        prev_signal[0] = 0
+
+        entry_signal = np.zeros(n, dtype=int)
+        # Long entry: transition TO breakout up from any other state
+        entry_signal[(raw_signal == 1) & (prev_signal != 1)] = 1
+        # Short entry: transition TO breakout down from any other state
+        entry_signal[(raw_signal == -1) & (prev_signal != -1)] = -1
+
+        # Exit signals: close crosses middle band
+        exit_long = closes < middle
+        exit_short = closes > middle
+        # Suppress exits during warmup
+        exit_long[:self.period + 1] = False
+        exit_short[:self.period + 1] = False
+
+        # SL = Middle Band (used for both long and short)
+        sl_price_long = middle.copy()
+        sl_price_short = middle.copy()
+
         return {
-            "entry_signal": np.zeros(n, dtype=int),
-            "exit_long": np.zeros(n, dtype=bool),
-            "exit_short": np.zeros(n, dtype=bool),
-            "sl_price_long": np.zeros(n),
-            "sl_price_short": np.zeros(n),
-            "indicator_value": np.zeros(n)
+            "entry_signal": entry_signal,
+            "exit_long": exit_long,
+            "exit_short": exit_short,
+            "sl_price_long": sl_price_long,
+            "sl_price_short": sl_price_short,
+            "indicator_value": middle
         }
 
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:
