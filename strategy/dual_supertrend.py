@@ -16,6 +16,8 @@ import logging
 import traceback
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+import numpy as np
+import pandas as pd
 from indicators.supertrend import SuperTrend, SIGNAL_UPTREND, SIGNAL_DOWNTREND
 from indicators.signal_generator import SignalGenerator
 from api.delta_client import DeltaExchangeClient
@@ -74,6 +76,53 @@ class DualSuperTrendStrategy(BaseStrategy):
         self._last_fetch_time: Dict[str, datetime] = {}
         self._last_candle_count: Dict[str, int] = {}
         self._last_processed_candle_time: Dict[str, int] = {}
+
+
+    def generate_backtest_signals(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Vectorized signal generation for the backtester."""
+        candles = df.to_dict('records')
+        p_series = self.perusu.calculate(candles, return_series=True)
+        s_series = self.sirusu.calculate(candles, return_series=True)
+        
+        n = len(df)
+        if not p_series or not s_series:
+            return {
+                "entry_signal": np.zeros(n, dtype=int),
+                "exit_long": np.zeros(n, dtype=bool),
+                "exit_short": np.zeros(n, dtype=bool),
+                "sl_price_long": np.zeros(n),
+                "sl_price_short": np.zeros(n),
+                "indicator_value": np.zeros(n)
+            }
+            
+        p_signal = p_series["signal"]
+        s_signal = s_series["signal"]
+        s_val = s_series["supertrend"]
+        
+        prev_p_signal = np.roll(p_signal, 1)
+        prev_p_signal[0] = p_signal[0]
+        
+        prev_s_signal = np.roll(s_signal, 1)
+        prev_s_signal[0] = s_signal[0]
+        
+        entry_signal = np.zeros(n, dtype=int)
+        
+        # Perusu flips
+        entry_signal[(prev_p_signal == SIGNAL_DOWNTREND) & (p_signal == SIGNAL_UPTREND)] = 1
+        entry_signal[(prev_p_signal == SIGNAL_UPTREND) & (p_signal == SIGNAL_DOWNTREND)] = -1
+        
+        # Dual ST uses Sirusu flips for exits
+        exit_long = (prev_s_signal == SIGNAL_UPTREND) & (s_signal == SIGNAL_DOWNTREND)
+        exit_short = (prev_s_signal == SIGNAL_DOWNTREND) & (s_signal == SIGNAL_UPTREND)
+        
+        return {
+            "entry_signal": entry_signal,
+            "exit_long": exit_long,
+            "exit_short": exit_short,
+            "sl_price_long": s_val,
+            "sl_price_short": s_val,
+            "indicator_value": p_series["supertrend"]
+        }
 
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:
         return f"{symbol}_{timeframe}"

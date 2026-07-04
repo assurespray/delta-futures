@@ -135,17 +135,23 @@ class BaseStrategy(ABC):
         """
         Map indicator results to IndicatorCache fields for dashboard display
         and strategy state persistence.
-
-        Must return a dict containing:
-        - current_price: float
-        - primary_name: str — display name for primary indicator (e.g., "Perusu", "Single ST")
-        - primary_signal: int (1 or -1) — primary indicator signal for UI
-        - primary_signal_text: str — "Uptrend" or "Downtrend" for UI
-        - primary_value: float — primary indicator value for UI
-        - secondary_name: str — display name for secondary indicator (e.g., "Sirusu", "EMA 34")
-        - secondary_signal: int — secondary indicator signal for UI
-        - secondary_signal_text: str — secondary signal text for UI
-        - secondary_value: float — secondary indicator value (SL reference)
-        - strategy_state: dict — generic state to persist for next cycle
         """
         ...
+
+    def generate_backtest_signals(self, df) -> None:
+        """
+        Vectorized signal generation for the backtester.
+        
+        Args:
+            df: pandas DataFrame containing OHLCV data.
+            
+        Returns:
+            The same DataFrame with appended columns:
+            - entry_signal (1 for long, -1 for short, 0 for none)
+            - exit_long (bool: True to exit long position)
+            - exit_short (bool: True to exit short position)
+            - sl_price_long (float: stop loss price if long entry triggers)
+            - sl_price_short (float: stop loss price if short entry triggers)
+            - indicator_value (float: main indicator value for logging)
+        """
+        raise NotImplementedError(f"Backtest signal vectorization not implemented for {self.__class__.__name__}")

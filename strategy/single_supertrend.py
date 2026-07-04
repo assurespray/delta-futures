@@ -10,6 +10,8 @@ import logging
 import traceback
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+import numpy as np
+import pandas as pd
 from indicators.supertrend import SuperTrend, SIGNAL_UPTREND, SIGNAL_DOWNTREND
 from api.delta_client import DeltaExchangeClient
 from api.market_data import get_candles
@@ -43,6 +45,53 @@ class SingleSuperTrendStrategy(BaseStrategy):
         self._last_fetch_time: Dict[str, datetime] = {}
         self._last_candle_count: Dict[str, int] = {}
         self._last_processed_candle_time: Dict[str, int] = {}
+
+
+    def generate_backtest_signals(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Vectorized signal generation for the backtester."""
+        candles = df.to_dict('records')
+        st_series = self.supertrend.calculate(candles, return_series=True)
+        
+        n = len(df)
+        if not st_series:
+            return {
+                "entry_signal": np.zeros(n, dtype=int),
+                "exit_long": np.zeros(n, dtype=bool),
+                "exit_short": np.zeros(n, dtype=bool),
+                "sl_price_long": np.zeros(n),
+                "sl_price_short": np.zeros(n),
+                "indicator_value": np.zeros(n)
+            }
+            
+        signal = st_series["signal"]
+        st_val = st_series["supertrend"]
+        
+        # Calculate flips
+        # Shift signal by 1 to detect flips from the previous candle
+        prev_signal = np.roll(signal, 1)
+        prev_signal[0] = signal[0]
+        
+        entry_signal = np.zeros(n, dtype=int)
+        exit_long = np.zeros(n, dtype=bool)
+        exit_short = np.zeros(n, dtype=bool)
+        
+        # Flip up -> long entry
+        entry_signal[(prev_signal == SIGNAL_DOWNTREND) & (signal == SIGNAL_UPTREND)] = 1
+        # Flip down -> short entry
+        entry_signal[(prev_signal == SIGNAL_UPTREND) & (signal == SIGNAL_DOWNTREND)] = -1
+        
+        # Single ST exits on the exact same flip
+        exit_long = (prev_signal == SIGNAL_UPTREND) & (signal == SIGNAL_DOWNTREND)
+        exit_short = (prev_signal == SIGNAL_DOWNTREND) & (signal == SIGNAL_UPTREND)
+        
+        return {
+            "entry_signal": entry_signal,
+            "exit_long": exit_long,
+            "exit_short": exit_short,
+            "sl_price_long": st_val,
+            "sl_price_short": st_val,
+            "indicator_value": st_val
+        }
 
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:
         return f"{symbol}_{timeframe}"

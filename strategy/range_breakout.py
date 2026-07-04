@@ -12,6 +12,7 @@ Exit Logic:
 """
 
 import logging
+import numpy as np
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from indicators.range_identifier import RangeIdentifierLazyBear
@@ -44,6 +45,19 @@ class RangeBreakoutStrategy(BaseStrategy):
         self._last_fetch_time: Dict[str, datetime] = {}
         self._last_candle_count: Dict[str, int] = {}
         self._last_processed_candle_time: Dict[str, int] = {}
+
+
+    def generate_backtest_signals(self, df):
+        import numpy as np
+        n = len(df)
+        return {
+            "entry_signal": np.zeros(n, dtype=int),
+            "exit_long": np.zeros(n, dtype=bool),
+            "exit_short": np.zeros(n, dtype=bool),
+            "sl_price_long": np.zeros(n),
+            "sl_price_short": np.zeros(n),
+            "indicator_value": np.zeros(n)
+        }
 
     def _get_cache_key(self, symbol: str, timeframe: str) -> str:
         return f"{symbol}_{timeframe}"

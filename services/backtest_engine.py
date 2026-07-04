@@ -69,8 +69,8 @@ class BacktestEngine:
         """
         logger.info(f"[BT-ENGINE] Starting backtest using {self.csv_path}")
         
-        perusu = SuperTrend(atr_length=self.perusu_atr, factor=self.perusu_factor, name="Perusu")
-        sirusu = SuperTrend(atr_length=self.sirusu_atr, factor=self.sirusu_factor, name="Sirusu")
+        strategy_name = self.params.get("strategy_name", "dual_supertrend")
+        strategy = StrategyFactory.get_strategy(strategy_name, self.params)
         
         overlap_buffer = pd.DataFrame()
         
@@ -104,24 +104,29 @@ class BacktestEngine:
             # Convert DF to list of dicts for the SuperTrend calculator
             candles = df.to_dict('records')
             
-            # 1. Vectorized Indicator Math
-            perusu_series = perusu.calculate(candles, return_series=True)
-            sirusu_series = sirusu.calculate(candles, return_series=True)
-            
-            if not perusu_series or not sirusu_series:
-                logger.error("[BT-ENGINE] Indicator calculation failed for chunk.")
+            # 1. Vectorized Indicator Math via Strategy
+            try:
+                signals = strategy.generate_backtest_signals(df)
+            except NotImplementedError:
+                logger.error(f"[BT-ENGINE] {strategy_name} does not support backtesting yet.")
+                break
+            except Exception as e:
+                logger.error(f"[BT-ENGINE] Indicator calculation failed for chunk: {e}")
                 continue
                 
             # 2. Extract fast Numpy arrays
-            times = perusu_series["time"]
-            opens = perusu_series["open"]
-            highs = perusu_series["high"]
-            lows = perusu_series["low"]
-            closes = perusu_series["close"]
+            times = df["time"].values
+            opens = df["open"].values
+            highs = df["high"].values
+            lows = df["low"].values
+            closes = df["close"].values
             
-            p_signal = perusu_series["signal"]
-            s_signal = sirusu_series["signal"]
-            s_value = sirusu_series["supertrend"]
+            entry_signal_arr = signals["entry_signal"]
+            exit_long_arr = signals["exit_long"]
+            exit_short_arr = signals["exit_short"]
+            sl_price_long_arr = signals["sl_price_long"]
+            sl_price_short_arr = signals["sl_price_short"]
+            indicator_val_arr = signals["indicator_value"]
             
             # 3. Simulate chronological ticks (the core trading loop)
             # We iterate from start_idx to end of chunk.
@@ -143,28 +148,22 @@ class BacktestEngine:
                     
                     if self.open_trade["direction"] == "long":
                         sl_price = self.open_trade["sl_price"]
-                        # Worst case: Did it wick down to hit SL?
                         if t_low <= sl_price:
                             exit_triggered = True
-                            # If it gapped down past our SL, we exit at the open price (slippage), else at SL
                             exit_price = t_open if t_open < sl_price else sl_price
                             exit_reason = "Stop Loss"
-                            
-                        # If SL wasn't hit, check if the strategy generated an exit signal (Sirusu flip)
-                        elif s_signal[i-1] == SIGNAL_DOWNTREND:
+                        elif exit_long_arr[i-1]:
                             exit_triggered = True
-                            exit_price = t_open  # Exits usually execute at the open of the next candle
+                            exit_price = t_open
                             exit_reason = "Signal Exit"
                             
                     elif self.open_trade["direction"] == "short":
                         sl_price = self.open_trade["sl_price"]
-                        # Worst case: Did it wick up to hit SL?
                         if t_high >= sl_price:
                             exit_triggered = True
                             exit_price = t_open if t_open > sl_price else sl_price
                             exit_reason = "Stop Loss"
-                            
-                        elif s_signal[i-1] == SIGNAL_UPTREND:
+                        elif exit_short_arr[i-1]:
                             exit_triggered = True
                             exit_price = t_open
                             exit_reason = "Signal Exit"
@@ -174,37 +173,33 @@ class BacktestEngine:
                             exit_price=exit_price,
                             exit_time=t_time,
                             reason=exit_reason,
-                            indicator_value=s_value[i-1]
+                            indicator_value=indicator_val_arr[i-1]
                         )
                 
                 # Check for new entries (Only if we don't have an open trade)
                 if not self.open_trade:
-                    # Breakout Logic: Did Perusu flip on the previous candle?
+                    # Breakout Logic: Did the strategy trigger an entry on the previous candle?
                     # Using i-1 ensures we only act on *closed* candle signals.
-                    prev_p_signal = p_signal[i-1]
-                    prev_prev_p_signal = p_signal[i-2] if i >= 2 else prev_p_signal
+                    signal = entry_signal_arr[i-1]
                     
-                    if prev_p_signal != prev_prev_p_signal:
-                        # Signal Flipped!
-                        if prev_p_signal == SIGNAL_UPTREND and self.direction in ["both", "long_only"]:
-                            # Entry triggered at Open of current candle (or Breakout level if specified)
-                            entry_price = t_open
-                            self._open_position(
-                                direction="long",
-                                entry_price=entry_price,
-                                entry_time=t_time,
-                                sl_price=s_value[i-1],
-                                indicator_value=perusu_series["supertrend"][i-1]
-                            )
-                        elif prev_p_signal == SIGNAL_DOWNTREND and self.direction in ["both", "short_only"]:
-                            entry_price = t_open
-                            self._open_position(
-                                direction="short",
-                                entry_price=entry_price,
-                                entry_time=t_time,
-                                sl_price=s_value[i-1],
-                                indicator_value=perusu_series["supertrend"][i-1]
-                            )
+                    if signal == 1 and self.direction in ["both", "long_only"]:
+                        entry_price = t_open
+                        self._open_position(
+                            direction="long",
+                            entry_price=entry_price,
+                            entry_time=t_time,
+                            sl_price=sl_price_long_arr[i-1],
+                            indicator_value=indicator_val_arr[i-1]
+                        )
+                    elif signal == -1 and self.direction in ["both", "short_only"]:
+                        entry_price = t_open
+                        self._open_position(
+                            direction="short",
+                            entry_price=entry_price,
+                            entry_time=t_time,
+                            sl_price=sl_price_short_arr[i-1],
+                            indicator_value=indicator_val_arr[i-1]
+                        )
                             
             # Update progress
             processed_rows += len(chunk)
@@ -221,7 +216,7 @@ class BacktestEngine:
                 exit_price=closes[-1],
                 exit_time=times[-1],
                 reason="End of Data",
-                indicator_value=s_value[-1]
+                indicator_value=indicator_val_arr[-1] if 'indicator_val_arr' in locals() else 0.0
             )
 
         logger.info(f"[BT-ENGINE] Backtest complete. Total Trades: {len(self.trade_log)}. Final Balance: ${self.balance:.2f}")
