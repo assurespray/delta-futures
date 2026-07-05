@@ -47,6 +47,11 @@ class BacktestEngine:
         self.leverage = int(self.params.get("leverage", 1))
         self.lot_size = float(self.params.get("lot_size", 1.0))  # Assuming 1 coin/contract per trade for simplicity
         
+        # Contract multiplier (fixes margin/position size mapping for altcoins)
+        from utils.market_utils import get_contract_multiplier
+        self.symbol = self.params.get("symbol", "BTCUSD")
+        self.contract_multiplier = get_contract_multiplier(self.symbol)
+        
         # State Tracking
         self.balance = self.initial_balance
         self.equity_curve = [self.initial_balance]
@@ -238,7 +243,7 @@ class BacktestEngine:
     def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, indicator_value: float):
         """Open a mock position with exact margin and lot size math."""
         quantity = self.lot_size
-        position_size_usd = entry_price * quantity
+        position_size_usd = entry_price * quantity * self.contract_multiplier
         
         # Initial Margin = Position Notional / Leverage
         initial_margin = position_size_usd / self.leverage if self.leverage > 0 else position_size_usd
@@ -246,7 +251,7 @@ class BacktestEngine:
         # Max Margin Required = Initial Margin + Max Potential Loss (Distance to SL)
         # Assumes the user wants to avoid liquidation before the SL triggers
         sl_distance = abs(entry_price - sl_price)
-        max_potential_loss = sl_distance * quantity
+        max_potential_loss = sl_distance * quantity * self.contract_multiplier
         max_margin_required = initial_margin + max_potential_loss
         
         fee = position_size_usd * PAPER_TRADE_TAKER_FEE
@@ -272,22 +277,24 @@ class BacktestEngine:
         quantity = self.open_trade["quantity"]
         position_size_usd = self.open_trade["position_size_usd"]
         
-        # Calculate PnL
+        # Calculate Gross PnL
         if direction == "long":
-            pnl = (exit_price - entry_price) * quantity
+            gross_pnl = (exit_price - entry_price) * quantity * self.contract_multiplier
         else:
-            pnl = (entry_price - exit_price) * quantity
-            
-        # Add Leverage multiplier
-        pnl *= self.leverage
+            gross_pnl = (entry_price - exit_price) * quantity * self.contract_multiplier
             
         # Calculate Exit Fees (Assuming Market/Taker on exits too to be conservative)
-        exit_notional = exit_price * quantity
+        exit_notional = exit_price * quantity * self.contract_multiplier
         exit_fee = exit_notional * PAPER_TRADE_TAKER_FEE
         
-        net_pnl = pnl - exit_fee
-        self.balance += net_pnl
+        total_fee = self.open_trade["entry_fee"] + exit_fee
+        
+        # Balance was already deducted entry_fee in _open_position
+        # So we only add gross_pnl and subtract exit_fee from balance
+        self.balance += (gross_pnl - exit_fee)
         self.equity_curve.append(self.balance)
+        
+        net_pnl = gross_pnl - total_fee
         
         # Create Trade Record
         self.trade_log.append({
@@ -300,6 +307,8 @@ class BacktestEngine:
             "notional_size": position_size_usd,
             "initial_margin": self.open_trade["initial_margin"],
             "max_margin_required": self.open_trade["max_margin_required"],
+            "gross_pnl": gross_pnl,
+            "fee_paid": total_fee,
             "pnl": net_pnl,
             "pnl_pct": (net_pnl / position_size_usd) * 100.0,
             "roe_pct": (net_pnl / self.open_trade["initial_margin"]) * 100.0 if self.open_trade["initial_margin"] > 0 else 0.0,

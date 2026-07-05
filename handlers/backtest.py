@@ -153,6 +153,7 @@ async def run_backtest_task(
 
         # 3. Run Simulation (Phase 2)
         await _update_ui(0, total_candles, "Warming up simulation engine...", force=True)
+        strategy_params["symbol"] = symbol
         engine = BacktestEngine(csv_path=csv_path, params=strategy_params)
         engine_result = await engine.run(progress_callback=_update_ui)
         
@@ -281,7 +282,8 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Peak Margin Req: `${result.get('peak_margin_required', 0):.2f}`\n\n"
 
         f"💰 **Profitability**\n"
-        f"• Overall Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
+        f"• Overall Net Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
+        f"• Gross Profit: `${result.get('total_gross_profit', result['overall_profit']):.2f}` | Total Fees: `${-result.get('total_fees_paid', 0.0):.2f}`\n"
         f"• No. of Trades: `{result['num_trades']}`\n"
         f"• Win / Loss %: `{result['win_pct']:.2f}%` / `{result['loss_pct']:.2f}%`\n"
         f"• Avg Profit per Trade: `${result['avg_profit_per_trade']:.2f}`\n"
@@ -295,18 +297,23 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Max trades in drawdown: `{result['max_trades_in_drawdown']}`\n\n"
         
         f"📈 **Ratios & Streaks**\n"
+        f"• Reward to Risk Ratio: `{result['reward_to_risk']:.2f}` *(Ideal: > 1.5)*\n"
+        f"• Expectancy Ratio: `{result['expectancy_ratio']:.2f}` *(Ideal: 0.20 - 0.50)*\n"
         f"• Return / MaxDD: `{result['return_over_max_dd']:.2f}`\n"
-        f"• Reward to Risk Ratio: `{result['reward_to_risk']:.2f}`\n"
-        f"• Expectancy Ratio: `{result['expectancy_ratio']:.2f}`\n"
         f"• Max Win Streak: `{result['max_win_streak']}`\n"
         f"• Max Losing Streak: `{result['max_loss_streak']}`\n\n"
         
         + rolling_str +
         
-        f"🔮 **Advanced Analytics**\n"
-        f"• R-Squared: `{result['r_squared']:.3f}`\n"
+        f"🎲 **Monte Carlo Simulations (1,000 runs)**\n"
         f"• Risk of Ruin: `{result['monte_carlo_risk_of_ruin']:.1f}%`\n"
-        f"• Sharpe Ratio: `{result['sharpe_ratio']:.2f}`\n"
+        f"• Worst-Case Drawdown (95% prob): `{result.get('monte_carlo_max_dd_95', 0):.2f}%`\n"
+        f"• Worst-Case Drawdown (99% prob): `{result.get('monte_carlo_max_dd_99', 0):.2f}%`\n\n"
+        
+        f"🔮 **Advanced Analytics**\n"
+        f"• R-Squared: `{result['r_squared']:.3f}` *(Ideal: > 0.80)*\n"
+        f"• Sharpe Ratio: `{result['sharpe_ratio']:.2f}` *(Ideal: > 1.0)*\n"
+        f"• Sortino Ratio: `{result.get('sortino_ratio', 0.0):.2f}`\n"
     )
     
     # We delete the "loading" message and send a fresh one with the photo
@@ -316,8 +323,19 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         pass
         
     try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        keyboard = [
+            [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")]
+        ]
+        
         # Send the massive text report as a separate message first (bypasses 1024 char caption limit)
-        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+        await context.bot.send_message(
+            chat_id=chat_id, 
+            text=text, 
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         
         # Send Photo (No long caption)
         if chart_path and os.path.exists(chart_path):

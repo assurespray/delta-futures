@@ -406,6 +406,7 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [InlineKeyboardButton("📥 Resend Chart & CSV", callback_data=f"bt_resend_{result_id}")],
+        [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
         [InlineKeyboardButton("🗑️ Delete Record", callback_data=f"bt_del_{result_id}")],
         [InlineKeyboardButton("🔙 Back to History", callback_data="bt_history")]
     ]
@@ -510,6 +511,48 @@ async def bt_stop_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+async def bt_glossary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send glossary and benchmark explanations."""
+    query = update.callback_query
+    await query.answer()
+    
+    text = (
+        "📖 **Backtest Glossary & Benchmarks**\n\n"
+        
+        "📊 **Expectancy Ratio**\n"
+        "How much you expect to win on average per dollar risked.\n"
+        "• `< 0.20` (Poor): Lacks an edge. Vulnerable to fees & slippage.\n"
+        "• `0.20 - 0.50` (Good): Sweet spot for sustainable algorithmic/swing strategies.\n"
+        "• `0.50 - 1.00` (Excellent): Exceptional edge, usually long-term trend following.\n"
+        "• `> 1.00` (Suspicious): Highly likely to be overfitted or look-ahead biased.\n\n"
+        
+        "⚖️ **Reward to Risk Ratio**\n"
+        "Average Win divided by Average Loss.\n"
+        "• `> 1.5`: Ideal for most breakout strategies.\n"
+        "• `< 1.0`: You lose more when wrong than you make when right. Requires a very high win rate to survive.\n\n"
+        
+        "📈 **R-Squared (Curve Fit)**\n"
+        "Measures how smooth your equity curve is. `1.0` is a perfect straight line up.\n"
+        "• `> 0.80`: Smooth, steady growth. Highly robust.\n"
+        "• `< 0.50`: Choppy, volatile. Profits come from a few lucky spikes.\n\n"
+        
+        "🛡️ **Sharpe & Sortino Ratios**\n"
+        "Measures Return vs. Volatility (Risk-adjusted return).\n"
+        "• **Sharpe**: Penalizes both upside AND downside volatility. `> 1.0` is great.\n"
+        "• **Sortino**: Better for crypto. Only penalizes downside volatility (losing streaks). `> 1.5` is excellent.\n\n"
+        
+        "🎲 **Monte Carlo (Risk of Ruin)**\n"
+        "We shuffle your trades randomly 1,000 times to simulate alternate realities.\n"
+        "• **Risk of Ruin**: % chance your account would hit a 50% drawdown in a randomized future.\n"
+        "• **Worst-Case 95%/99%**: The maximum drawdown reached in 95% and 99% of those simulated realities. This is your true worst-case scenario."
+    )
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        parse_mode="Markdown"
+    )
+
 def get_backtest_handlers():
     """Return all handlers for backtesting."""
     
@@ -549,4 +592,5 @@ def get_backtest_handlers():
         CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
         CallbackQueryHandler(bt_stop_backtest, pattern="^bt_stop$"),
+        CallbackQueryHandler(bt_glossary, pattern="^bt_glossary$"),
     ]

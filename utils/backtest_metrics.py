@@ -89,11 +89,16 @@ def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str
     
     # Core lists for aggregations
     pnls = [t["pnl"] for t in trade_log]
+    gross_pnls = [t.get("gross_pnl", t["pnl"]) for t in trade_log]
+    fees_paid = [t.get("fee_paid", 0.0) for t in trade_log]
+    
     winning_trades = [pnl for pnl in pnls if pnl > 0]
     losing_trades = [pnl for pnl in pnls if pnl <= 0]  # Consider breakeven as loss/neutral
     
     overall_profit = sum(pnls)
     overall_profit_pct = (overall_profit / initial_balance) * 100.0
+    total_gross_profit = sum(gross_pnls)
+    total_fees_paid = sum(fees_paid)
     
     # Averages
     avg_profit_per_trade = overall_profit / num_trades if num_trades > 0 else 0.0
@@ -201,6 +206,8 @@ def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str
     return {
         "overall_profit": overall_profit,
         "overall_profit_pct": overall_profit_pct,
+        "total_gross_profit": total_gross_profit,
+        "total_fees_paid": total_fees_paid,
         "avg_initial_margin": avg_initial_margin,
         "avg_max_margin_required": avg_max_margin,
         "peak_margin_required": peak_margin,
@@ -238,6 +245,8 @@ def _empty_metrics(initial_balance: float) -> Dict[str, Any]:
     return {
         "overall_profit": 0.0,
         "overall_profit_pct": 0.0,
+        "total_gross_profit": 0.0,
+        "total_fees_paid": 0.0,
         "avg_initial_margin": 0.0,
         "avg_max_margin_required": 0.0,
         "peak_margin_required": 0.0,
