@@ -6,6 +6,7 @@ Fully decoupled from the trading engine to allow isolated unit testing.
 """
 
 import logging
+import pandas as pd
 from typing import List, Dict, Any
 from datetime import datetime, timezone
 
