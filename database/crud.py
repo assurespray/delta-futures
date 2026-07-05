@@ -1315,19 +1315,21 @@ async def get_backtest_results(
         return []
 
 
-async def get_backtest_result_by_id(result_id: str) -> Optional[dict]:
+async def get_backtest_result_by_id(result_id: str, include_arrays: bool = False) -> Optional[dict]:
     """
     Retrieve a single backtest result by its MongoDB _id.
 
     Args:
         result_id: The string representation of the document's ObjectId.
+        include_arrays: Whether to download heavy trade_log and equity_curve arrays.
 
     Returns:
         The backtest result dict, or None if not found.
     """
     try:
         db = mongodb.get_db()
-        doc = await db.backtest_results.find_one({"_id": ObjectId(result_id)})
+        projection = None if include_arrays else {"trade_log": 0, "equity_curve": 0}
+        doc = await db.backtest_results.find_one({"_id": ObjectId(result_id)}, projection)
         if doc:
             doc["_id"] = str(doc["_id"])
         return doc

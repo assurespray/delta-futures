@@ -421,7 +421,7 @@ async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("Generating files, please wait...")
     
     result_id = query.data.replace("bt_resend_", "")
-    r = await get_backtest_result_by_id(result_id)
+    r = await get_backtest_result_by_id(result_id, include_arrays=True)
     
     if not r:
         await query.message.reply_text("❌ Result not found or deleted.")
