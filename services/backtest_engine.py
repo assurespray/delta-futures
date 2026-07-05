@@ -137,11 +137,11 @@ class BacktestEngine:
             # 3. Simulate chronological ticks (the core trading loop)
             # We iterate from start_idx to end of chunk.
             for i in range(start_idx, len(times)):
-                t_time = times[i]
-                t_open = opens[i]
-                t_high = highs[i]
-                t_low = lows[i]
-                t_close = closes[i]
+                t_time = int(times[i])
+                t_open = float(opens[i])
+                t_high = float(highs[i])
+                t_low = float(lows[i])
+                t_close = float(closes[i])
                 
                 # Check for open position exits FIRST
                 if self.open_trade:
@@ -176,17 +176,17 @@ class BacktestEngine:
                             
                     if exit_triggered:
                         self._close_position(
-                            exit_price=exit_price,
+                            exit_price=float(exit_price),
                             exit_time=t_time,
                             reason=exit_reason,
-                            indicator_value=indicator_val_arr[i-1]
+                            indicator_value=float(indicator_val_arr[i-1])
                         )
                 
                 # Check for new entries (Only if we don't have an open trade)
                 if not self.open_trade:
                     # Breakout Logic: Did the strategy trigger an entry on the previous candle?
                     # Using i-1 ensures we only act on *closed* candle signals.
-                    signal = entry_signal_arr[i-1]
+                    signal = int(entry_signal_arr[i-1])
                     
                     if signal == 1 and self.direction in ["both", "long_only"]:
                         entry_price = t_open
@@ -194,8 +194,8 @@ class BacktestEngine:
                             direction="long",
                             entry_price=entry_price,
                             entry_time=t_time,
-                            sl_price=sl_price_long_arr[i-1],
-                            indicator_value=indicator_val_arr[i-1]
+                            sl_price=float(sl_price_long_arr[i-1]),
+                            indicator_value=float(indicator_val_arr[i-1])
                         )
                     elif signal == -1 and self.direction in ["both", "short_only"]:
                         entry_price = t_open
@@ -203,8 +203,8 @@ class BacktestEngine:
                             direction="short",
                             entry_price=entry_price,
                             entry_time=t_time,
-                            sl_price=sl_price_short_arr[i-1],
-                            indicator_value=indicator_val_arr[i-1]
+                            sl_price=float(sl_price_short_arr[i-1]),
+                            indicator_value=float(indicator_val_arr[i-1])
                         )
                 
                 # HARD MEMORY LIMIT: Stop simulating if trades exceed 50,000
@@ -225,10 +225,10 @@ class BacktestEngine:
         # If there's still an open trade at the very end of history, close it out at the final close price
         if self.open_trade:
             self._close_position(
-                exit_price=closes[-1],
-                exit_time=times[-1],
+                exit_price=float(closes[-1]),
+                exit_time=int(times[-1]),
                 reason="End of Data",
-                indicator_value=indicator_val_arr[-1] if 'indicator_val_arr' in locals() else 0.0
+                indicator_value=float(indicator_val_arr[-1]) if 'indicator_val_arr' in locals() else 0.0
             )
 
         logger.info(f"[BT-ENGINE] Backtest complete. Total Trades: {len(self.trade_log)}. Final Balance: ${self.balance:.2f}")
