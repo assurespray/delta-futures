@@ -547,10 +547,15 @@ async def bt_glossary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• **Worst-Case 95%/99%**: The maximum drawdown reached in 95% and 99% of those simulated realities. This is your true worst-case scenario."
     )
     
+    keyboard = [
+        [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
+    ]
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=text,
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 def get_backtest_handlers():

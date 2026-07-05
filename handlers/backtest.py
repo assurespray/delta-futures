@@ -326,7 +326,9 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         
         keyboard = [
-            [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")]
+            [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
+            [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
+            [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
         ]
         
         # Send the massive text report as a separate message first (bypasses 1024 char caption limit)
