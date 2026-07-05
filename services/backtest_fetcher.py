@@ -229,14 +229,12 @@ class BacktestFetcher:
 
             if not candles or len(candles) == 0:
                 consecutive_empty += 1
-                if consecutive_empty >= 2:
+                if consecutive_empty >= 3:
                     logger.warning("[BT-FETCH] Hit empty data in the past (Genesis reached). Stopping backward fetch safely.")
                     break
                 current_end = page_start
                 await asyncio.sleep(API_PAUSE)
                 continue
-
-            consecutive_empty = 0
 
             # Deduplicate within the chunk
             new_rows = []
@@ -248,19 +246,29 @@ class BacktestFetcher:
                         "time": ts, "open": c["open"], "high": c["high"], "low": c["low"], "close": c["close"], "volume": c["volume"]
                     })
 
-            if new_rows:
-                new_rows.sort(key=lambda r: r["time"])
-                
-                # Write to a temporary file for this specific page
-                temp_file = f"{csv_path}.part{page_number}"
-                temp_files.append(temp_file)
-                
-                with open(temp_file, "w", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-                    # No header in temp files
-                    writer.writerows(new_rows)
+            if not new_rows:
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    logger.warning("[BT-FETCH] Hit duplicate out-of-bounds data (Genesis reached). Stopping backward fetch safely.")
+                    break
+                current_end = page_start
+                await asyncio.sleep(API_PAUSE)
+                continue
 
-                total_written += len(new_rows)
+            consecutive_empty = 0
+            
+            new_rows.sort(key=lambda r: r["time"])
+            
+            # Write to a temporary file for this specific page
+            temp_file = f"{csv_path}.part{page_number}"
+            temp_files.append(temp_file)
+            
+            with open(temp_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                # No header in temp files
+                writer.writerows(new_rows)
+
+            total_written += len(new_rows)
 
             if progress_callback:
                 pct_msg = f"Fetching historical data... ({total_written}/{estimated_total} candles)"
