@@ -268,6 +268,27 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Worst Return: `{w.get('worst', 0):+.1f}%` (Wk) | `{m.get('worst', 0):+.1f}%` (Mo)\n\n"
     )
 
+    # Dynamic Leverage Margin Table
+    from utils.market_utils import get_max_leverage
+    max_lev = get_max_leverage(result['symbol'])
+    tiers = [1, 10, 20, 50, 100, 200]
+    
+    avg_notional = result.get('avg_notional_size', 0)
+    avg_sl_risk = result.get('avg_stop_loss_risk', 0)
+    
+    margin_table_lines = [f"• Sizing: `{result.get('lot_size', 0)} Contracts` (Avg Notional: `${avg_notional:.2f}`)"]
+    for lev in tiers:
+        if lev <= max_lev:
+            im = avg_notional / lev if lev > 0 else avg_notional
+            safe = im + avg_sl_risk
+            margin_table_lines.append(f"• `{lev}x` Lev: `${im:.2f}` Initial | `${safe:.2f}` Safe")
+    if max_lev not in tiers:
+        im_max = avg_notional / max_lev if max_lev > 0 else avg_notional
+        safe_max = im_max + avg_sl_risk
+        margin_table_lines.append(f"• `{int(max_lev)}x` Lev (Max): `${im_max:.2f}` Initial | `${safe_max:.2f}` Safe")
+        
+    margin_table_str = "\n".join(margin_table_lines)
+
     text = (
         f"📊 **Backtest Complete: {result['symbol']} ({result['timeframe']})**\n"
         f"⏱️ Analyzed {result['total_candles']:,} candles in {result['run_duration_seconds']:.1f}s\n\n"
@@ -275,11 +296,9 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"⚙️ **Configuration**\n"
         f"{config_str}\n\n"
         
-        f"🏦 **Capital & Margin Requirements**\n"
-        f"• Sizing: `{result.get('lot_size', 0)} Contracts` @ `{result.get('leverage', 1)}x Lev`\n"
-        f"• Avg Initial Margin: `${result.get('avg_initial_margin', 0):.2f}`\n"
-        f"• Avg Safe Margin: `${result.get('avg_max_margin_required', 0):.2f}`\n"
-        f"• Peak Margin Req: `${result.get('peak_margin_required', 0):.2f}`\n\n"
+        f"🏦 **Margin Required per Trade (Avg)**\n"
+        f"{margin_table_str}\n"
+        f"*(Peak Margin hit during test: ${result.get('peak_margin_required', 0):.2f})*\n\n"
 
         f"💰 **Profitability**\n"
         f"• Overall Net Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
