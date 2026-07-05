@@ -1298,7 +1298,11 @@ async def get_backtest_results(
         if sort_by not in allowed_sort_fields:
             sort_by = "created_at"
 
-        cursor = db.backtest_results.find(query).sort(sort_by, sort_order).limit(limit)
+        # Apply MongoDB Projection to exclude heavy array data for fast menu rendering
+        cursor = db.backtest_results.find(
+            query, 
+            {"trade_log": 0, "equity_curve": 0}
+        ).sort(sort_by, sort_order).limit(limit)
         results = await cursor.to_list(length=limit)
 
         # Convert ObjectId to string for JSON safety
@@ -1389,7 +1393,11 @@ async def get_backtest_summary(user_id: str) -> dict:
     """
     try:
         db = mongodb.get_db()
-        cursor = db.backtest_results.find({"user_id": user_id})
+        # Apply MongoDB Projection to exclude heavy array data for fast calculation
+        cursor = db.backtest_results.find(
+            {"user_id": user_id}, 
+            {"trade_log": 0, "equity_curve": 0}
+        )
         results = await cursor.to_list(length=500)
 
         if not results:

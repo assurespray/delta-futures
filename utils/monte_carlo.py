@@ -45,8 +45,10 @@ def run_advanced_analytics(trade_log: List[Dict], initial_balance: float) -> Dic
         "sharpe_ratio": sharpe,
         "sortino_ratio": sortino,
         "monte_carlo_risk_of_ruin": mc_results["risk_of_ruin_pct"],
-        "monte_carlo_max_dd_95": mc_results["max_dd_95"],
-        "monte_carlo_max_dd_99": mc_results["max_dd_99"],
+        "monte_carlo_max_dd_95_pct": mc_results["max_dd_95_pct"],
+        "monte_carlo_max_dd_95_usd": mc_results["max_dd_95_usd"],
+        "monte_carlo_max_dd_99_pct": mc_results["max_dd_99_pct"],
+        "monte_carlo_max_dd_99_usd": mc_results["max_dd_99_usd"],
     }
 
 
@@ -130,7 +132,6 @@ def _run_monte_carlo(pnls: List[float], initial_balance: float, iterations: int 
     try:
         max_drawdowns = []
         ruined_count = 0
-        ruin_balance = initial_balance * (1.0 - ruin_threshold_pct)
         
         # Convert to numpy array for faster shuffling
         pnls_arr = np.array(pnls)
@@ -139,27 +140,26 @@ def _run_monte_carlo(pnls: List[float], initial_balance: float, iterations: int 
             # Shuffle in place
             np.random.shuffle(pnls_arr)
             
-            running_balance = initial_balance
-            peak_balance = initial_balance
-            max_dd_pct = 0.0
-            ruined = False
-            
             # Fast numpy cumulative sum to build equity curve
             cumulative = initial_balance + np.cumsum(pnls_arr)
             
             # Use numpy functions for fast DD calculation
             peaks = np.maximum.accumulate(cumulative)
             drawdowns = (peaks - cumulative) / peaks
+            drawdowns_usd = peaks - cumulative
             
-            max_dd_pct = np.max(drawdowns) * 100.0
-            max_drawdowns.append(max_dd_pct)
+            max_dd_pct = float(np.max(drawdowns) * 100.0)
+            max_dd_usd = float(np.max(drawdowns_usd))
             
-            # Check for ruin
-            if np.any(cumulative <= ruin_balance):
+            # Store tuple of (pct, usd) so they stay paired when sorting
+            max_drawdowns.append((max_dd_pct, max_dd_usd))
+            
+            # Institutional Risk of Ruin: Probability of taking a X% Peak-to-Trough Drawdown at ANY point
+            if max_dd_pct >= ruin_threshold_pct * 100.0:
                 ruined_count += 1
                 
-        # Calculate Percentiles
-        max_drawdowns.sort()
+        # Calculate Percentiles (sort by percentage)
+        max_drawdowns.sort(key=lambda x: x[0])
         idx_95 = int(iterations * 0.95)
         idx_99 = int(iterations * 0.99)
         
@@ -169,16 +169,20 @@ def _run_monte_carlo(pnls: List[float], initial_balance: float, iterations: int 
         
         return {
             "risk_of_ruin_pct": (ruined_count / iterations) * 100.0,
-            "max_dd_95": float(max_drawdowns[idx_95]),
-            "max_dd_99": float(max_drawdowns[idx_99])
+            "max_dd_95_pct": max_drawdowns[idx_95][0],
+            "max_dd_95_usd": max_drawdowns[idx_95][1],
+            "max_dd_99_pct": max_drawdowns[idx_99][0],
+            "max_dd_99_usd": max_drawdowns[idx_99][1]
         }
         
     except Exception as e:
         logger.error(f"[BT-ANALYTICS] Error running Monte Carlo: {e}")
         return {
             "risk_of_ruin_pct": 0.0,
-            "max_dd_95": 0.0,
-            "max_dd_99": 0.0
+            "max_dd_95_pct": 0.0,
+            "max_dd_95_usd": 0.0,
+            "max_dd_99_pct": 0.0,
+            "max_dd_99_usd": 0.0
         }
 
 
@@ -189,6 +193,8 @@ def _empty_analytics() -> Dict[str, float]:
         "sharpe_ratio": 0.0,
         "sortino_ratio": 0.0,
         "monte_carlo_risk_of_ruin": 0.0,
-        "monte_carlo_max_dd_95": 0.0,
-        "monte_carlo_max_dd_99": 0.0,
+        "monte_carlo_max_dd_95_pct": 0.0,
+        "monte_carlo_max_dd_95_usd": 0.0,
+        "monte_carlo_max_dd_99_pct": 0.0,
+        "monte_carlo_max_dd_99_usd": 0.0,
     }

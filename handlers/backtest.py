@@ -307,8 +307,8 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         
         f"🎲 **Monte Carlo Simulations (1,000 runs)**\n"
         f"• Risk of Ruin: `{result['monte_carlo_risk_of_ruin']:.1f}%`\n"
-        f"• Worst-Case Drawdown (95% prob): `{result.get('monte_carlo_max_dd_95', 0):.2f}%`\n"
-        f"• Worst-Case Drawdown (99% prob): `{result.get('monte_carlo_max_dd_99', 0):.2f}%`\n\n"
+        f"• Worst-Case Drawdown (95% prob): `${-result.get('monte_carlo_max_dd_95_usd', 0):.2f}` ({result.get('monte_carlo_max_dd_95_pct', 0):.2f}%)\n"
+        f"• Worst-Case Drawdown (99% prob): `${-result.get('monte_carlo_max_dd_99_usd', 0):.2f}` ({result.get('monte_carlo_max_dd_99_pct', 0):.2f}%)\n\n"
         
         f"🔮 **Advanced Analytics**\n"
         f"• R-Squared: `{result['r_squared']:.3f}` *(Ideal: > 0.80)*\n"
