@@ -168,6 +168,15 @@ async def run_backtest_task(
         
         # 5. Build Final Result Document
         run_duration = time.time() - start_cpu_time
+        
+        # Optimize DB storage: MongoDB Free Tier limits
+        db_trade_log = trade_log
+        db_equity_curve = equity_curve
+        if len(trade_log) > 2500:
+            logger.info(f"[BT-TASK] Truncating DB trade log from {len(trade_log)} to 2500 to save Atlas free tier space.")
+            db_trade_log = trade_log[:2500]
+            db_equity_curve = equity_curve[:2500]
+            
         final_result = {
             "user_id": user_id,
             "symbol": symbol,
@@ -181,8 +190,8 @@ async def run_backtest_task(
             "backtest_start": datetime.fromtimestamp(start_ts, tz=timezone.utc),
             "backtest_end": datetime.fromtimestamp(end_ts, tz=timezone.utc),
             "total_candles": total_candles,
-            "trade_log": trade_log,
-            "equity_curve": equity_curve,
+            "trade_log": db_trade_log,
+            "equity_curve": db_equity_curve,
             "run_duration_seconds": run_duration,
             "created_at": datetime.utcnow()
         }

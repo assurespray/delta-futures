@@ -18,8 +18,11 @@ def calculate_rolling_stats(trade_log: List[Dict], initial_balance: float) -> Di
         return {"weekly": None, "monthly": None}
     
     try:
-        # Build daily equity series
-        df = pd.DataFrame(trade_log)
+        # Build daily equity series (Optimized to only load required columns)
+        df = pd.DataFrame({
+            'exit_time': [t['exit_time'] for t in trade_log],
+            'pnl': [t['pnl'] for t in trade_log]
+        })
         df['date'] = pd.to_datetime(df['exit_time'], unit='s', utc=True).dt.floor('D')
         
         df['cumulative_pnl'] = df['pnl'].cumsum()

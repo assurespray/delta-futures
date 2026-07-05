@@ -54,6 +54,12 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
             times.append(dt)
             balances.append(current_balance)
             
+        # RAM Optimization: Downsample massive charts to prevent Matplotlib OOM
+        if len(times) > 5000:
+            step = len(times) // 5000
+            times = times[::step]
+            balances = balances[::step]
+            
         # Plotting styling
         plt.style.use('dark_background')
         fig, ax = plt.subplots(figsize=(10, 5), dpi=150)

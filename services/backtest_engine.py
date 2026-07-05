@@ -201,6 +201,12 @@ class BacktestEngine:
                             sl_price=sl_price_short_arr[i-1],
                             indicator_value=indicator_val_arr[i-1]
                         )
+                
+                # HARD MEMORY LIMIT: Stop simulating if trades exceed 50,000
+                if len(self.trade_log) >= 50000:
+                    logger.warning(f"[BT-ENGINE] Trade limit reached (50,000). Stopping simulation early to save memory.")
+                    self._abort = True
+                    break
                             
             # Update progress
             processed_rows += len(chunk)
