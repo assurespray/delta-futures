@@ -46,7 +46,10 @@ def calculate_rolling_stats(trade_log: List[Dict], initial_balance: float) -> Di
             if len(daily_balances) <= days:
                 return None
             rolling_returns = daily_balances.pct_change(periods=days) * 100.0
+            rolling_usd = daily_balances.diff(periods=days)
+            
             rolling_returns = rolling_returns.dropna()
+            rolling_usd = rolling_usd.dropna()
             
             if len(rolling_returns) == 0:
                 return None
@@ -57,6 +60,8 @@ def calculate_rolling_stats(trade_log: List[Dict], initial_balance: float) -> Di
             return {
                 "best": float(rolling_returns.max()),
                 "worst": float(rolling_returns.min()),
+                "best_usd": float(rolling_usd.max()),
+                "worst_usd": float(rolling_usd.min()),
                 "avg": float(rolling_returns.mean()),
                 "win_rate": float((wins / total) * 100.0) if total > 0 else 0.0
             }

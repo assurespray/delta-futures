@@ -310,8 +310,10 @@ def format_report_text(result: dict) -> str:
     rolling_str = (
         f"🔄 **Rolling Consistency**\n"
         f"• Profitable: `{w.get('win_rate', 0):.1f}%` (Wk) | `{m.get('win_rate', 0):.1f}%` (Mo)\n"
-        f"• Best Return: `{w.get('best', 0):+.1f}%` (Wk) | `{m.get('best', 0):+.1f}%` (Mo)\n"
-        f"• Worst Return: `{w.get('worst', 0):+.1f}%` (Wk) | `{m.get('worst', 0):+.1f}%` (Mo)\n\n"
+        f"• Best Wk: `${w.get('best_usd', 0):+.2f}` ({w.get('best', 0):+.1f}%)\n"
+        f"• Best Mo: `${m.get('best_usd', 0):+.2f}` ({m.get('best', 0):+.1f}%)\n"
+        f"• Worst Wk: `${w.get('worst_usd', 0):+.2f}` ({w.get('worst', 0):+.1f}%)\n"
+        f"• Worst Mo: `${m.get('worst_usd', 0):+.2f}` ({m.get('worst', 0):+.1f}%)\n\n"
     )
     
     lev = result.get('leverage', 1)
