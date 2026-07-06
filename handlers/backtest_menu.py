@@ -26,7 +26,6 @@ BT_SELECT_ASSET = 802
 BT_SELECT_TIMEFRAME = 803
 BT_SELECT_DURATION = 804
 BT_CUSTOM_DATE = 805
-BT_SELECT_CAPITAL = 806
 BT_SELECT_LOT_SIZE = 807
 
 
@@ -197,70 +196,24 @@ async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def bt_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 4: Ask for Starting Capital."""
+    """Step 4: Ask for Lot Size."""
     query = update.callback_query
     await query.answer()
     
     tf = query.data.replace("bt_tf_", "")
     context.user_data['bt_timeframe'] = tf
-    
-    preset_name = context.user_data['bt_preset']['preset_name']
-    asset = context.user_data['bt_asset']
-    
-    text = (
-        f"🧪 **Step 4: Starting Capital**\n\n"
-        f"**Strategy:** {preset_name}\n"
-        f"**Asset:** {asset}\n"
-        f"**Timeframe:** {tf}\n\n"
-        f"What is your simulated starting account balance?\n"
-        f"*(Select an option or type a custom number in chat)*"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("$500", callback_data="bt_cap_500"), InlineKeyboardButton("$1,000", callback_data="bt_cap_1000")],
-        [InlineKeyboardButton("$5,000", callback_data="bt_cap_5000"), InlineKeyboardButton("$10,000", callback_data="bt_cap_10000")],
-        [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
-    ]
-    
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    return BT_SELECT_CAPITAL
-
-
-async def bt_capital_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 4b: Handle Capital Button Click"""
-    query = update.callback_query
-    await query.answer()
-    cap = query.data.replace("bt_cap_", "")
-    context.user_data['bt_capital'] = float(cap)
     return await bt_ask_lot_size(query, context)
-
-
-async def bt_capital_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 4b: Handle Custom Capital Typed"""
-    val = update.message.text.strip()
-    try:
-        cap = float(val)
-        if cap <= 0: raise ValueError
-    except ValueError:
-        await update.message.reply_text("❌ Please enter a valid positive number for capital:")
-        return BT_SELECT_CAPITAL
-        
-    context.user_data['bt_capital'] = cap
-    message = await update.message.reply_text("Processing...", parse_mode="Markdown")
-    
-    class MockQuery:
-        def __init__(self, msg):
-            self.message = msg
-        async def edit_message_text(self, *args, **kwargs):
-            return await self.message.edit_text(*args, **kwargs)
-            
-    return await bt_ask_lot_size(MockQuery(message), context)
-
 
 async def bt_ask_lot_size(query, context: ContextTypes.DEFAULT_TYPE):
     """Step 5: Ask for Lot Size."""
+    preset_name = context.user_data['bt_preset']['preset_name']
+    asset = context.user_data['bt_asset']
+    tf = context.user_data['bt_timeframe']
+    
     text = (
-        f"🧪 **Step 5: Lot Size**\n\n"
+        f"🧪 **Step 4: Lot Size**\n\n"
+        f"**Strategy:** {preset_name}\n"
+        f"**Asset:** {asset} ({tf})\n\n"
         f"How many lots (contracts) do you want to trade per signal?\n"
         f"*(Select an option or type a custom number)*"
     )
@@ -309,14 +262,13 @@ async def bt_ask_duration(query, context: ContextTypes.DEFAULT_TYPE):
     preset_name = context.user_data['bt_preset']['preset_name']
     asset = context.user_data['bt_asset']
     tf = context.user_data['bt_timeframe']
-    cap = context.user_data['bt_capital']
     lot = context.user_data['bt_lot_size']
     
     text = (
-        f"🧪 **Step 6: Select Duration**\n\n"
+        f"🧪 **Step 5: Select Duration**\n\n"
         f"**Strategy:** {preset_name}\n"
         f"**Asset:** {asset} ({tf})\n"
-        f"**Capital:** ${cap:,.2f} | **Lot Size:** {lot}\n\n"
+        f"**Lot Size:** {lot}\n\n"
         f"Choose how much historical data to download and test:"
     )
     
@@ -407,8 +359,7 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
     if "parameters" in preset:
         strategy_params.update(preset["parameters"])
         
-    # Explicitly overwrite lot_size and initial_balance with user's sandbox selections
-    strategy_params["initial_balance"] = float(context.user_data.get('bt_capital', 10000.0))
+    # Explicitly overwrite lot_size with user's sandbox selection
     strategy_params["lot_size"] = float(context.user_data.get('bt_lot_size', 1.0))
         
     loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\n\n⏳ Please wait..."
@@ -487,33 +438,31 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
         
-    # Build Configuration block
-    params = r.get('strategy_params', {})
-    config_lines = [
-        f"• Strategy: {r.get('strategy', 'Unknown').replace('_', ' ').title()}",
-        f"• Direction: {r.get('direction', 'both').upper()}",
-    ]
-    for k, v in params.items():
-        if k not in ['strategy_name', 'direction', 'lot_size', 'initial_balance', 'leverage', 'paper_leverage']:
-            config_lines.append(f"• {k.replace('_', ' ').title()}: {v}")
-    config_str = "\n".join(config_lines)
-
-    rs = r.get('rolling_stats') or {}
-    m = rs.get('monthly') or {}
+    from handlers.backtest import format_report_text
+    from utils.market_utils import get_max_leverage
     
-    text = (
-        f"📊 **Backtest Record: {r.get('symbol', 'Unknown')} ({r.get('timeframe', 'Unknown')})**\n"
-        f"Run Date: `{r.get('created_at', 'Unknown')}`\n\n"
-        f"⚙️ **Configuration**\n{config_str}\n\n"
-        f"🏦 **Avg Safe Margin:** `${r.get('avg_max_margin_required', 0):.2f}`\n\n"
-        f"💰 **Profit:** `${r.get('overall_profit', 0):.2f}` ({r.get('overall_profit_pct', 0):.2f}%)\n"
-        f"📉 **Max DD:** `${r.get('max_drawdown', 0):.2f}` ({r.get('max_drawdown_pct', 0):.2f}%)\n"
-        f"🎯 **Win Rate:** `{r.get('win_pct', 0):.2f}%`\n"
-        f"🔄 **Monthly Profitable:** `{m.get('win_rate', 0):.1f}%`\n"
-        f"🔮 **R-Squared:** `{r.get('r_squared', 0):.3f}`\n"
-    )
+    text = format_report_text(r)
     
-    keyboard = [
+    max_lev = get_max_leverage(r.get('symbol', 'BTCUSD'))
+    std_tiers = [1, 2, 3, 5, 10, 25, 50, 100, 200]
+    valid_tiers = [t for t in std_tiers if t <= max_lev]
+    if max_lev not in valid_tiers:
+        valid_tiers.append(int(max_lev))
+        valid_tiers.sort()
+        
+    btn_rows = []
+    current_row = []
+    current_lev = r.get('leverage', 1)
+    for t in valid_tiers:
+        prefix = "✅ " if t == current_lev else "🔍 "
+        current_row.append(InlineKeyboardButton(f"{prefix}{t}x", callback_data=f"bt_recalc_{result_id}_{t}"))
+        if len(current_row) >= 5:
+            btn_rows.append(current_row)
+            current_row = []
+    if current_row:
+        btn_rows.append(current_row)
+        
+    keyboard = btn_rows + [
         [InlineKeyboardButton("📥 Resend Chart & CSV", callback_data=f"bt_resend_{result_id}")],
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
         [InlineKeyboardButton("🗑️ Delete Record", callback_data=f"bt_del_{result_id}")],
@@ -522,6 +471,82 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+
+async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Instantly recalculate and update the backtest report for a new leverage."""
+    query = update.callback_query
+    await query.answer("Recalculating...")
+    
+    # data format: bt_recalc_{result_id}_{leverage}
+    parts = query.data.replace("bt_recalc_", "").split("_")
+    if len(parts) != 2:
+        return
+        
+    result_id, lev_str = parts[0], parts[1]
+    new_leverage = float(lev_str)
+    
+    # Fetch full result (including heavy arrays)
+    r = await get_backtest_result_by_id(result_id, include_arrays=True)
+    if not r:
+        await query.message.reply_text("❌ Result not found or deleted.")
+        return
+        
+    trade_log = r.get("trade_log", [])
+    if not trade_log:
+        await query.message.reply_text("❌ No trade log data available for recalculation.")
+        return
+        
+    from handlers.backtest import recalculate_metrics_with_auto_capital, format_report_text
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from utils.market_utils import get_max_leverage
+    
+    # Recalculate everything!
+    auto_cap, peak_m, max_dd_usd, metrics, advanced = recalculate_metrics_with_auto_capital(trade_log, new_leverage)
+    
+    # Update result dictionary with new stats so the text formatter gets the updated values
+    r.update(metrics)
+    r.update(advanced)
+    r["leverage"] = new_leverage
+    r["initial_balance"] = auto_cap
+    r["peak_margin_required"] = peak_m
+    
+    # Generate new text
+    text = format_report_text(r)
+    
+    # Rebuild keyboard
+    max_lev = get_max_leverage(r['symbol'])
+    std_tiers = [1, 2, 3, 5, 10, 25, 50, 100, 200]
+    valid_tiers = [t for t in std_tiers if t <= max_lev]
+    if max_lev not in valid_tiers:
+        valid_tiers.append(int(max_lev))
+        valid_tiers.sort()
+        
+    btn_rows = []
+    current_row = []
+    for t in valid_tiers:
+        # Checkmark the currently active leverage
+        prefix = "✅ " if t == new_leverage else "🔍 "
+        current_row.append(InlineKeyboardButton(f"{prefix}{t}x", callback_data=f"bt_recalc_{result_id}_{t}"))
+        if len(current_row) >= 5:
+            btn_rows.append(current_row)
+            current_row = []
+    if current_row:
+        btn_rows.append(current_row)
+        
+    keyboard = btn_rows + [
+        [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
+        [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
+        [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
+    ]
+    
+    try:
+        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except Exception as e:
+        # If it's a text message without caption
+        try:
+            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e2:
+            pass
 
 
 async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -683,10 +708,6 @@ def get_backtest_handlers():
             BT_SELECT_TIMEFRAME: [
                 CallbackQueryHandler(bt_timeframe_selected, pattern="^bt_tf_")
             ],
-            BT_SELECT_CAPITAL: [
-                CallbackQueryHandler(bt_capital_callback, pattern="^bt_cap_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_capital_received)
-            ],
             BT_SELECT_LOT_SIZE: [
                 CallbackQueryHandler(bt_lot_callback, pattern="^bt_lot_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bt_lot_received)
@@ -711,6 +732,7 @@ def get_backtest_handlers():
         CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history$"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
+        CallbackQueryHandler(bt_recalc_leverage, pattern="^bt_recalc_"),
         CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
         CallbackQueryHandler(bt_stop_backtest, pattern="^bt_stop$"),
