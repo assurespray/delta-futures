@@ -325,8 +325,9 @@ def format_report_text(result: dict) -> str:
         
         f"🏦 **Capital Required (Auto-Sized for {int(lev)}x Lev)**\n"
         f"• Sizing: `{result.get('lot_size', 0)} Contracts` (Avg Notional: `${result.get('avg_notional_size', 0):.2f}`)\n"
-        f"• Peak Margin Required: `${result.get('peak_margin_required', 0):.2f}`\n"
-        f"• Max Historical Drawdown: `${result.get('monte_carlo_max_dd_99_usd', 0):.2f}`\n"
+        f"• Initial Margin (Avg): `${result.get('avg_initial_margin', 0):.2f}`\n"
+        f"• Stop-Loss Buffer (Peak): `${max(0.0, result.get('peak_margin_required', 0) - result.get('avg_initial_margin', 0)):.2f}`\n"
+        f"• Max Historical Drawdown: `${abs(result.get('max_drawdown', 0)):.2f}`\n"
         f"• Recommended Deposit: `${result.get('initial_balance', 0):.2f}`\n\n"
 
         f"💰 **Profitability**\n"
