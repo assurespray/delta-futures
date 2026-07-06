@@ -258,7 +258,7 @@ async def run_backtest_task(
         
         # 7. Generate Files (Phase 4)
         await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
-        chart_path = generate_equity_curve_chart(trade_log, initial_balance, symbol, timeframe)
+        chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, timeframe)
         csv_path = generate_trade_log_csv(trade_log, symbol, timeframe)
         
         # 8. Send Final Report
