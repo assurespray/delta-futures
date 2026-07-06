@@ -26,6 +26,8 @@ BT_SELECT_ASSET = 802
 BT_SELECT_TIMEFRAME = 803
 BT_SELECT_DURATION = 804
 BT_CUSTOM_DATE = 805
+BT_SELECT_CAPITAL = 806
+BT_SELECT_LOT_SIZE = 807
 
 
 async def menu_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +197,7 @@ async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def bt_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 4: Ask for duration."""
+    """Step 4: Ask for Starting Capital."""
     query = update.callback_query
     await query.answer()
     
@@ -206,10 +208,115 @@ async def bt_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TY
     asset = context.user_data['bt_asset']
     
     text = (
-        f"🧪 **Step 4: Select Duration**\n\n"
+        f"🧪 **Step 4: Starting Capital**\n\n"
         f"**Strategy:** {preset_name}\n"
         f"**Asset:** {asset}\n"
         f"**Timeframe:** {tf}\n\n"
+        f"What is your simulated starting account balance?\n"
+        f"*(Select an option or type a custom number in chat)*"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("$500", callback_data="bt_cap_500"), InlineKeyboardButton("$1,000", callback_data="bt_cap_1000")],
+        [InlineKeyboardButton("$5,000", callback_data="bt_cap_5000"), InlineKeyboardButton("$10,000", callback_data="bt_cap_10000")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
+    ]
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return BT_SELECT_CAPITAL
+
+
+async def bt_capital_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 4b: Handle Capital Button Click"""
+    query = update.callback_query
+    await query.answer()
+    cap = query.data.replace("bt_cap_", "")
+    context.user_data['bt_capital'] = float(cap)
+    return await bt_ask_lot_size(query, context)
+
+
+async def bt_capital_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 4b: Handle Custom Capital Typed"""
+    val = update.message.text.strip()
+    try:
+        cap = float(val)
+        if cap <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Please enter a valid positive number for capital:")
+        return BT_SELECT_CAPITAL
+        
+    context.user_data['bt_capital'] = cap
+    message = await update.message.reply_text("Processing...", parse_mode="Markdown")
+    
+    class MockQuery:
+        def __init__(self, msg):
+            self.message = msg
+        async def edit_message_text(self, *args, **kwargs):
+            return await self.message.edit_text(*args, **kwargs)
+            
+    return await bt_ask_lot_size(MockQuery(message), context)
+
+
+async def bt_ask_lot_size(query, context: ContextTypes.DEFAULT_TYPE):
+    """Step 5: Ask for Lot Size."""
+    text = (
+        f"🧪 **Step 5: Lot Size**\n\n"
+        f"How many lots (contracts) do you want to trade per signal?\n"
+        f"*(Select an option or type a custom number)*"
+    )
+    keyboard = [
+        [InlineKeyboardButton("1 Lot", callback_data="bt_lot_1"), InlineKeyboardButton("10 Lots", callback_data="bt_lot_10")],
+        [InlineKeyboardButton("100 Lots", callback_data="bt_lot_100"), InlineKeyboardButton("1000 Lots", callback_data="bt_lot_1000")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return BT_SELECT_LOT_SIZE
+
+
+async def bt_lot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 5b: Handle Lot Button Click"""
+    query = update.callback_query
+    await query.answer()
+    lot = query.data.replace("bt_lot_", "")
+    context.user_data['bt_lot_size'] = float(lot)
+    return await bt_ask_duration(query, context)
+
+
+async def bt_lot_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 5b: Handle Custom Lot Typed"""
+    val = update.message.text.strip()
+    try:
+        lot = float(val)
+        if lot <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Please enter a valid positive number for lot size:")
+        return BT_SELECT_LOT_SIZE
+        
+    context.user_data['bt_lot_size'] = lot
+    message = await update.message.reply_text("Processing...", parse_mode="Markdown")
+    
+    class MockQuery:
+        def __init__(self, msg):
+            self.message = msg
+        async def edit_message_text(self, *args, **kwargs):
+            return await self.message.edit_text(*args, **kwargs)
+            
+    return await bt_ask_duration(MockQuery(message), context)
+
+
+async def bt_ask_duration(query, context: ContextTypes.DEFAULT_TYPE):
+    """Step 6: Ask for duration."""
+    preset_name = context.user_data['bt_preset']['preset_name']
+    asset = context.user_data['bt_asset']
+    tf = context.user_data['bt_timeframe']
+    cap = context.user_data['bt_capital']
+    lot = context.user_data['bt_lot_size']
+    
+    text = (
+        f"🧪 **Step 6: Select Duration**\n\n"
+        f"**Strategy:** {preset_name}\n"
+        f"**Asset:** {asset} ({tf})\n"
+        f"**Capital:** ${cap:,.2f} | **Lot Size:** {lot}\n\n"
         f"Choose how much historical data to download and test:"
     )
     
@@ -295,12 +402,14 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
     strategy_params = {
         "strategy_name": preset.get("strategy_type", "dual_supertrend"),
         "direction": preset.get("parameters", {}).get("direction", "both"),
-        "lot_size": 1,
-        "initial_balance": 10000.0,
         "leverage": 10
     }
     if "parameters" in preset:
         strategy_params.update(preset["parameters"])
+        
+    # Explicitly overwrite lot_size and initial_balance with user's sandbox selections
+    strategy_params["initial_balance"] = float(context.user_data.get('bt_capital', 10000.0))
+    strategy_params["lot_size"] = float(context.user_data.get('bt_lot_size', 1.0))
         
     loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\n\n⏳ Please wait..."
     
@@ -573,6 +682,14 @@ def get_backtest_handlers():
             ],
             BT_SELECT_TIMEFRAME: [
                 CallbackQueryHandler(bt_timeframe_selected, pattern="^bt_tf_")
+            ],
+            BT_SELECT_CAPITAL: [
+                CallbackQueryHandler(bt_capital_callback, pattern="^bt_cap_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_capital_received)
+            ],
+            BT_SELECT_LOT_SIZE: [
+                CallbackQueryHandler(bt_lot_callback, pattern="^bt_lot_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_lot_received)
             ],
             BT_SELECT_DURATION: [
                 CallbackQueryHandler(bt_duration_selected, pattern="^bt_dur_")
