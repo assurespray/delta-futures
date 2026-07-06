@@ -29,6 +29,55 @@ logger = logging.getLogger(__name__)
 # Telegram limits edits to ~1 per second. 3-4s is safe.
 UI_UPDATE_INTERVAL = 3.5 
 
+import numpy as np
+
+def recalculate_metrics_with_auto_capital(trade_log: list, leverage: float):
+    """
+    Recalculates trade margins for a specific leverage,
+    calculates Auto-Capital (Peak Margin + Max DD),
+    and re-runs the advanced metrics.
+    Modifies trade_log IN PLACE.
+    """
+    if not trade_log:
+        return 100.0, 0.0, 0.0, calculate_metrics([], 100.0), run_advanced_analytics([], 100.0)
+        
+    # First, calculate absolute Max Drawdown USD
+    pnls = [t["pnl"] for t in trade_log]
+    cumulative = np.cumsum(pnls)
+    peaks = np.maximum.accumulate(cumulative)
+    drawdowns = peaks - cumulative
+    max_dd_usd = float(np.max(drawdowns)) if len(drawdowns) > 0 else 0.0
+    
+    # Recalculate margins per trade based on new leverage
+    peak_margin = 0.0
+    for t in trade_log:
+        notional = t.get("notional_size", 0.0)
+        old_im = t.get("initial_margin", 0.0)
+        old_max_m = t.get("max_margin_required", 0.0)
+        sl_risk = max(0.0, old_max_m - old_im)
+        
+        new_im = notional / leverage if leverage > 0 else notional
+        new_max_m = new_im + sl_risk
+        
+        t["initial_margin"] = new_im
+        t["max_margin_required"] = new_max_m
+        t["roe_pct"] = (t["pnl"] / new_im) * 100.0 if new_im > 0 else 0.0
+        
+        if new_max_m > peak_margin:
+            peak_margin = new_max_m
+            
+    auto_capital = peak_margin + max_dd_usd
+    if auto_capital <= 0:
+        auto_capital = 100.0 # Safety fallback
+        
+    from utils.backtest_metrics import calculate_metrics
+    from utils.monte_carlo import run_advanced_analytics
+    metrics = calculate_metrics(trade_log, auto_capital)
+    advanced = run_advanced_analytics(trade_log, auto_capital)
+    
+    return auto_capital, peak_margin, max_dd_usd, metrics, advanced
+
+
 def generate_progress_bar(current: int, total: int, width: int = 15) -> str:
     """Generate a text-based progress bar [████░░░░]"""
     if total <= 0:
@@ -162,10 +211,12 @@ async def run_backtest_task(
         
         # 4. Analytics (Phase 3)
         await _update_ui(95, 100, "Calculating advanced metrics...", force=True)
-        initial_balance = strategy_params.get("initial_balance", 10000.0)
         
-        metrics = calculate_metrics(trade_log, initial_balance)
-        advanced_stats = run_advanced_analytics(trade_log, initial_balance)
+        from utils.market_utils import get_max_leverage
+        max_lev = get_max_leverage(symbol)
+        base_leverage = min(200.0, max_lev)
+        
+        auto_cap, peak_m, max_dd_usd, metrics, advanced_stats = recalculate_metrics_with_auto_capital(trade_log, base_leverage)
         
         # 5. Build Final Result Document
         run_duration = time.time() - start_cpu_time
@@ -186,8 +237,8 @@ async def run_backtest_task(
             "strategy_params": strategy_params,
             "direction": strategy_params.get("direction", "both"),
             "lot_size": strategy_params.get("lot_size", 1),
-            "leverage": strategy_params.get("leverage", 1),
-            "initial_balance": initial_balance,
+            "leverage": base_leverage,
+            "initial_balance": auto_cap,
             "backtest_start": datetime.fromtimestamp(start_ts, tz=timezone.utc),
             "backtest_end": datetime.fromtimestamp(end_ts, tz=timezone.utc),
             "total_candles": total_candles,
@@ -203,6 +254,7 @@ async def run_backtest_task(
         
         # 6. Save to MongoDB
         result_id = await save_backtest_result(final_result)
+        final_result['_id'] = result_id
         
         # 7. Generate Files (Phase 4)
         await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
@@ -238,25 +290,19 @@ async def run_backtest_task(
             pass
 
 
-async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, result: dict, chart_path: str, csv_path: str, message_id: int):
-    """Format and send the final Telegram report."""
-    
-
-    # Build configuration string
+def format_report_text(result: dict) -> str:
     params = result.get('strategy_params', {})
+    
     config_lines = [
         f"• Strategy: {result.get('strategy', 'Unknown').replace('_', ' ').title()}",
-        f"• Direction: {result.get('direction', 'both').upper()}",
-        f"• Leverage: {result.get('leverage', 1)}x"
+        f"• Direction: {result.get('direction', 'both').upper()}"
     ]
-    # Add specific strategy params
     for k, v in params.items():
         if k not in ['strategy_name', 'direction', 'lot_size', 'initial_balance', 'leverage', 'paper_leverage']:
             config_lines.append(f"• {k.replace('_', ' ').title()}: {v}")
     
     config_str = "\n".join(config_lines)
 
-    # Rolling stats format
     rs = result.get('rolling_stats') or {}
     w = rs.get('weekly') or {}
     m = rs.get('monthly') or {}
@@ -267,28 +313,9 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Best Return: `{w.get('best', 0):+.1f}%` (Wk) | `{m.get('best', 0):+.1f}%` (Mo)\n"
         f"• Worst Return: `{w.get('worst', 0):+.1f}%` (Wk) | `{m.get('worst', 0):+.1f}%` (Mo)\n\n"
     )
-
-    # Dynamic Leverage Margin Table
-    from utils.market_utils import get_max_leverage
-    max_lev = get_max_leverage(result['symbol'])
-    tiers = [1, 10, 20, 50, 100, 200]
     
-    avg_notional = result.get('avg_notional_size', 0)
-    avg_sl_risk = result.get('avg_stop_loss_risk', 0)
+    lev = result.get('leverage', 1)
     
-    margin_table_lines = [f"• Sizing: `{result.get('lot_size', 0)} Contracts` (Avg Notional: `${avg_notional:.2f}`)"]
-    for lev in tiers:
-        if lev <= max_lev:
-            im = avg_notional / lev if lev > 0 else avg_notional
-            safe = im + avg_sl_risk
-            margin_table_lines.append(f"• `{lev}x` Lev: `${im:.2f}` Initial | `${safe:.2f}` Safe")
-    if max_lev not in tiers:
-        im_max = avg_notional / max_lev if max_lev > 0 else avg_notional
-        safe_max = im_max + avg_sl_risk
-        margin_table_lines.append(f"• `{int(max_lev)}x` Lev (Max): `${im_max:.2f}` Initial | `${safe_max:.2f}` Safe")
-        
-    margin_table_str = "\n".join(margin_table_lines)
-
     text = (
         f"📊 **Backtest Complete: {result['symbol']} ({result['timeframe']})**\n"
         f"⏱️ Analyzed {result['total_candles']:,} candles in {result['run_duration_seconds']:.1f}s\n\n"
@@ -296,9 +323,11 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"⚙️ **Configuration**\n"
         f"{config_str}\n\n"
         
-        f"🏦 **Margin Required per Trade (Avg)**\n"
-        f"{margin_table_str}\n"
-        f"*(Peak Margin hit during test: ${result.get('peak_margin_required', 0):.2f})*\n\n"
+        f"🏦 **Capital Required (Auto-Sized for {int(lev)}x Lev)**\n"
+        f"• Sizing: `{result.get('lot_size', 0)} Contracts` (Avg Notional: `${result.get('avg_notional_size', 0):.2f}`)\n"
+        f"• Peak Margin Required: `${result.get('peak_margin_required', 0):.2f}`\n"
+        f"• Max Historical Drawdown: `${result.get('monte_carlo_max_dd_99_usd', 0):.2f}`\n"
+        f"• Recommended Deposit: `${result.get('initial_balance', 0):.2f}`\n\n"
 
         f"💰 **Profitability**\n"
         f"• Overall Net Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
@@ -334,6 +363,11 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         f"• Sharpe Ratio: `{result['sharpe_ratio']:.2f}` *(Ideal: > 1.0)*\n"
         f"• Sortino Ratio: `{result.get('sortino_ratio', 0.0):.2f}`\n"
     )
+    return text
+
+async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, result: dict, chart_path: str, csv_path: str, message_id: int):
+    """Format and send the final Telegram report."""
+    text = format_report_text(result)
     
     # We delete the "loading" message and send a fresh one with the photo
     try:
@@ -343,8 +377,28 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         
     try:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from utils.market_utils import get_max_leverage
         
-        keyboard = [
+        max_lev = get_max_leverage(result['symbol'])
+        
+        # Build dynamic 9-button grid
+        std_tiers = [1, 2, 3, 5, 10, 25, 50, 100, 200]
+        valid_tiers = [t for t in std_tiers if t <= max_lev]
+        if max_lev not in valid_tiers:
+            valid_tiers.append(int(max_lev))
+            valid_tiers.sort()
+            
+        btn_rows = []
+        current_row = []
+        for t in valid_tiers:
+            current_row.append(InlineKeyboardButton(f"🔍 {t}x", callback_data=f"bt_recalc_{result.get('_id', '')}_{t}"))
+            if len(current_row) >= 5:
+                btn_rows.append(current_row)
+                current_row = []
+        if current_row:
+            btn_rows.append(current_row)
+            
+        keyboard = btn_rows + [
             [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
             [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
             [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
