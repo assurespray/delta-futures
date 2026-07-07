@@ -52,6 +52,14 @@ class BacktestEngine:
         self.symbol = self.params.get("symbol", "BTCUSD")
         self.contract_multiplier = get_contract_multiplier(self.symbol)
         
+        # Time Window Rules
+        from utils.time_utils import parse_time, is_time_in_window, is_time_to_hard_exit
+        self.time_window = self.params.get("time_window")
+        if self.time_window:
+            self.tw_start = parse_time(self.time_window["start"])
+            self.tw_stop_entries = parse_time(self.time_window["stop_entries"])
+            self.tw_hard_exit = parse_time(self.time_window["hard_exit"])
+        
         # State Tracking
         self.balance = self.initial_balance
         self.equity_curve = [self.initial_balance]
@@ -136,12 +144,33 @@ class BacktestEngine:
             
             # 3. Simulate chronological ticks (the core trading loop)
             # We iterate from start_idx to end of chunk.
+            from utils.time_utils import IST
+            from datetime import datetime
+            
             for i in range(start_idx, len(times)):
                 t_time = int(times[i])
                 t_open = float(opens[i])
                 t_high = float(highs[i])
                 t_low = float(lows[i])
                 t_close = float(closes[i])
+                
+                # Check Time Window Rules
+                current_dt = datetime.fromtimestamp(t_time, tz=IST)
+                current_time = current_dt.time()
+                
+                is_within_entry_window = True
+                if self.time_window:
+                    from utils.time_utils import is_time_in_window, is_time_to_hard_exit
+                    is_within_entry_window = is_time_in_window(current_time, self.tw_start, self.tw_stop_entries)
+                    
+                    # Hard Exit Check (Executes BEFORE regular exits to ensure strict deadlines)
+                    if self.open_trade and is_time_to_hard_exit(current_time, self.tw_hard_exit, self.tw_start):
+                        self._close_position(
+                            exit_price=t_open,  # Exit at open of the candle that crossed the hard exit time
+                            exit_time=t_time,
+                            reason="Time Hard Exit",
+                            indicator_value=float(indicator_val_arr[i-1]) if 'indicator_val_arr' in locals() else 0.0
+                        )
                 
                 # Check for open position exits FIRST
                 if self.open_trade:
@@ -188,6 +217,10 @@ class BacktestEngine:
                     # Using i-1 ensures we only act on *closed* candle signals.
                     signal = int(entry_signal_arr[i-1])
                     
+                    # Apply Time Filter Bouncer
+                    if not is_within_entry_window:
+                        signal = 0
+                        
                     if signal == 1 and self.direction in ["both", "long_only"]:
                         entry_price = t_open
                         self._open_position(

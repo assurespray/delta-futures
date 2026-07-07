@@ -332,6 +332,19 @@ class AlgoEngine:
                 indicator_result
             )
             
+            # Apply Time Filter Bouncer
+            time_window = algo_setup.get("time_window")
+            if time_window and entry_signal:
+                from utils.time_utils import parse_time, is_time_in_window, IST
+                from datetime import datetime
+                now_ist = datetime.now(IST).time()
+                tw_start = parse_time(time_window["start"])
+                tw_stop = parse_time(time_window["stop_entries"])
+                
+                if not is_time_in_window(now_ist, tw_start, tw_stop):
+                    logger.info(f"SKIP entry for {setup_name} - currently outside allowed time window ({time_window['start']} to {time_window['stop_entries']})")
+                    entry_signal = None
+            
             # If signal exists and there's no open trade for this setup+asset, place order
             if entry_signal:
                 # Direction constraint (long_only / short_only)
@@ -525,9 +538,27 @@ class AlgoEngine:
                 return
                         
             # Exit Check (strategy-agnostic)
-            exit_signal = strategy.generate_exit_signal(
-                setup_id, current_position, indicator_result
-            )
+            from database.crud import get_algo_setup_by_id
+            from strategy.base import ExitSignal
+            algo_setup = await get_algo_setup_by_id(setup_id)
+            time_window = algo_setup.get("time_window") if algo_setup else None
+            
+            exit_signal = None
+            if time_window:
+                from utils.time_utils import parse_time, is_time_to_hard_exit, IST
+                from datetime import datetime
+                now_ist = datetime.now(IST).time()
+                tw_start = parse_time(time_window["start"])
+                tw_exit = parse_time(time_window["hard_exit"])
+                
+                if is_time_to_hard_exit(now_ist, tw_exit, tw_start):
+                    logger.info(f"TIME HARD EXIT for {asset}: Clock hit hard exit time {time_window['hard_exit']}")
+                    exit_signal = ExitSignal(reason="Time Hard Exit", stop_loss=0.0)
+                    
+            if not exit_signal:
+                exit_signal = strategy.generate_exit_signal(
+                    setup_id, current_position, indicator_result
+                )
             
             if exit_signal:
                 logger.info(

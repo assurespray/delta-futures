@@ -27,6 +27,8 @@ BT_SELECT_TIMEFRAME = 803
 BT_SELECT_DURATION = 804
 BT_CUSTOM_DATE = 805
 BT_SELECT_LOT_SIZE = 807
+BT_ASK_TIME_MODE = 808
+BT_ASK_CUSTOM_TIME = 809
 
 
 async def menu_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,7 +234,7 @@ async def bt_lot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     lot = query.data.replace("bt_lot_", "")
     context.user_data['bt_lot_size'] = float(lot)
-    return await bt_ask_duration(query, context)
+    return await bt_ask_time_mode(query, context)
 
 
 async def bt_lot_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -254,6 +256,77 @@ async def bt_lot_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async def edit_message_text(self, *args, **kwargs):
             return await self.message.edit_text(*args, **kwargs)
             
+    return await bt_ask_time_mode(MockQuery(message), context)
+
+
+async def bt_ask_time_mode(query, context: ContextTypes.DEFAULT_TYPE):
+    """Step 6: Ask for Time Mode."""
+    text = (
+        f"🧪 **Step 6: Time Window**\n\n"
+        f"Do you want to run this strategy 24/7, or restrict it to a specific Time Window (IST)?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌍 Run 24/7", callback_data="bt_time_247")],
+        [InlineKeyboardButton("🕒 Custom Time Window", callback_data="bt_time_custom")],
+        [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return BT_ASK_TIME_MODE
+
+
+async def bt_time_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 6b: Handle Time Mode Selection"""
+    query = update.callback_query
+    await query.answer()
+    
+    mode = query.data.replace("bt_time_", "")
+    
+    if mode == "247":
+        context.user_data['bt_time_window'] = None
+        return await bt_ask_duration(query, context)
+    else:
+        text = (
+            f"🕒 **Custom Time Window (IST)**\n\n"
+            f"Please reply with your times in `HH:MM` format separated by commas:\n"
+            f"`Start Time, Stop Entries, Hard Exit`\n\n"
+            f"Example (8 PM to 9 PM):\n"
+            f"`20:00, 20:45, 21:00`"
+        )
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]]), parse_mode="Markdown")
+        return BT_ASK_CUSTOM_TIME
+
+
+async def bt_custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 6c: Handle Custom Time String"""
+    val = update.message.text.strip()
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError
+            
+        from utils.time_utils import parse_time
+        # Validate they are parseable
+        t_start = parse_time(parts[0])
+        t_stop = parse_time(parts[1])
+        t_exit = parse_time(parts[2])
+        
+        context.user_data['bt_time_window'] = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+    except Exception:
+        await update.message.reply_text("❌ Invalid format. Please reply with exactly 3 times separated by commas (e.g. `20:00, 20:45, 21:00`):")
+        return BT_ASK_CUSTOM_TIME
+        
+    message = await update.message.reply_text("Processing...", parse_mode="Markdown")
+    
+    class MockQuery:
+        def __init__(self, msg):
+            self.message = msg
+        async def edit_message_text(self, *args, **kwargs):
+            return await self.message.edit_text(*args, **kwargs)
+            
     return await bt_ask_duration(MockQuery(message), context)
 
 
@@ -265,12 +338,18 @@ async def bt_ask_duration(query, context: ContextTypes.DEFAULT_TYPE):
     lot = context.user_data['bt_lot_size']
     
     text = (
-        f"🧪 **Step 5: Select Duration**\n\n"
+        f"🧪 **Step 7: Select Duration**\n\n"
         f"**Strategy:** {preset_name}\n"
         f"**Asset:** {asset} ({tf})\n"
-        f"**Lot Size:** {lot}\n\n"
-        f"Choose how much historical data to download and test:"
+        f"**Lot Size:** {lot}\n"
     )
+    time_window = context.user_data.get('bt_time_window')
+    if time_window:
+        text += f"**Time Window:** {time_window['start']} - {time_window['hard_exit']} (IST)\n\n"
+    else:
+        text += f"**Time Window:** 24/7\n\n"
+        
+    text += f"Choose how much historical data to download and test:"
     
     keyboard = [
         [InlineKeyboardButton("7 Days", callback_data="bt_dur_7"), InlineKeyboardButton("30 Days", callback_data="bt_dur_30")],
@@ -361,6 +440,9 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
         
     # Explicitly overwrite lot_size with user's sandbox selection
     strategy_params["lot_size"] = float(context.user_data.get('bt_lot_size', 1.0))
+    time_window = context.user_data.get('bt_time_window')
+    if time_window:
+        strategy_params["time_window"] = time_window
         
     loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\n\n⏳ Please wait..."
     
@@ -711,6 +793,12 @@ def get_backtest_handlers():
             BT_SELECT_LOT_SIZE: [
                 CallbackQueryHandler(bt_lot_callback, pattern="^bt_lot_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bt_lot_received)
+            ],
+            BT_ASK_TIME_MODE: [
+                CallbackQueryHandler(bt_time_mode_callback, pattern="^bt_time_")
+            ],
+            BT_ASK_CUSTOM_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_custom_time_received)
             ],
             BT_SELECT_DURATION: [
                 CallbackQueryHandler(bt_duration_selected, pattern="^bt_dur_")
