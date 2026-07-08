@@ -23,6 +23,7 @@ SCREENER_INDICATOR = 3
 SCREENER_ASSET_TYPE = 4
 SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION = range(5, 9)
 SCREENER_CONFIRM = 9
+SCREENER_TIME_WINDOW, SCREENER_CUSTOM_TIME = 10, 11
 
 
 async def screener_setups_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -309,7 +310,7 @@ async def render_screener_protection_selection(update, context):
     lot_size = context.user_data.get('screener_lot_size', '?')
     text = (
         f"✅ Lot Size: {lot_size}\n\n"
-        f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
+        f"Step 9/10: Additional Protection (Stop-Loss)?\n\n"
         f"If enabled, a stop-loss order will be placed based on the indicator strategy."
     )
     keyboard = [
@@ -333,6 +334,11 @@ async def render_screener_confirm(update, context):
     user_data = context.user_data
     protection = user_data.get('screener_additional_protection', False)
     asset_type_text = ASSET_TYPE_TEXT.get(user_data.get('screener_asset_type', ''), "Unknown")
+    tw = user_data.get('screener_time_window')
+    if tw:
+        tw_display = f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST"
+    else:
+        tw_display = "24/7 (No Restriction)"
     
     text = "✅ **Screener Setup Summary**\n\n"
     text += f"**Name:** {user_data.get('screener_name', '?')}\n"
@@ -343,13 +349,14 @@ async def render_screener_confirm(update, context):
     text += f"**Timeframe:** {user_data.get('screener_timeframe', '?')}\n"
     text += f"**Direction:** {user_data.get('screener_direction', '').replace('_', ' ').title()}\n"
     text += f"**Lot Size (per trade):** {user_data.get('screener_lot_size', '?')}\n"
-    text += f"**Stop-Loss Protection:** {'✅ Enabled' if protection else '❌ Disabled'}\n\n"
+    text += f"**Stop-Loss Protection:** {'✅ Enabled' if protection else '❌ Disabled'}\n"
+    text += f"**Time Window:** {tw_display}\n\n"
     text += "Confirm to save and activate this screener?"
     
     keyboard = [
         [InlineKeyboardButton("✅ Confirm and Activate", callback_data="screener_confirm_yes")],
         [
-            InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_PROTECTION"),
+            InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_TIME_WINDOW"),
             InlineKeyboardButton("❌ Cancel", callback_data="screener_cancel")
         ]
     ]
@@ -486,6 +493,84 @@ async def screener_protection_selected(update: Update, context: ContextTypes.DEF
     protection = query.data == "screener_prot_yes"
     context.user_data['screener_additional_protection'] = protection
     
+    return await render_screener_time_window_selection(update, context)
+
+async def render_screener_time_window_selection(update, context):
+    protection = context.user_data.get('screener_additional_protection', False)
+    text = (
+        f"✅ Protection: {'Enabled' if protection else 'Disabled'}\n\n"
+        f"Step 10/10: Time Window\n\n"
+        f"Run 24/7 or restrict to a specific IST time window?\n\n"
+        f"A time window controls:\n"
+        f"• When new entries are allowed\n"
+        f"• When entries stop (cool-down)\n"
+        f"• When open positions are force-closed (hard exit)"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌍 Run 24/7", callback_data="screener_tw_247")],
+        [InlineKeyboardButton("🕒 Custom Time Window (IST)", callback_data="screener_tw_custom")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="screener_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return SCREENER_TIME_WINDOW
+
+async def screener_time_window_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 24/7 vs custom time window selection for screener."""
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.replace("screener_tw_", "")
+    if mode == "247":
+        context.user_data['screener_time_window'] = None
+        return await render_screener_confirm(update, context)
+    else:
+        text = (
+            "🕒 **Custom Time Window (IST)**\n\n"
+            "Reply with 3 times in `HH:MM` format, comma-separated:\n"
+            "`Start, Stop Entries, Hard Exit`\n\n"
+            "Example: `20:00, 20:45, 21:00`\n\n"
+            "• **Start** — entries allowed from this time\n"
+            "• **Stop Entries** — no new entries after this\n"
+            "• **Hard Exit** — force-close any open position"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="screener_back_to_SCREENER_TIME_WINDOW"),
+                InlineKeyboardButton("❌ Cancel", callback_data="screener_cancel")
+            ]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return SCREENER_CUSTOM_TIME
+
+async def screener_custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parse custom time window input for screener."""
+    val = update.message.text.strip()
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError("Need exactly 3 times")
+        from utils.time_utils import parse_time
+        parse_time(parts[0])
+        parse_time(parts[1])
+        parse_time(parts[2])
+        context.user_data['screener_time_window'] = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+    except Exception:
+        await update.message.reply_text(
+            "❌ Invalid format. Reply with exactly 3 times separated by commas.\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            parse_mode="Markdown"
+        )
+        return SCREENER_CUSTOM_TIME
     return await render_screener_confirm(update, context)
 
 
@@ -519,6 +604,7 @@ async def screener_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "direction": user_data['screener_direction'],
             "lot_size": user_data['screener_lot_size'],
             "additional_protection": user_data['screener_additional_protection'],
+            "time_window": user_data.get('screener_time_window'),
             "is_active": True
         }
         
@@ -589,6 +675,8 @@ async def screener_back_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return await render_screener_lot_size_prompt(update, context)
     elif state == "SCREENER_PROTECTION":
         return await render_screener_protection_selection(update, context)
+    elif state == "SCREENER_TIME_WINDOW":
+        return await render_screener_time_window_selection(update, context)
     
     return ConversationHandler.END
 
@@ -668,7 +756,14 @@ async def screener_view_detail_callback(update: Update, context: ContextTypes.DE
     message += f"├ Timeframe: {setup['timeframe']}\n"
     message += f"├ Direction: {setup['direction'].replace('_', ' ').title()}\n"
     message += f"├ Lot Size (per trade): {setup['lot_size']}\n"
-    message += f"└ Stop-Loss: {'✅ Enabled' if setup.get('additional_protection') else '❌ Disabled'}\n\n"
+    message += f"├ Stop-Loss: {'✅ Enabled' if setup.get('additional_protection') else '❌ Disabled'}\n"
+    
+    tw = setup.get('time_window')
+    if tw:
+        message += f"└ Time Window: {tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST\n\n"
+    else:
+        message += f"└ Time Window: 24/7\n\n"
+        
     message += f"📊 **Active Trades:** Tracking all {asset_type_text.lower()}\n"
     
     keyboard = [

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Conversation states
 SETUP_NAME, SETUP_DESC, SETUP_API, SETUP_INDICATOR, SETUP_DIRECTION = range(5)
 SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM = range(5, 10)
+SETUP_TIME_WINDOW, SETUP_CUSTOM_TIME = 10, 11
 
 
 async def algo_setups_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,7 +278,7 @@ async def render_protection_selection(update, context):
     lot_size = context.user_data.get('lot_size', '?')
     text = (
         f"✅ Lot Size: {lot_size}\n\n"
-        f"Step 9/9: Additional Protection (Stop-Loss)?\n\n"
+        f"Step 9/10: Additional Protection (Stop-Loss)?\n\n"
         f"If enabled, a stop-loss order will be placed at the secondary indicator price during entry."
     )
     keyboard = [
@@ -299,6 +300,11 @@ async def render_protection_selection(update, context):
 async def render_confirm_selection(update, context):
     user_data = context.user_data
     additional_protection = user_data.get('additional_protection', False)
+    tw = user_data.get('time_window')
+    if tw:
+        tw_display = f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST"
+    else:
+        tw_display = "24/7 (No Restriction)"
     
     text = "✅ **Algo Setup Summary**\n\n"
     text += f"**Name:** {user_data.get('setup_name', '?')}\n"
@@ -309,13 +315,14 @@ async def render_confirm_selection(update, context):
     text += f"**Timeframe:** {user_data.get('timeframe', '?')}\n"
     text += f"**Asset:** {user_data.get('asset', '?')}\n"
     text += f"**Lot Size:** {user_data.get('lot_size', '?')}\n"
-    text += f"**Stop-Loss Protection:** {'✅ Enabled' if additional_protection else '❌ Disabled'}\n\n"
+    text += f"**Stop-Loss Protection:** {'✅ Enabled' if additional_protection else '❌ Disabled'}\n"
+    text += f"**Time Window:** {tw_display}\n\n"
     text += f"Confirm to save and activate this setup?"
     
     keyboard = [
         [InlineKeyboardButton("✅ Confirm and Activate", callback_data="setup_confirm_yes")],
         [
-            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_PROTECTION"),
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_TIME_WINDOW"),
             InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
         ]
     ]
@@ -427,10 +434,95 @@ async def setup_lot_size_received(update: Update, context: ContextTypes.DEFAULT_
         return SETUP_LOT_SIZE
 
 async def setup_protection_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle protection selection and show confirmation."""
+    """Handle protection selection and show time window step."""
     query = update.callback_query
     await query.answer()
     context.user_data['additional_protection'] = query.data == "setup_prot_yes"
+    return await render_time_window_selection(update, context)
+
+async def render_time_window_selection(update, context):
+    protection = context.user_data.get('additional_protection', False)
+    text = (
+        f"✅ Protection: {'Enabled' if protection else 'Disabled'}\n\n"
+        f"Step 10/10: Time Window\n\n"
+        f"Do you want to run this strategy 24/7, or restrict it to a specific IST time window?\n\n"
+        f"A time window controls:\n"
+        f"• When new entries are allowed\n"
+        f"• When entries stop (cool-down)\n"
+        f"• When open positions are force-closed (hard exit)"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌍 Run 24/7", callback_data="setup_tw_247")],
+        [InlineKeyboardButton("🕒 Custom Time Window (IST)", callback_data="setup_tw_custom")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return SETUP_TIME_WINDOW
+
+async def setup_time_window_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 24/7 vs custom time window selection."""
+    query = update.callback_query
+    await query.answer()
+
+    mode = query.data.replace("setup_tw_", "")
+    if mode == "247":
+        context.user_data['time_window'] = None
+        return await render_confirm_selection(update, context)
+    else:
+        text = (
+            "🕒 **Custom Time Window (IST)**\n\n"
+            "Reply with 3 times in `HH:MM` format, comma-separated:\n"
+            "`Start, Stop Entries, Hard Exit`\n\n"
+            "Example (8 PM to 9 PM session):\n"
+            "`20:00, 20:45, 21:00`\n\n"
+            "• **Start** — entries allowed from this time\n"
+            "• **Stop Entries** — no new entries after this\n"
+            "• **Hard Exit** — force-close any open position"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="algo_back_to_SETUP_TIME_WINDOW"),
+                InlineKeyboardButton("❌ Cancel", callback_data="algo_cancel")
+            ]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return SETUP_CUSTOM_TIME
+
+async def setup_custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parse custom time window input (HH:MM, HH:MM, HH:MM)."""
+    val = update.message.text.strip()
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError("Need exactly 3 times")
+
+        from utils.time_utils import parse_time
+        # Validate all three parse correctly
+        parse_time(parts[0])
+        parse_time(parts[1])
+        parse_time(parts[2])
+
+        context.user_data['time_window'] = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+    except Exception:
+        await update.message.reply_text(
+            "❌ Invalid format. Please reply with exactly 3 times separated by commas.\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            parse_mode="Markdown"
+        )
+        return SETUP_CUSTOM_TIME
+
     return await render_confirm_selection(update, context)
 
 async def setup_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -491,6 +583,7 @@ async def setup_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "product_id": product_id,
             "lot_size": user_data['lot_size'],
             "additional_protection": user_data['additional_protection'],
+            "time_window": user_data.get('time_window'),
             "is_active": True
         }
         
@@ -605,7 +698,12 @@ async def algo_view_detail_callback(update: Update, context: ContextTypes.DEFAUL
     message += f"├ Timeframe: {setup['timeframe']}\n"
     message += f"├ Asset: {setup['asset']}\n"
     message += f"├ Lot Size: {setup['lot_size']}\n"
-    message += f"└ Stop-Loss: {'✅ Enabled' if setup.get('additional_protection') else '❌ Disabled'}\n\n"
+    message += f"├ Stop-Loss: {'✅ Enabled' if setup.get('additional_protection') else '❌ Disabled'}\n"
+    tw = setup.get('time_window')
+    if tw:
+        message += f"└ Time Window: {tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST\n\n"
+    else:
+        message += f"└ Time Window: 24/7\n\n"
     message += f"**Current State:**\n"
     message += f"├ Position: {position_text}\n"
     
@@ -652,6 +750,7 @@ async def algo_edit_menu_callback(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("⏱️ Timeframe", callback_data=f"algo_editf_timeframe_{setup_id}")],
         [InlineKeyboardButton("🎛️ Indicator Preset", callback_data=f"algo_editf_preset_{setup_id}")],
         [InlineKeyboardButton("🛡️ Stop-Loss Protection", callback_data=f"algo_editf_protection_{setup_id}")],
+        [InlineKeyboardButton("🕒 Time Window", callback_data=f"algo_editf_timewindow_{setup_id}")],
         [InlineKeyboardButton("🔙 Back to Details", callback_data=f"algo_view_{setup_id}")],
     ]
     
@@ -848,6 +947,102 @@ async def algo_edit_protection_set(update: Update, context: ContextTypes.DEFAULT
     await algo_view_detail_callback(update, context)
 
 
+# ---- Edit: Time Window ----
+
+EDIT_TIME_WINDOW = 51  # Unique conversation state for edit flow
+
+async def algo_edit_timewindow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show time window edit choices."""
+    query = update.callback_query
+    await query.answer()
+
+    setup_id = query.data.replace("algo_editf_timewindow_", "")
+    context.user_data['edit_setup_id'] = setup_id
+
+    setup = await get_algo_setup_by_id(setup_id)
+    tw = setup.get('time_window') if setup else None
+    current = f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST" if tw else "24/7"
+
+    keyboard = [
+        [InlineKeyboardButton("🌍 Set to 24/7", callback_data="algo_edset_tw_247")],
+        [InlineKeyboardButton("🕒 Set Custom Times", callback_data="algo_edset_tw_custom")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"algo_edit_{setup_id}")],
+    ]
+
+    await query.edit_message_text(
+        f"🕒 **Edit Time Window**\n\nCurrent: {current}\n\nSelect new time window:",
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+    )
+
+async def algo_edit_timewindow_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 24/7 selection for time window edit."""
+    query = update.callback_query
+    await query.answer()
+
+    setup_id = context.user_data.get('edit_setup_id')
+    if not setup_id:
+        await query.edit_message_text("❌ Session expired. Use /start.")
+        return
+
+    mode = query.data.replace("algo_edset_tw_", "")
+    if mode == "247":
+        await update_algo_setup(setup_id, {"time_window": None})
+        query.data = f"algo_view_{setup_id}"
+        await algo_view_detail_callback(update, context)
+    else:
+        # Custom — prompt for text input
+        keyboard = [
+            [InlineKeyboardButton("🔙 Back", callback_data=f"algo_edit_{setup_id}")],
+        ]
+        await query.edit_message_text(
+            "🕒 **Set Custom Time Window (IST)**\n\n"
+            "Reply with 3 times in `HH:MM` format, comma-separated:\n"
+            "`Start, Stop Entries, Hard Exit`\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown"
+        )
+        return EDIT_TIME_WINDOW
+
+async def algo_edit_timewindow_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive custom time window text for edit."""
+    val = update.message.text.strip()
+    setup_id = context.user_data.get('edit_setup_id')
+
+    if not setup_id:
+        await update.message.reply_text("❌ Session expired. Use /start.")
+        return ConversationHandler.END
+
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError("Need exactly 3 times")
+
+        from utils.time_utils import parse_time
+        parse_time(parts[0])
+        parse_time(parts[1])
+        parse_time(parts[2])
+
+        tw = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+        await update_algo_setup(setup_id, {"time_window": tw})
+
+        await update.message.reply_text(
+            f"✅ Time Window updated to {parts[0]} → {parts[1]} → {parts[2]} IST"
+        )
+    except Exception:
+        await update.message.reply_text(
+            "❌ Invalid format. Please reply with exactly 3 times separated by commas.\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            parse_mode="Markdown"
+        )
+        return EDIT_TIME_WINDOW
+
+    return ConversationHandler.END
+
+
 # ---- Edit: Lot Size (requires text input via ConversationHandler) ----
 
 EDIT_LOT_SIZE = 50  # Unique conversation state
@@ -926,6 +1121,8 @@ async def algo_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await render_lot_size_prompt(update, context)
     elif state == "SETUP_PROTECTION":
         return await render_protection_selection(update, context)
+    elif state == "SETUP_TIME_WINDOW":
+        return await render_time_window_selection(update, context)
     
     from telegram.ext import ConversationHandler
     return ConversationHandler.END

@@ -35,17 +35,21 @@ from handlers.algo_setup import (
     algo_setups_callback, algo_add_start, setup_name_received, setup_desc_received,
     setup_api_selected, setup_indicator_selected, setup_direction_selected,
     setup_timeframe_selected, setup_asset_received, setup_lot_size_received, setup_lot_size_callback,
-    setup_protection_selected, setup_confirmed, cancel_algo_setup,
+    setup_protection_selected, setup_time_window_callback, setup_custom_time_received,
+    setup_confirmed, cancel_algo_setup,
     algo_view_list_callback, algo_view_detail_callback,
     algo_delete_list_callback, algo_delete_confirm_callback,
     algo_edit_menu_callback, algo_edit_direction_callback, algo_edit_direction_set,
     algo_edit_timeframe_callback, algo_edit_timeframe_set,
     algo_edit_preset_callback, algo_edit_preset_set,
     algo_edit_protection_callback, algo_edit_protection_set,
+    algo_edit_timewindow_callback, algo_edit_timewindow_set, algo_edit_timewindow_received,
+    EDIT_TIME_WINDOW,
     algo_edit_lotsize_callback, algo_edit_lotsize_received, cancel_edit_setup,
     algo_back_handler, algo_cancel_handler,
     SETUP_NAME, SETUP_DESC, SETUP_API, SETUP_INDICATOR, SETUP_DIRECTION,
     SETUP_TIMEFRAME, SETUP_ASSET, SETUP_LOT_SIZE, SETUP_PROTECTION, SETUP_CONFIRM,
+    SETUP_TIME_WINDOW, SETUP_CUSTOM_TIME,
     EDIT_LOT_SIZE
 )
 from handlers.screener_setup import (
@@ -53,12 +57,14 @@ from handlers.screener_setup import (
     screener_api_selected, screener_indicator_selected, screener_asset_type_selected,
     screener_timeframe_selected,
     screener_direction_selected, screener_lot_size_received, screener_lot_size_callback, screener_protection_selected,
+    screener_time_window_callback, screener_custom_time_received,
     screener_confirmed, cancel_screener_setup,
     screener_view_list_callback, screener_view_detail_callback,
     screener_delete_list_callback, screener_delete_confirm_callback,
     screener_back_handler, screener_cancel_handler,
     SCREENER_NAME, SCREENER_DESC, SCREENER_API, SCREENER_INDICATOR, SCREENER_ASSET_TYPE,
-    SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM
+    SCREENER_TIMEFRAME, SCREENER_DIRECTION, SCREENER_LOT_SIZE, SCREENER_PROTECTION, SCREENER_CONFIRM,
+    SCREENER_TIME_WINDOW, SCREENER_CUSTOM_TIME
 )
 from handlers.algo_activity import algo_activity_callback, paper_activity_callback
 from handlers.paper_trading import (
@@ -66,7 +72,9 @@ from handlers.paper_trading import (
     paper_desc_received, paper_api_selected, paper_indicator_selected,
     paper_direction_selected,
     paper_timeframe_selected, paper_asset_received, paper_lot_size_received, paper_lot_size_callback, paper_lot_size_callback,
-    paper_leverage_selected, paper_protection_selected, paper_confirmed,
+    paper_leverage_selected, paper_protection_selected,
+    paper_time_window_callback, paper_custom_time_received,
+    paper_confirmed,
     cancel_paper_setup, paper_view_list_callback, paper_setup_group_callback, paper_detail_callback,
     paper_toggle_callback, paper_cancel_callback, paper_close_callback,
     paper_delete_list_callback, paper_delete_confirm_callback,
@@ -75,14 +83,18 @@ from handlers.paper_trading import (
     pscr_api_selected, pscr_indicator_selected, pscr_asset_type_selected,
     pscr_timeframe_selected,
     pscr_direction_selected, pscr_lot_size_received, pscr_lot_size_callback, pscr_leverage_selected,
-    pscr_protection_selected, pscr_confirmed,
+    pscr_protection_selected,
+    pscr_time_window_callback, pscr_custom_time_received,
+    pscr_confirmed,
     paper_back_handler, paper_cancel_handler, pscr_back_handler, pscr_cancel_handler,
     PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_INDICATOR, PAPER_DIRECTION,
     PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
     PAPER_PROTECTION, PAPER_CONFIRM,
+    PAPER_TIME_WINDOW, PAPER_CUSTOM_TIME,
     PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_INDICATOR, PSCR_ASSET_TYPE,
     PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE,
     PSCR_PROTECTION, PSCR_CONFIRM,
+    PSCR_TIME_WINDOW, PSCR_CUSTOM_TIME,
     PAPER_SET_BALANCE_AMOUNT,
 )
 from handlers.performance import (
@@ -203,6 +215,8 @@ def create_application() -> Application:
             SETUP_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_asset_received)],
             SETUP_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_lot_size_received), CallbackQueryHandler(setup_lot_size_callback, pattern="^algo_lot_")],
             SETUP_PROTECTION: [CallbackQueryHandler(setup_protection_selected, pattern="^setup_prot_")],
+            SETUP_TIME_WINDOW: [CallbackQueryHandler(setup_time_window_callback, pattern="^setup_tw_")],
+            SETUP_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_custom_time_received)],
             SETUP_CONFIRM: [CallbackQueryHandler(setup_confirmed, pattern="^setup_confirm_")]
         },
         fallbacks=[
@@ -230,6 +244,21 @@ def create_application() -> Application:
         allow_reentry=True
     )
     application.add_handler(algo_edit_lotsize_conv_handler)
+
+    # Algo Edit Time Window conversation handler (text input for custom times)
+    algo_edit_tw_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(algo_edit_timewindow_set, pattern="^algo_edset_tw_")],
+        states={
+            EDIT_TIME_WINDOW: [MessageHandler(filters.TEXT & ~filters.COMMAND, algo_edit_timewindow_received)],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_edit_setup),
+            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
+        ],
+        per_message=False,
+        allow_reentry=True
+    )
+    application.add_handler(algo_edit_tw_conv_handler)
     
     # ============================================================
     # CALLBACK QUERY HANDLERS (Order matters - most specific first)
@@ -274,6 +303,7 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(algo_edit_timeframe_callback, pattern="^algo_editf_timeframe_"))
     application.add_handler(CallbackQueryHandler(algo_edit_preset_callback, pattern="^algo_editf_preset_"))
     application.add_handler(CallbackQueryHandler(algo_edit_protection_callback, pattern="^algo_editf_protection_"))
+    application.add_handler(CallbackQueryHandler(algo_edit_timewindow_callback, pattern="^algo_editf_timewindow_"))
     application.add_handler(CallbackQueryHandler(algo_edit_direction_set, pattern="^algo_edset_dir_"))
     application.add_handler(CallbackQueryHandler(algo_edit_timeframe_set, pattern="^algo_edset_tf_"))
     application.add_handler(CallbackQueryHandler(algo_edit_preset_set, pattern="^algo_edset_preset_"))
@@ -300,6 +330,8 @@ def create_application() -> Application:
             SCREENER_DIRECTION: [CallbackQueryHandler(screener_direction_selected, pattern="^screener_dir_")],
             SCREENER_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_lot_size_received), CallbackQueryHandler(screener_lot_size_callback, pattern="^screener_lot_")],
             SCREENER_PROTECTION: [CallbackQueryHandler(screener_protection_selected, pattern="^screener_prot_")],
+            SCREENER_TIME_WINDOW: [CallbackQueryHandler(screener_time_window_callback, pattern="^screener_tw_")],
+            SCREENER_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, screener_custom_time_received)],
             SCREENER_CONFIRM: [CallbackQueryHandler(screener_confirmed, pattern="^screener_confirm_")]
         },
         fallbacks=[
@@ -339,6 +371,8 @@ def create_application() -> Application:
             PAPER_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_lot_size_received), CallbackQueryHandler(paper_lot_size_callback, pattern="^paper_lot_")],
             PAPER_LEVERAGE: [CallbackQueryHandler(paper_leverage_selected, pattern="^paper_lev_")],
             PAPER_PROTECTION: [CallbackQueryHandler(paper_protection_selected, pattern="^paper_prot_")],
+            PAPER_TIME_WINDOW: [CallbackQueryHandler(paper_time_window_callback, pattern="^paper_tw_")],
+            PAPER_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_custom_time_received)],
             PAPER_CONFIRM: [CallbackQueryHandler(paper_confirmed, pattern="^paper_confirm_")],
         },
         fallbacks=[
@@ -366,6 +400,8 @@ def create_application() -> Application:
             PSCR_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_lot_size_received), CallbackQueryHandler(pscr_lot_size_callback, pattern="^pscr_lot_")],
             PSCR_LEVERAGE: [CallbackQueryHandler(pscr_leverage_selected, pattern="^pscr_lev_")],
             PSCR_PROTECTION: [CallbackQueryHandler(pscr_protection_selected, pattern="^pscr_prot_")],
+            PSCR_TIME_WINDOW: [CallbackQueryHandler(pscr_time_window_callback, pattern="^pscr_tw_")],
+            PSCR_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_custom_time_received)],
             PSCR_CONFIRM: [CallbackQueryHandler(pscr_confirmed, pattern="^pscr_confirm_")],
         },
         fallbacks=[

@@ -40,6 +40,12 @@ def _lev_display(lev) -> str:
     lev = int(lev or 10)
     return "Max" if lev == 0 else f"{lev}x"
 
+def _tw_display(tw) -> str:
+    """Format time_window dict for display."""
+    if not tw:
+        return "24/7"
+    return f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST"
+
 # Conversation states for paper INDIVIDUAL setup creation
 PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_DIRECTION = range(100, 104)
 PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE, PAPER_PROTECTION, PAPER_CONFIRM = range(104, 110)
@@ -47,6 +53,10 @@ PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE, PAPER_PROTECTION, 
 # Conversation states for paper SCREENER setup creation
 PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_ASSET_TYPE = range(110, 114)
 PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE, PSCR_PROTECTION, PSCR_CONFIRM = range(114, 120)
+
+# Time Window states for paper individual + screener
+PAPER_TIME_WINDOW, PAPER_CUSTOM_TIME = 121, 122
+PSCR_TIME_WINDOW, PSCR_CUSTOM_TIME = 123, 124
 
 # Conversation state for editable virtual balance
 PAPER_SET_BALANCE_AMOUNT = 120
@@ -280,7 +290,7 @@ async def render_paper_protection_selection(update, context):
     lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
     text = (
         f"Leverage: {lev_display}\n\n"
-        "Step 10/10: Additional Protection (Stop-Loss)?"
+        "Step 10/11: Additional Protection (Stop-Loss)?"
     )
     keyboard = [
         [InlineKeyboardButton("Yes (Enable SL)", callback_data="paper_prot_yes")],
@@ -300,6 +310,11 @@ async def render_paper_protection_selection(update, context):
 async def render_paper_confirm(update, context):
     ud = context.user_data
     protection = ud.get('paper_protection', False)
+    tw = ud.get('paper_time_window')
+    if tw:
+        tw_display = f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST"
+    else:
+        tw_display = "24/7 (No Restriction)"
     text = (
         "**Paper Setup Summary**\n\n"
         f"**Name:** {ud.get('paper_setup_name', '?')}\n"
@@ -312,13 +327,14 @@ async def render_paper_confirm(update, context):
         f"**Lot Size:** {ud.get('paper_lot_size', '?')}\n"
         f"**Leverage:** {_lev_display(ud.get('paper_leverage', 10))}\n"
         f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
+        f"**Time Window:** {tw_display}\n"
         f"**Mode:** PAPER TRADE (Virtual)\n\n"
         "Confirm to save and activate?"
     )
     keyboard = [
         [InlineKeyboardButton("Confirm and Activate", callback_data="paper_confirm_yes")],
         [
-            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_PROTECTION"),
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_TIME_WINDOW"),
             InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
         ]
     ]
@@ -577,7 +593,7 @@ async def render_pscr_protection_selection(update, context):
     lev_display = "Max (per asset)" if leverage == 0 else f"{leverage}x"
     text = (
         f"Leverage: {lev_display}\n\n"
-        "Step 10/11: Additional Protection (Stop-Loss)?"
+        "Step 10/12: Additional Protection (Stop-Loss)?"
     )
     keyboard = [
         [InlineKeyboardButton("Yes (Enable SL)", callback_data="pscr_prot_yes")],
@@ -598,6 +614,11 @@ async def render_pscr_confirm(update, context):
     ud = context.user_data
     protection = ud.get('pscr_protection', False)
     asset_type_text = ASSET_TYPE_TEXT.get(ud.get('pscr_asset_type', ''), ud.get('pscr_asset_type', 'Unknown'))
+    tw = ud.get('pscr_time_window')
+    if tw:
+        tw_display = f"{tw['start']} → {tw['stop_entries']} → {tw['hard_exit']} IST"
+    else:
+        tw_display = "24/7 (No Restriction)"
     
     text = (
         "**Paper Screener Summary**\n\n"
@@ -611,13 +632,14 @@ async def render_pscr_confirm(update, context):
         f"**Lot Size:** {ud.get('pscr_lot_size', '?')}\n"
         f"**Leverage:** {_lev_display(ud.get('pscr_leverage', 10))}\n"
         f"**Stop-Loss:** {'Enabled' if protection else 'Disabled'}\n"
+        f"**Time Window:** {tw_display}\n"
         f"**Mode:** PAPER SCREENER (Virtual)\n\n"
         "Confirm to save and activate?"
     )
     keyboard = [
         [InlineKeyboardButton("Confirm and Activate", callback_data="pscr_confirm_yes")],
         [
-            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_PROTECTION"),
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_TIME_WINDOW"),
             InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
         ]
     ]
@@ -782,9 +804,85 @@ async def paper_protection_selected(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     protection = query.data == "paper_prot_yes"
     context.user_data['paper_protection'] = protection
+    return await render_paper_time_window_selection(update, context)
+
+async def render_paper_time_window_selection(update, context):
+    protection = context.user_data.get('paper_protection', False)
+    text = (
+        f"Protection: {'Enabled' if protection else 'Disabled'}\n\n"
+        f"Step 11/11: Time Window\n\n"
+        f"Run 24/7 or restrict to a specific IST time window?\n\n"
+        f"A time window controls:\n"
+        f"• When new entries are allowed\n"
+        f"• When entries stop (cool-down)\n"
+        f"• When open positions are force-closed (hard exit)"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌍 Run 24/7", callback_data="paper_tw_247")],
+        [InlineKeyboardButton("🕒 Custom Time Window (IST)", callback_data="paper_tw_custom")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PAPER_TIME_WINDOW
+
+async def paper_time_window_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 24/7 vs custom time window selection for paper setup."""
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.replace("paper_tw_", "")
+    if mode == "247":
+        context.user_data['paper_time_window'] = None
+        return await render_paper_confirm(update, context)
+    else:
+        text = (
+            "🕒 **Custom Time Window (IST)**\n\n"
+            "Reply with 3 times in `HH:MM` format, comma-separated:\n"
+            "`Start, Stop Entries, Hard Exit`\n\n"
+            "Example: `20:00, 20:45, 21:00`\n\n"
+            "• **Start** — entries allowed from this time\n"
+            "• **Stop Entries** — no new entries after this\n"
+            "• **Hard Exit** — force-close any open position"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="paper_back_to_PAPER_TIME_WINDOW"),
+                InlineKeyboardButton("❌ Cancel", callback_data="paper_fsm_cancel")
+            ]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return PAPER_CUSTOM_TIME
+
+async def paper_custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parse custom time window input for paper setup."""
+    val = update.message.text.strip()
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError("Need exactly 3 times")
+        from utils.time_utils import parse_time
+        parse_time(parts[0])
+        parse_time(parts[1])
+        parse_time(parts[2])
+        context.user_data['paper_time_window'] = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+    except Exception:
+        await update.message.reply_text(
+            "❌ Invalid format. Reply with exactly 3 times separated by commas.\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            parse_mode="Markdown"
+        )
+        return PAPER_CUSTOM_TIME
     return await render_paper_confirm(update, context)
-
-
 
 async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Save the paper setup to database."""
@@ -826,6 +924,7 @@ async def paper_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "product_id": product_id,
             "lot_size": ud['paper_lot_size'],
             "additional_protection": ud['paper_protection'],
+            "time_window": ud.get('paper_time_window'),
             "is_active": True,
             "is_paper_trade": True,
             "paper_leverage": ud['paper_leverage'],
@@ -961,6 +1060,84 @@ async def pscr_protection_selected(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     protection = query.data == "pscr_prot_yes"
     context.user_data['pscr_protection'] = protection
+    return await render_pscr_time_window_selection(update, context)
+
+async def render_pscr_time_window_selection(update, context):
+    protection = context.user_data.get('pscr_protection', False)
+    text = (
+        f"Protection: {'Enabled' if protection else 'Disabled'}\n\n"
+        f"Step 11/12: Time Window\n\n"
+        f"Run 24/7 or restrict to a specific IST time window?\n\n"
+        f"A time window controls:\n"
+        f"• When new entries are allowed\n"
+        f"• When entries stop (cool-down)\n"
+        f"• When open positions are force-closed (hard exit)"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌍 Run 24/7", callback_data="pscr_tw_247")],
+        [InlineKeyboardButton("🕒 Custom Time Window (IST)", callback_data="pscr_tw_custom")],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_PROTECTION"),
+            InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    return PSCR_TIME_WINDOW
+
+async def pscr_time_window_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle 24/7 vs custom time window selection for paper screener."""
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.replace("pscr_tw_", "")
+    if mode == "247":
+        context.user_data['pscr_time_window'] = None
+        return await render_pscr_confirm(update, context)
+    else:
+        text = (
+            "🕒 **Custom Time Window (IST)**\n\n"
+            "Reply with 3 times in `HH:MM` format, comma-separated:\n"
+            "`Start, Stop Entries, Hard Exit`\n\n"
+            "Example: `20:00, 20:45, 21:00`\n\n"
+            "• **Start** — entries allowed from this time\n"
+            "• **Stop Entries** — no new entries after this\n"
+            "• **Hard Exit** — force-close any open position"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton("🔙 Back", callback_data="pscr_back_to_PSCR_TIME_WINDOW"),
+                InlineKeyboardButton("❌ Cancel", callback_data="pscr_fsm_cancel")
+            ]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return PSCR_CUSTOM_TIME
+
+async def pscr_custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parse custom time window input for paper screener."""
+    val = update.message.text.strip()
+    try:
+        parts = [p.strip() for p in val.split(",")]
+        if len(parts) != 3:
+            raise ValueError("Need exactly 3 times")
+        from utils.time_utils import parse_time
+        parse_time(parts[0])
+        parse_time(parts[1])
+        parse_time(parts[2])
+        context.user_data['pscr_time_window'] = {
+            "start": parts[0],
+            "stop_entries": parts[1],
+            "hard_exit": parts[2]
+        }
+    except Exception:
+        await update.message.reply_text(
+            "❌ Invalid format. Reply with exactly 3 times separated by commas.\n\n"
+            "Example: `20:00, 20:45, 21:00`",
+            parse_mode="Markdown"
+        )
+        return PSCR_CUSTOM_TIME
     return await render_pscr_confirm(update, context)
 
 
@@ -992,6 +1169,7 @@ async def pscr_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "direction": ud['pscr_direction'],
             "lot_size": ud['pscr_lot_size'],
             "additional_protection": ud['pscr_protection'],
+            "time_window": ud.get('pscr_time_window'),
             "is_active": True,
             "is_paper_trade": True,
             "paper_leverage": ud['pscr_leverage'],
@@ -1347,6 +1525,7 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"**Lot Size:** {setup['lot_size']}\n"
             f"**Leverage:** {_lev_display(setup.get('paper_leverage', 10))}\n"
             f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
+            f"**Time Window:** {_tw_display(setup.get('time_window'))}\n"
             f"**Status:** {status}\n\n"
             f"**Current Position:** {position.upper()}\n"
         )
@@ -1366,6 +1545,7 @@ async def paper_detail_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"**Lot Size:** {setup.get('lot_size', 1)}\n"
             f"**Leverage:** {_lev_display(setup.get('paper_leverage', 10))}\n"
             f"**SL Protection:** {'Yes' if setup.get('additional_protection') else 'No'}\n"
+            f"**Time Window:** {_tw_display(setup.get('time_window'))}\n"
             f"**Status:** {status}\n"
         )
     
@@ -1602,6 +1782,10 @@ async def paper_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await render_paper_lot_size_prompt(update, context)
     elif state == "PAPER_LEVERAGE":
         return await render_paper_leverage_selection(update, context)
+    elif state == "PAPER_PROTECTION":
+        return await render_paper_protection_selection(update, context)
+    elif state == "PAPER_TIME_WINDOW":
+        return await render_paper_time_window_selection(update, context)
     
     return ConversationHandler.END
 
@@ -1636,6 +1820,10 @@ async def pscr_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await render_pscr_lot_size_prompt(update, context)
     elif state == "PSCR_LEVERAGE":
         return await render_pscr_leverage_selection(update, context)
+    elif state == "PSCR_PROTECTION":
+        return await render_pscr_protection_selection(update, context)
+    elif state == "PSCR_TIME_WINDOW":
+        return await render_pscr_time_window_selection(update, context)
     
     return ConversationHandler.END
 
