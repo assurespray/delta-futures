@@ -108,11 +108,6 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
         query = update.callback_query
         await query.answer()
         text = query.data.replace("ohlc_btn_", "")
-        # Remove buttons from the message
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
     else:
         text = update.message.text.strip()
     
@@ -167,7 +162,7 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             
             if step < 7:
                 if update.callback_query:
-                    await update.callback_query.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
+                    await update.callback_query.edit_message_text(OHLC_PROMPTS[step], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 else:
                     await update.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 return PRESET_P1
@@ -185,14 +180,14 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
         
         msg = "✅ Preset saved successfully.\nUse /start to go to main menu."
         if update.callback_query:
-            await update.callback_query.message.reply_text(msg)
+            await update.callback_query.edit_message_text(msg)
         else:
             await update.message.reply_text(msg)
         return ConversationHandler.END
     except Exception as e:
         msg = f"❌ Invalid format. Error: {e}\nTry again:"
         if update.callback_query:
-            await update.callback_query.message.reply_text(msg)
+            await update.callback_query.edit_message_text(msg)
         else:
             await update.message.reply_text(msg)
         return PRESET_P1
@@ -312,10 +307,6 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
         query = update.callback_query
         await query.answer()
         text = query.data.replace("ohlc_btn_", "")
-        try:
-            await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
     else:
         text = update.message.text.strip()
         
@@ -325,7 +316,7 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
     if not pid or not ptype:
         msg = "❌ Session expired. Use /start."
         if update.callback_query:
-            await update.callback_query.message.reply_text(msg)
+            await update.callback_query.edit_message_text(msg)
         else:
             await update.message.reply_text(msg)
         return ConversationHandler.END
@@ -386,7 +377,7 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
                 current_val = old_params.get(keys[step], '?')
                 prompt = OHLC_PROMPTS[step] + f"\n*(Current: {current_val})*"
                 if update.callback_query:
-                    await update.callback_query.message.reply_text(prompt, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
+                    await update.callback_query.edit_message_text(prompt, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 else:
                     await update.message.reply_text(prompt, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 return PRESET_EDIT_PARAMS
@@ -408,14 +399,14 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
             "Use /start to return to main menu."
         )
         if update.callback_query:
-            await update.callback_query.message.reply_text(msg, parse_mode="Markdown")
+            await update.callback_query.edit_message_text(msg, parse_mode="Markdown")
         else:
             await update.message.reply_text(msg, parse_mode="Markdown")
         return ConversationHandler.END
     except Exception as e:
         msg = f"❌ Invalid format. Error: {e}\nTry again:"
         if update.callback_query:
-            await update.callback_query.message.reply_text(msg)
+            await update.callback_query.edit_message_text(msg)
         else:
             await update.message.reply_text(msg)
         return PRESET_EDIT_PARAMS
