@@ -70,8 +70,6 @@ def recalculate_metrics_with_auto_capital(trade_log: list, leverage: float):
     if auto_capital <= 0:
         auto_capital = 100.0 # Safety fallback
         
-    from utils.backtest_metrics import calculate_metrics
-    from utils.monte_carlo import run_advanced_analytics
     metrics = calculate_metrics(trade_log, auto_capital)
     advanced = run_advanced_analytics(trade_log, auto_capital)
     
