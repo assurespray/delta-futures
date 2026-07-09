@@ -77,6 +77,10 @@ class OHLCBreakoutStrategy(BaseStrategy):
         # Instance state for TP tracking (live engine only)
         self._tp_price = 0.0
         self._pending_ref_time = 0  # ref_time when pending order was created
+        
+        # One-shot memory state
+        self._long_triggered_ref = 0
+        self._short_triggered_ref = 0
 
         # Dedup tracking
         self._last_processed_candle_time: Dict[str, int] = {}
@@ -128,6 +132,9 @@ class OHLCBreakoutStrategy(BaseStrategy):
         building_low = float('inf')
         in_ref_window = False
         targets_valid = False
+        
+        long_taken = False
+        short_taken = False
 
         for i in range(n):
             ts = int(times[i])
@@ -165,6 +172,10 @@ class OHLCBreakoutStrategy(BaseStrategy):
                     in_ref_window = True
                     building_high = highs[i]
                     building_low = lows[i]
+                    
+                    # Reset one-shot memory for new reference window
+                    long_taken = False
+                    short_taken = False
                 else:
                     # Continue building
                     building_high = max(building_high, highs[i])
@@ -199,18 +210,22 @@ class OHLCBreakoutStrategy(BaseStrategy):
             # ---- Entry signal generation ----
             if self.entry_mode == "confirmation":
                 # Candle close above target_high → long
-                if closes[i] > active_high:
+                if not long_taken and closes[i] > active_high:
                     entry_signal[i] = 1
+                    long_taken = True
                 # Candle close below target_low → short
-                elif closes[i] < active_low:
+                elif not short_taken and closes[i] < active_low:
                     entry_signal[i] = -1
+                    short_taken = True
             else:
                 # Breakout mode: high/low pierce target ± actual_pip_offset
-                if highs[i] > active_high + actual_pip_offset:
+                if not long_taken and highs[i] > active_high + actual_pip_offset:
                     entry_signal[i] = 1
+                    long_taken = True
                 # Short breakout (long takes priority if both trigger)
-                if entry_signal[i] == 0 and lows[i] < active_low - actual_pip_offset:
+                if entry_signal[i] == 0 and not short_taken and lows[i] < active_low - actual_pip_offset:
                     entry_signal[i] = -1
+                    short_taken = True
 
             # ---- SL prices ----
             if entry_signal[i] == 1:
@@ -454,16 +469,22 @@ class OHLCBreakoutStrategy(BaseStrategy):
             tick_size = get_tick_size(symbol) if symbol else 0.0001
             actual_pip_offset = self.pip_offset_multiplier * tick_size
 
-            # Check if reference candle changed since last entry
-            last_ref_time = previous_state.get("ref_time", 0) if previous_state else 0
+            # Read one-shot memory to survive restarts
+            if previous_state:
+                self._long_triggered_ref = previous_state.get("long_triggered_ref", self._long_triggered_ref)
+                self._short_triggered_ref = previous_state.get("short_triggered_ref", self._short_triggered_ref)
+                
+            can_long = self._long_triggered_ref != ref_time
+            can_short = self._short_triggered_ref != ref_time
 
             if self.entry_mode == "confirmation":
                 # --- Confirmation mode: candle close triggers ---
-                if current_price > target_high:
+                if can_long and current_price > target_high:
                     sl = target_low if self.sl_type == "opposite" else ref_mid
                     risk = current_price - sl
                     self._tp_price = current_price + risk * self.rr_ratio
                     self._pending_ref_time = ref_time
+                    self._long_triggered_ref = ref_time
 
                     logger.info(
                         f"OHLC LONG (confirmed): Price {current_price} > Target {target_high} | "
@@ -477,11 +498,12 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         reason=f'OHLC Breakout Up (confirmed)'
                     )
 
-                elif current_price < target_low:
+                elif can_short and current_price < target_low:
                     sl = target_high if self.sl_type == "opposite" else ref_mid
                     risk = sl - current_price
                     self._tp_price = current_price - risk * self.rr_ratio
                     self._pending_ref_time = ref_time
+                    self._short_triggered_ref = ref_time
 
                     logger.info(
                         f"OHLC SHORT (confirmed): Price {current_price} < Target {target_low} | "
@@ -498,7 +520,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
             else:
                 # --- Breakout mode: pending stop-market orders ---
                 # Direction based on price position relative to ref_mid
-                if current_price >= ref_mid:
+                if current_price >= ref_mid and can_long:
                     # Trending toward upper target → long pending
                     trigger = target_high + actual_pip_offset
                     sl = target_low if self.sl_type == "opposite" else ref_mid
@@ -508,6 +530,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         risk = current_price - sl
                         self._tp_price = current_price + risk * self.rr_ratio
                         self._pending_ref_time = ref_time
+                        self._long_triggered_ref = ref_time
 
                         logger.info(
                             f"OHLC LONG (immediate breakout): Price {current_price} >= {trigger}"
@@ -524,6 +547,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         risk = trigger - sl
                         self._tp_price = trigger + risk * self.rr_ratio
                         self._pending_ref_time = ref_time
+                        self._long_triggered_ref = ref_time
 
                         logger.info(
                             f"OHLC LONG (pending): trigger {trigger}, current {current_price}"
@@ -535,7 +559,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                             immediate=False,
                             reason='OHLC Breakout Up (pending)'
                         )
-                else:
+                elif current_price < ref_mid and can_short:
                     # Trending toward lower target → short pending
                     trigger = target_low - actual_pip_offset
                     sl = target_high if self.sl_type == "opposite" else ref_mid
@@ -544,6 +568,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         risk = sl - current_price
                         self._tp_price = current_price - risk * self.rr_ratio
                         self._pending_ref_time = ref_time
+                        self._short_triggered_ref = ref_time
 
                         logger.info(
                             f"OHLC SHORT (immediate breakout): Price {current_price} <= {trigger}"
@@ -559,6 +584,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         risk = sl - trigger
                         self._tp_price = trigger - risk * self.rr_ratio
                         self._pending_ref_time = ref_time
+                        self._short_triggered_ref = ref_time
 
                         logger.info(
                             f"OHLC SHORT (pending): trigger {trigger}, current {current_price}"
@@ -693,6 +719,8 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 "primary_signal": signal,
                 "ref_time": ref.get("ref_time", 0),
                 "tp_price": self._tp_price,
+                "long_triggered_ref": self._long_triggered_ref,
+                "short_triggered_ref": self._short_triggered_ref,
             },
             "display_details": {
                 "Status": signal_text,
