@@ -51,6 +51,7 @@ async def preset_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("📊 Dual SuperTrend", callback_data="preset_type_dual_supertrend")],
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
+        [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await update.message.reply_text("Select base strategy:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -73,6 +74,14 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
         return PRESET_P1
     elif ptype == "donchian":
         await query.edit_message_text("Enter Donchian Channel Period (e.g., 20):")
+        return PRESET_P1
+    elif ptype == "ohlc_breakout":
+        await query.edit_message_text(
+            "Enter 7 parameters separated by comma:\n"
+            "Ref Time, Ref Timeframe, Merge Prev(True/False), SL Type(opposite/middle), RR Ratio, Pip Offset, Entry Mode(breakout/confirmation)\n\n"
+            "Example:\n`09:15,1h,False,opposite,2.0,0.0001,confirmation`",
+            parse_mode="Markdown"
+        )
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,6 +109,17 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
         elif ptype == "donchian":
             if len(parts) != 1: raise ValueError("Need 1 value (period)")
             params = {"period": int(parts[0])}
+        elif ptype == "ohlc_breakout":
+            if len(parts) != 7: raise ValueError("Need exactly 7 values")
+            params = {
+                "reference_time": parts[0].strip(),
+                "reference_timeframe": parts[1].strip(),
+                "use_prev_candle": parts[2].strip().lower() in ['true', '1', 'yes'],
+                "sl_type": parts[3].strip().lower(),
+                "rr_ratio": float(parts[4]),
+                "pip_offset": float(parts[5]),
+                "entry_mode": parts[6].strip().lower()
+            }
             
         await create_strategy_preset({
             "user_id": str(update.effective_user.id),
@@ -209,6 +229,15 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif ptype == "donchian":
         message += f"• Period: {params.get('period', '?')}\n\n"
         message += "Enter new Donchian Channel Period (e.g., 20):"
+    elif ptype == "ohlc_breakout":
+        message += f"• Ref Time: {params.get('reference_time', '?')}\n"
+        message += f"• Ref Timeframe: {params.get('reference_timeframe', '?')}\n"
+        message += f"• Merge Prev: {params.get('use_prev_candle', '?')}\n"
+        message += f"• SL Type: {params.get('sl_type', '?')}\n"
+        message += f"• RR Ratio: {params.get('rr_ratio', '?')}\n"
+        message += f"• Pip Offset: {params.get('pip_offset', '?')}\n"
+        message += f"• Entry Mode: {params.get('entry_mode', '?')}\n\n"
+        message += "Enter 7 parameters separated by comma:\nRef Time, Ref TF, Merge(True/False), SL, RR, Pip Offset, Entry Mode\n(e.g., `09:15,1h,False,opposite,2.0,0.0001,confirmation`):"
     
     message += "\n\nSend /cancel to abort."
     
@@ -248,6 +277,17 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
         elif ptype == "donchian":
             if len(parts) != 1: raise ValueError("Need 1 value (period)")
             params = {"period": int(parts[0])}
+        elif ptype == "ohlc_breakout":
+            if len(parts) != 7: raise ValueError("Need exactly 7 values")
+            params = {
+                "reference_time": parts[0].strip(),
+                "reference_timeframe": parts[1].strip(),
+                "use_prev_candle": parts[2].strip().lower() in ['true', '1', 'yes'],
+                "sl_type": parts[3].strip().lower(),
+                "rr_ratio": float(parts[4]),
+                "pip_offset": float(parts[5]),
+                "entry_mode": parts[6].strip().lower()
+            }
         
         await update_strategy_preset(pid, {"parameters": params})
         
@@ -289,6 +329,7 @@ async def preset_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("📊 Dual SuperTrend", callback_data="preset_type_dual_supertrend")],
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
+        [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await query.edit_message_text(

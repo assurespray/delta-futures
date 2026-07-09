@@ -4,6 +4,7 @@ from strategy.dual_supertrend import DualSuperTrendStrategy
 from strategy.single_supertrend import SingleSuperTrendStrategy
 from strategy.range_breakout import RangeBreakoutStrategy
 from strategy.donchian_breakout import DonchianBreakoutStrategy
+from strategy.ohlc_breakout import OHLCBreakoutStrategy
 
 
 class StrategyFactory:
@@ -15,5 +16,7 @@ class StrategyFactory:
             return RangeBreakoutStrategy(params)
         elif strategy_type == "donchian":
             return DonchianBreakoutStrategy(params)
+        elif strategy_type == "ohlc_breakout":
+            return OHLCBreakoutStrategy(params)
         else:
             return DualSuperTrendStrategy(params)

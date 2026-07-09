@@ -193,6 +193,19 @@ async def ensure_default_presets(user_id: str) -> None:
             "preset_name": "[S] Donchian Breakout (20)",
             "parameters": {"period": 20},
         },
+        {
+            "strategy_type": "ohlc_breakout",
+            "preset_name": "[S] OHLC Breakout (09:15, 1h)",
+            "parameters": {
+                "reference_time": "09:15",
+                "reference_timeframe": "1h",
+                "use_prev_candle": False,
+                "sl_type": "opposite",
+                "rr_ratio": 2.0,
+                "pip_offset": 0.0001,
+                "entry_mode": "confirmation"
+            },
+        },
     ]
 
     for d in defaults:

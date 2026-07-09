@@ -142,6 +142,9 @@ class BacktestEngine:
             sl_price_short_arr = signals["sl_price_short"]
             indicator_val_arr = signals["indicator_value"]
             
+            # TP support: strategies can return rr_ratio for auto TP computation
+            rr_ratio = signals.get("rr_ratio", 0)
+            
             # 3. Simulate chronological ticks (the core trading loop)
             # We iterate from start_idx to end of chunk.
             from utils.time_utils import IST
@@ -183,10 +186,15 @@ class BacktestEngine:
                     
                     if self.open_trade["direction"] == "long":
                         sl_price = self.open_trade["sl_price"]
+                        tp_price = self.open_trade.get("tp_price", 0)
                         if t_low <= sl_price:
                             exit_triggered = True
                             exit_price = t_open if t_open < sl_price else sl_price
                             exit_reason = "Stop Loss"
+                        elif tp_price > 0 and t_high >= tp_price:
+                            exit_triggered = True
+                            exit_price = t_open if t_open > tp_price else tp_price
+                            exit_reason = "Take Profit"
                         elif exit_long_arr[i-1]:
                             exit_triggered = True
                             exit_price = t_open
@@ -194,10 +202,15 @@ class BacktestEngine:
                             
                     elif self.open_trade["direction"] == "short":
                         sl_price = self.open_trade["sl_price"]
+                        tp_price = self.open_trade.get("tp_price", 0)
                         if t_high >= sl_price:
                             exit_triggered = True
                             exit_price = t_open if t_open > sl_price else sl_price
                             exit_reason = "Stop Loss"
+                        elif tp_price > 0 and t_low <= tp_price:
+                            exit_triggered = True
+                            exit_price = t_open if t_open < tp_price else tp_price
+                            exit_reason = "Take Profit"
                         elif exit_short_arr[i-1]:
                             exit_triggered = True
                             exit_price = t_open
@@ -223,20 +236,26 @@ class BacktestEngine:
                         
                     if signal == 1 and self.direction in ["both", "long_only"]:
                         entry_price = t_open
+                        sl_price = float(sl_price_long_arr[i-1])
+                        tp_price = entry_price + (entry_price - sl_price) * rr_ratio if rr_ratio > 0 else 0.0
                         self._open_position(
                             direction="long",
                             entry_price=entry_price,
                             entry_time=t_time,
-                            sl_price=float(sl_price_long_arr[i-1]),
+                            sl_price=sl_price,
+                            tp_price=tp_price,
                             indicator_value=float(indicator_val_arr[i-1])
                         )
                     elif signal == -1 and self.direction in ["both", "short_only"]:
                         entry_price = t_open
+                        sl_price = float(sl_price_short_arr[i-1])
+                        tp_price = entry_price - (sl_price - entry_price) * rr_ratio if rr_ratio > 0 else 0.0
                         self._open_position(
                             direction="short",
                             entry_price=entry_price,
                             entry_time=t_time,
-                            sl_price=float(sl_price_short_arr[i-1]),
+                            sl_price=sl_price,
+                            tp_price=tp_price,
                             indicator_value=float(indicator_val_arr[i-1])
                         )
                 
@@ -273,7 +292,7 @@ class BacktestEngine:
             "total_candles": processed_rows
         }
 
-    def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, indicator_value: float):
+    def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, tp_price: float, indicator_value: float):
         """Open a mock position with exact margin and lot size math."""
         quantity = self.lot_size
         position_size_usd = entry_price * quantity * self.contract_multiplier
@@ -295,6 +314,7 @@ class BacktestEngine:
             "entry_price": entry_price,
             "entry_time": entry_time,
             "sl_price": sl_price,
+            "tp_price": tp_price,
             "quantity": quantity,
             "position_size_usd": position_size_usd,
             "initial_margin": initial_margin,

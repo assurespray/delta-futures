@@ -104,8 +104,10 @@ def _format_indicator_params(indicator: str, params: dict) -> str:
         return f"Single ST ({params.get('atr_length','?')}, {params.get('factor','?')})"
     elif indicator == 'range_breakout_lazybear' or indicator == 'range_breakout':
         return f"Range Breakout LB (EMA:{params.get('ema_length','?')})"
-    elif indicator == 'donchian_breakout':
+    elif indicator == 'donchian_breakout' or indicator == 'donchian':
         return f"Donchian ({params.get('period','?')})"
+    elif indicator == 'ohlc_breakout':
+        return f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')})"
     
     return indicator.replace('_', ' ').title()
 
