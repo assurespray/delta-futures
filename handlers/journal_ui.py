@@ -107,7 +107,7 @@ def _format_indicator_params(indicator: str, params: dict) -> str:
     elif indicator == 'donchian_breakout' or indicator == 'donchian':
         return f"Donchian ({params.get('period','?')})"
     elif indicator == 'ohlc_breakout':
-        return f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')})"
+        return f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')}, PipMult:{params.get('pip_offset_multiplier','?')})"
     
     return indicator.replace('_', ' ').title()
 

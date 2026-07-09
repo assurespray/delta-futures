@@ -56,7 +56,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
         self.use_prev_candle = bool(self.params.get("use_prev_candle", False))
         self.sl_type = str(self.params.get("sl_type", "opposite"))     # "opposite" | "middle"
         self.rr_ratio = float(self.params.get("rr_ratio", 2.0))
-        self.pip_offset = float(self.params.get("pip_offset", BREAKOUT_PIP_OFFSET))
+        self.pip_offset_multiplier = float(self.params.get("pip_offset_multiplier", 1.0))
         self.entry_mode = str(self.params.get("entry_mode", "confirmation"))  # "breakout" | "confirmation"
 
         # Parse reference time
@@ -96,6 +96,11 @@ class OHLCBreakoutStrategy(BaseStrategy):
         Returns standard signal dict + rr_ratio for engine TP computation.
         """
         from utils.time_utils import IST
+        from utils.market_utils import get_tick_size
+        
+        symbol = self.params.get("symbol", "")
+        tick_size = get_tick_size(symbol) if symbol else 0.0001
+        actual_pip_offset = self.pip_offset_multiplier * tick_size
 
         n = len(df)
         times = df['time'].astype(int).values
@@ -200,11 +205,11 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 elif closes[i] < active_low:
                     entry_signal[i] = -1
             else:
-                # Breakout mode: high/low pierce target ± pip_offset
-                if highs[i] > active_high + self.pip_offset:
+                # Breakout mode: high/low pierce target ± actual_pip_offset
+                if highs[i] > active_high + actual_pip_offset:
                     entry_signal[i] = 1
                 # Short breakout (long takes priority if both trigger)
-                if entry_signal[i] == 0 and lows[i] < active_low - self.pip_offset:
+                if entry_signal[i] == 0 and lows[i] < active_low - actual_pip_offset:
                     entry_signal[i] = -1
 
             # ---- SL prices ----
@@ -442,6 +447,12 @@ class OHLCBreakoutStrategy(BaseStrategy):
 
             # Reset TP tracking when no position
             self._tp_price = 0.0
+            
+            # Dynamic tick size calculation
+            from utils.market_utils import get_tick_size
+            symbol = indicators_data.get("symbol", "")
+            tick_size = get_tick_size(symbol) if symbol else 0.0001
+            actual_pip_offset = self.pip_offset_multiplier * tick_size
 
             # Check if reference candle changed since last entry
             last_ref_time = previous_state.get("ref_time", 0) if previous_state else 0
@@ -489,7 +500,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 # Direction based on price position relative to ref_mid
                 if current_price >= ref_mid:
                     # Trending toward upper target → long pending
-                    trigger = target_high + self.pip_offset
+                    trigger = target_high + actual_pip_offset
                     sl = target_low if self.sl_type == "opposite" else ref_mid
 
                     if current_price >= trigger:
@@ -526,7 +537,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                         )
                 else:
                     # Trending toward lower target → short pending
-                    trigger = target_low - self.pip_offset
+                    trigger = target_low - actual_pip_offset
                     sl = target_high if self.sl_type == "opposite" else ref_mid
 
                     if current_price <= trigger:

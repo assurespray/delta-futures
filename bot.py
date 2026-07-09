@@ -175,7 +175,10 @@ def create_application() -> Application:
                 CallbackQueryHandler(preset_type_selected, pattern="^preset_type_"),
                 CallbackQueryHandler(preset_back_to_name, pattern="^preset_back_name$"),
             ],
-            PRESET_P1: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_params_received)],
+            PRESET_P1: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, preset_params_received),
+                CallbackQueryHandler(preset_params_received, pattern="^ohlc_btn_")
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_preset),
@@ -191,7 +194,10 @@ def create_application() -> Application:
     preset_edit_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(preset_edit_select, pattern="^preset_edit_select_")],
         states={
-            PRESET_EDIT_PARAMS: [MessageHandler(filters.TEXT & ~filters.COMMAND, preset_edit_params_received)],
+            PRESET_EDIT_PARAMS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, preset_edit_params_received),
+                CallbackQueryHandler(preset_edit_params_received, pattern="^ohlc_btn_")
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_preset),

@@ -202,7 +202,7 @@ async def ensure_default_presets(user_id: str) -> None:
                 "use_prev_candle": False,
                 "sl_type": "opposite",
                 "rr_ratio": 2.0,
-                "pip_offset": 0.0001,
+                "pip_offset_multiplier": 1.0,
                 "entry_mode": "confirmation"
             },
         },

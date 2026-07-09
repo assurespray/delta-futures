@@ -696,7 +696,7 @@ async def algo_view_detail_callback(update: Update, context: ContextTypes.DEFAUL
         elif setup['indicator'] == 'donchian':
             indicator_display = f"Donchian ({params.get('period','?')})"
         elif setup['indicator'] == 'ohlc_breakout':
-            indicator_display = f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')})"
+            indicator_display = f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')}, PipMult:{params.get('pip_offset_multiplier','?')})"
     message += f"├ Indicator: {indicator_display}\n"
     message += f"├ Direction: {setup['direction'].replace('_', ' ').title()}\n"
     message += f"├ Timeframe: {setup['timeframe']}\n"

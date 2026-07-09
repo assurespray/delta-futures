@@ -89,9 +89,10 @@ async def get_top_gainers(client: DeltaExchangeClient, limit: int = 10) -> List[
 
 _contract_multipliers_cache: Dict[str, float] = {}
 _max_leverage_cache: Dict[str, float] = {}
+_tick_size_cache: Dict[str, float] = {}
 
 async def refresh_contract_multipliers() -> None:
-    """Fetch and cache contract values and max leverage for all products from Delta Exchange."""
+    """Fetch and cache contract values, tick sizes, and max leverage for all products from Delta Exchange."""
     try:
         from api.market_data import get_products
         # Public endpoints don't need real API keys
@@ -103,6 +104,15 @@ async def refresh_contract_multipliers() -> None:
                 cval = p.get("contract_value")
                 if sym and cval is not None:
                     _contract_multipliers_cache[sym] = float(cval)
+                    
+                # Cache tick size
+                tick_size = p.get("tick_size")
+                if sym and tick_size is not None:
+                    try:
+                        _tick_size_cache[sym] = float(tick_size)
+                    except ValueError:
+                        pass
+                        
                 # Cache max leverage from initial_margin
                 # initial_margin is a percentage string, e.g. "0.5" means 0.5% → max leverage = 100/0.5 = 200x
                 initial_margin = p.get("initial_margin")
@@ -113,11 +123,11 @@ async def refresh_contract_multipliers() -> None:
                             _max_leverage_cache[sym] = 100.0 / margin_pct
                     except (ValueError, ZeroDivisionError):
                         pass
-            logger.info(f"✅ Cached {len(_contract_multipliers_cache)} contract multipliers, {len(_max_leverage_cache)} max leverage values")
+            logger.info(f"✅ Cached {len(_contract_multipliers_cache)} multipliers, {len(_tick_size_cache)} tick sizes, {len(_max_leverage_cache)} max leverages")
         else:
-            logger.warning("⚠️ Failed to fetch products for contract multiplier cache")
+            logger.warning("⚠️ Failed to fetch products for cache")
     except Exception as e:
-        logger.error(f"❌ Error refreshing contract multipliers: {e}")
+        logger.error(f"❌ Error refreshing caches: {e}")
     finally:
         await client.close()
 
@@ -137,6 +147,20 @@ def get_contract_multiplier(symbol: str) -> float:
         return 0.001
     else:
         return 1.0
+
+def get_tick_size(symbol: str) -> float:
+    """
+    Get the minimum price movement (tick size) for a symbol from cache.
+    Falls back to a safe default if not found.
+    """
+    symbol = symbol.upper()
+    if symbol in _tick_size_cache:
+        return _tick_size_cache[symbol]
+    
+    # Sensible fallbacks
+    if "BTC" in symbol or "ETH" in symbol:
+        return 0.5
+    return 0.0001
 
 def get_max_leverage(symbol: str) -> float:
     """

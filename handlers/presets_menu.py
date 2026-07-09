@@ -15,11 +15,21 @@ PRESET_EDIT_PARAMS = 10  # Unique state for edit conversation
 OHLC_PROMPTS = [
     "⏰ **Step 1/7: Reference Time**\nEnter the Reference Time (IST) in HH:MM format.\n\nExample: `09:15`",
     "⏳ **Step 2/7: Reference Timeframe**\nEnter the timeframe for the reference candle.\n\nExamples: `15m`, `1h`, `4h`, `1d`",
-    "🔄 **Step 3/7: Merge Previous Candle**\nTake the max high/min low of the last two reference candles? (True/False)\n\nExample: `False`",
-    "🛑 **Step 4/7: Stop Loss Type**\nEnter Stop Loss Type (`opposite` or `middle`).\n\nExample: `opposite`",
+    "🔄 **Step 3/7: Merge Previous Candle**\nTake the max high/min low of the last two reference candles?",
+    "🛑 **Step 4/7: Stop Loss Type**\nEnter Stop Loss Type:",
     "⚖️ **Step 5/7: Risk-Reward Ratio**\nEnter RR Ratio to calculate Take Profit.\n\nExample: `2.0`",
-    "📏 **Step 6/7: Pip Offset**\nEnter Pip Offset buffer for breakouts.\n\nExample: `0.0001`",
-    "⚡ **Step 7/7: Entry Mode**\nEnter Entry Mode (`breakout` or `confirmation`).\n\nExample: `confirmation`"
+    "📏 **Step 6/7: Pip/Tick Multiplier**\nEnter the number of ticks/pips to offset the breakout.\n*(Automatically scales to the asset's tick size)*\n\nExample: `1`, `2`, `5`",
+    "⚡ **Step 7/7: Entry Mode**\nEnter Entry Mode:"
+]
+
+OHLC_KEYBOARDS = [
+    None, # Step 1
+    None, # Step 2
+    InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes", callback_data="ohlc_btn_true"), InlineKeyboardButton("❌ No", callback_data="ohlc_btn_false")]]), # Step 3
+    InlineKeyboardMarkup([[InlineKeyboardButton("↕️ Opposite", callback_data="ohlc_btn_opposite"), InlineKeyboardButton("➖ Middle", callback_data="ohlc_btn_middle")]]), # Step 4
+    None, # Step 5
+    None, # Step 6
+    InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Breakout", callback_data="ohlc_btn_breakout"), InlineKeyboardButton("✅ Confirmation", callback_data="ohlc_btn_confirmation")]]), # Step 7
 ]
 
 async def presets_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,12 +98,23 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     elif ptype == "ohlc_breakout":
         context.user_data['ohlc_step'] = 0
         context.user_data['ohlc_params'] = {}
-        await query.edit_message_text(OHLC_PROMPTS[0], parse_mode="Markdown")
+        await query.edit_message_text(OHLC_PROMPTS[0], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    ptype = context.user_data['strategy_type']
+    ptype = context.user_data.get('strategy_type')
+    
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        text = query.data.replace("ohlc_btn_", "")
+        # Remove buttons from the message
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    else:
+        text = update.message.text.strip()
     
     try:
         parts = [p.strip() for p in text.split(",")]
@@ -135,7 +156,7 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             elif step == 4:
                 params_dict['rr_ratio'] = float(val)
             elif step == 5:
-                params_dict['pip_offset'] = float(val)
+                params_dict['pip_offset_multiplier'] = float(val)
             elif step == 6:
                 if val.lower() not in ['breakout', 'confirmation']: raise ValueError("Must be 'breakout' or 'confirmation'")
                 params_dict['entry_mode'] = val.lower()
@@ -145,7 +166,10 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data['ohlc_step'] = step
             
             if step < 7:
-                await update.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown")
+                if update.callback_query:
+                    await update.callback_query.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
+                else:
+                    await update.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 return PRESET_P1
             else:
                 params = params_dict
@@ -159,10 +183,18 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             "is_default": False
         })
         
-        await update.message.reply_text("✅ Preset saved successfully.\nUse /start to go to main menu.")
+        msg = "✅ Preset saved successfully.\nUse /start to go to main menu."
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return ConversationHandler.END
     except Exception as e:
-        await update.message.reply_text(f"❌ Invalid format. Error: {e}\nTry again:")
+        msg = f"❌ Invalid format. Error: {e}\nTry again:"
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return PRESET_P1
 
 async def cancel_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -269,19 +301,33 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += "Let's update them one by one.\n\n"
         message += OHLC_PROMPTS[0] + f"\n*(Current: {params.get('reference_time', '?')})*"
         message += "\n\nSend /cancel to abort."
-        await query.edit_message_text(message, parse_mode="Markdown")
+        await query.edit_message_text(message, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
         
     return PRESET_EDIT_PARAMS
 
 
 async def preset_edit_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive new parameters for an existing preset."""
-    text = update.message.text.strip()
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        text = query.data.replace("ohlc_btn_", "")
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    else:
+        text = update.message.text.strip()
+        
     ptype = context.user_data.get('edit_preset_type')
     pid = context.user_data.get('edit_preset_id')
     
     if not pid or not ptype:
-        await update.message.reply_text("❌ Session expired. Use /start.")
+        msg = "❌ Session expired. Use /start."
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return ConversationHandler.END
     
     try:
@@ -326,7 +372,7 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
             elif step == 4:
                 params_dict['rr_ratio'] = float(val)
             elif step == 5:
-                params_dict['pip_offset'] = float(val)
+                params_dict['pip_offset_multiplier'] = float(val)
             elif step == 6:
                 if val.lower() not in ['breakout', 'confirmation']: raise ValueError("Must be 'breakout' or 'confirmation'")
                 params_dict['entry_mode'] = val.lower()
@@ -336,10 +382,13 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
             context.user_data['ohlc_step'] = step
             
             if step < 7:
-                keys = ['reference_time', 'reference_timeframe', 'use_prev_candle', 'sl_type', 'rr_ratio', 'pip_offset', 'entry_mode']
+                keys = ['reference_time', 'reference_timeframe', 'use_prev_candle', 'sl_type', 'rr_ratio', 'pip_offset_multiplier', 'entry_mode']
                 current_val = old_params.get(keys[step], '?')
                 prompt = OHLC_PROMPTS[step] + f"\n*(Current: {current_val})*"
-                await update.message.reply_text(prompt, parse_mode="Markdown")
+                if update.callback_query:
+                    await update.callback_query.message.reply_text(prompt, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
+                else:
+                    await update.message.reply_text(prompt, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[step])
                 return PRESET_EDIT_PARAMS
             else:
                 params = params_dict
@@ -353,15 +402,22 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
         context.user_data.pop('edit_preset_id', None)
         context.user_data.pop('edit_preset_type', None)
         
-        await update.message.reply_text(
+        msg = (
             "✅ Preset parameters updated.\n\n"
             "⚠️ This only affects **new** Algo Setups. Existing running setups keep their original parameters.\n\n"
-            "Use /start to return to main menu.",
-            parse_mode="Markdown"
+            "Use /start to return to main menu."
         )
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(msg, parse_mode="Markdown")
         return ConversationHandler.END
     except Exception as e:
-        await update.message.reply_text(f"❌ Invalid format. Error: {e}\nTry again:")
+        msg = f"❌ Invalid format. Error: {e}\nTry again:"
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return PRESET_EDIT_PARAMS
 
 
