@@ -12,6 +12,16 @@ logger = logging.getLogger(__name__)
 PRESET_NAME, PRESET_TYPE, PRESET_P1, PRESET_P2 = range(4)
 PRESET_EDIT_PARAMS = 10  # Unique state for edit conversation
 
+OHLC_PROMPTS = [
+    "⏰ **Step 1/7: Reference Time**\nEnter the Reference Time (IST) in HH:MM format.\n\nExample: `09:15`",
+    "⏳ **Step 2/7: Reference Timeframe**\nEnter the timeframe for the reference candle.\n\nExamples: `15m`, `1h`, `4h`, `1d`",
+    "🔄 **Step 3/7: Merge Previous Candle**\nTake the max high/min low of the last two reference candles? (True/False)\n\nExample: `False`",
+    "🛑 **Step 4/7: Stop Loss Type**\nEnter Stop Loss Type (`opposite` or `middle`).\n\nExample: `opposite`",
+    "⚖️ **Step 5/7: Risk-Reward Ratio**\nEnter RR Ratio to calculate Take Profit.\n\nExample: `2.0`",
+    "📏 **Step 6/7: Pip Offset**\nEnter Pip Offset buffer for breakouts.\n\nExample: `0.0001`",
+    "⚡ **Step 7/7: Entry Mode**\nEnter Entry Mode (`breakout` or `confirmation`).\n\nExample: `confirmation`"
+]
+
 async def presets_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -76,12 +86,9 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Enter Donchian Channel Period (e.g., 20):")
         return PRESET_P1
     elif ptype == "ohlc_breakout":
-        await query.edit_message_text(
-            "Enter 7 parameters separated by comma:\n"
-            "Ref Time, Ref Timeframe, Merge Prev(True/False), SL Type(opposite/middle), RR Ratio, Pip Offset, Entry Mode(breakout/confirmation)\n\n"
-            "Example:\n`09:15,1h,False,opposite,2.0,0.0001,confirmation`",
-            parse_mode="Markdown"
-        )
+        context.user_data['ohlc_step'] = 0
+        context.user_data['ohlc_params'] = {}
+        await query.edit_message_text(OHLC_PROMPTS[0], parse_mode="Markdown")
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,16 +117,39 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             if len(parts) != 1: raise ValueError("Need 1 value (period)")
             params = {"period": int(parts[0])}
         elif ptype == "ohlc_breakout":
-            if len(parts) != 7: raise ValueError("Need exactly 7 values")
-            params = {
-                "reference_time": parts[0].strip(),
-                "reference_timeframe": parts[1].strip(),
-                "use_prev_candle": parts[2].strip().lower() in ['true', '1', 'yes'],
-                "sl_type": parts[3].strip().lower(),
-                "rr_ratio": float(parts[4]),
-                "pip_offset": float(parts[5]),
-                "entry_mode": parts[6].strip().lower()
-            }
+            step = context.user_data.get('ohlc_step', 0)
+            params_dict = context.user_data.get('ohlc_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                if ":" not in val or len(val.split(":")) != 2: raise ValueError("Must be HH:MM format")
+                params_dict['reference_time'] = val
+            elif step == 1:
+                params_dict['reference_timeframe'] = val.lower()
+            elif step == 2:
+                if val.lower() not in ['true', 'false', '1', '0', 'yes', 'no']: raise ValueError("Enter True or False")
+                params_dict['use_prev_candle'] = val.lower() in ['true', '1', 'yes']
+            elif step == 3:
+                if val.lower() not in ['opposite', 'middle']: raise ValueError("Must be 'opposite' or 'middle'")
+                params_dict['sl_type'] = val.lower()
+            elif step == 4:
+                params_dict['rr_ratio'] = float(val)
+            elif step == 5:
+                params_dict['pip_offset'] = float(val)
+            elif step == 6:
+                if val.lower() not in ['breakout', 'confirmation']: raise ValueError("Must be 'breakout' or 'confirmation'")
+                params_dict['entry_mode'] = val.lower()
+                
+            context.user_data['ohlc_params'] = params_dict
+            step += 1
+            context.user_data['ohlc_step'] = step
+            
+            if step < 7:
+                await update.message.reply_text(OHLC_PROMPTS[step], parse_mode="Markdown")
+                return PRESET_P1
+            else:
+                params = params_dict
+                # Fall through to save preset
             
         await create_strategy_preset({
             "user_id": str(update.effective_user.id),
@@ -229,19 +259,18 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif ptype == "donchian":
         message += f"• Period: {params.get('period', '?')}\n\n"
         message += "Enter new Donchian Channel Period (e.g., 20):"
+        message += "\n\nSend /cancel to abort."
+        await query.edit_message_text(message, parse_mode="Markdown")
     elif ptype == "ohlc_breakout":
-        message += f"• Ref Time: {params.get('reference_time', '?')}\n"
-        message += f"• Ref Timeframe: {params.get('reference_timeframe', '?')}\n"
-        message += f"• Merge Prev: {params.get('use_prev_candle', '?')}\n"
-        message += f"• SL Type: {params.get('sl_type', '?')}\n"
-        message += f"• RR Ratio: {params.get('rr_ratio', '?')}\n"
-        message += f"• Pip Offset: {params.get('pip_offset', '?')}\n"
-        message += f"• Entry Mode: {params.get('entry_mode', '?')}\n\n"
-        message += "Enter 7 parameters separated by comma:\nRef Time, Ref TF, Merge(True/False), SL, RR, Pip Offset, Entry Mode\n(e.g., `09:15,1h,False,opposite,2.0,0.0001,confirmation`):"
-    
-    message += "\n\nSend /cancel to abort."
-    
-    await query.edit_message_text(message, parse_mode="Markdown")
+        context.user_data['ohlc_step'] = 0
+        context.user_data['ohlc_params'] = {}
+        context.user_data['ohlc_old_params'] = params
+        
+        message += "Let's update them one by one.\n\n"
+        message += OHLC_PROMPTS[0] + f"\n*(Current: {params.get('reference_time', '?')})*"
+        message += "\n\nSend /cancel to abort."
+        await query.edit_message_text(message, parse_mode="Markdown")
+        
     return PRESET_EDIT_PARAMS
 
 
@@ -278,16 +307,46 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
             if len(parts) != 1: raise ValueError("Need 1 value (period)")
             params = {"period": int(parts[0])}
         elif ptype == "ohlc_breakout":
-            if len(parts) != 7: raise ValueError("Need exactly 7 values")
-            params = {
-                "reference_time": parts[0].strip(),
-                "reference_timeframe": parts[1].strip(),
-                "use_prev_candle": parts[2].strip().lower() in ['true', '1', 'yes'],
-                "sl_type": parts[3].strip().lower(),
-                "rr_ratio": float(parts[4]),
-                "pip_offset": float(parts[5]),
-                "entry_mode": parts[6].strip().lower()
-            }
+            step = context.user_data.get('ohlc_step', 0)
+            params_dict = context.user_data.get('ohlc_params', {})
+            old_params = context.user_data.get('ohlc_old_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                if ":" not in val or len(val.split(":")) != 2: raise ValueError("Must be HH:MM format")
+                params_dict['reference_time'] = val
+            elif step == 1:
+                params_dict['reference_timeframe'] = val.lower()
+            elif step == 2:
+                if val.lower() not in ['true', 'false', '1', '0', 'yes', 'no']: raise ValueError("Enter True or False")
+                params_dict['use_prev_candle'] = val.lower() in ['true', '1', 'yes']
+            elif step == 3:
+                if val.lower() not in ['opposite', 'middle']: raise ValueError("Must be 'opposite' or 'middle'")
+                params_dict['sl_type'] = val.lower()
+            elif step == 4:
+                params_dict['rr_ratio'] = float(val)
+            elif step == 5:
+                params_dict['pip_offset'] = float(val)
+            elif step == 6:
+                if val.lower() not in ['breakout', 'confirmation']: raise ValueError("Must be 'breakout' or 'confirmation'")
+                params_dict['entry_mode'] = val.lower()
+                
+            context.user_data['ohlc_params'] = params_dict
+            step += 1
+            context.user_data['ohlc_step'] = step
+            
+            if step < 7:
+                keys = ['reference_time', 'reference_timeframe', 'use_prev_candle', 'sl_type', 'rr_ratio', 'pip_offset', 'entry_mode']
+                current_val = old_params.get(keys[step], '?')
+                prompt = OHLC_PROMPTS[step] + f"\n*(Current: {current_val})*"
+                await update.message.reply_text(prompt, parse_mode="Markdown")
+                return PRESET_EDIT_PARAMS
+            else:
+                params = params_dict
+                context.user_data.pop('ohlc_step', None)
+                context.user_data.pop('ohlc_params', None)
+                context.user_data.pop('ohlc_old_params', None)
+                # Fall through to save preset
         
         await update_strategy_preset(pid, {"parameters": params})
         
