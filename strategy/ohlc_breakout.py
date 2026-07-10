@@ -293,10 +293,12 @@ class OHLCBreakoutStrategy(BaseStrategy):
         historical_candles: Optional[List[Dict[str, Any]]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Fetch trading TF candles (for price) and reference TF candles (for levels).
+        Fetch trading TF candles and build reference window levels from them.
 
-        The reference TF candles are filtered to find those matching reference_time
-        in IST. The OHLCReference indicator extracts target high/low from them.
+        Scans trading candles to find the IST reference window (ref_hour:ref_minute)
+        and aggregates high/low across all candles within that window — identical
+        logic to the backtest. This avoids UTC-alignment mismatches where Delta's
+        hourly candles never land on arbitrary IST minutes like :15.
         """
         try:
             from utils.time_utils import IST
@@ -346,42 +348,104 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 if not force_recalc:
                     return None
 
-            # --- Step 2: Fetch reference TF candles ---
-            if self.reference_timeframe not in TIMEFRAME_MAPPING:
-                logger.error(f"Unknown reference timeframe: {self.reference_timeframe}")
-                return None
-
+            # --- Step 2: Build reference window from trading TF candles ---
+            # Scan trading candles to find reference windows at ref_hour:ref_minute IST,
+            # exactly like the backtest does. This avoids the UTC-alignment mismatch
+            # where Delta's 1h candles never land on :15 IST.
             ref_tf_seconds = TIMEFRAME_SECONDS.get(self.reference_timeframe, 3600)
-            # Fetch enough reference candles to find recent ones at reference_time
-            # 50 candles at 1h = ~2 days, at 4h = ~8 days — plenty
-            ref_candles = await get_candles(client, symbol, self.reference_timeframe, limit=50)
-            if not ref_candles:
-                logger.error(f"No reference candles for {symbol} {self.reference_timeframe}")
-                return None
-
-            # --- Step 3: Filter to candles matching reference_time (IST) ---
             now_ts = int(current_time.timestamp())
-            matching_candles = []
-            for c in ref_candles:
-                c_time = c.get("time", 0)
-                dt = datetime.fromtimestamp(c_time, tz=IST)
-                # Match hour:minute in IST
-                if dt.hour == self.ref_hour and dt.minute == self.ref_minute:
-                    # Only use fully closed candles
-                    if c_time + ref_tf_seconds <= now_ts:
-                        matching_candles.append(c)
 
-            if not matching_candles:
+            # Track the two most recent completed reference windows
+            completed_windows = []  # list of (ref_start_ts, high, low)
+            current_ref_start_ts = 0
+            building_high = 0.0
+            building_low = float('inf')
+            in_ref_window = False
+
+            for c in trading_candles:
+                ts = int(c.get("time", 0))
+                dt = datetime.fromtimestamp(ts, tz=IST)
+
+                # Compute nearest reference window start (same logic as backtest)
+                today_ref_start = dt.replace(
+                    hour=self.ref_hour, minute=self.ref_minute,
+                    second=0, microsecond=0
+                )
+                today_ref_start_ts = int(today_ref_start.timestamp())
+
+                if ts < today_ref_start_ts:
+                    nearest_ref_start_ts = today_ref_start_ts - 86400
+                else:
+                    nearest_ref_start_ts = today_ref_start_ts
+
+                nearest_ref_end_ts = nearest_ref_start_ts + ref_tf_seconds
+                candle_in_window = nearest_ref_start_ts <= ts < nearest_ref_end_ts
+
+                if candle_in_window:
+                    if current_ref_start_ts != nearest_ref_start_ts:
+                        # New window starting — finalize previous if exists
+                        if in_ref_window and building_high > 0:
+                            # Only count as completed if the window has fully closed
+                            if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                                completed_windows.append(
+                                    (current_ref_start_ts, building_high, building_low)
+                                )
+                        current_ref_start_ts = nearest_ref_start_ts
+                        in_ref_window = True
+                        building_high = float(c.get("high", 0))
+                        building_low = float(c.get("low", float('inf')))
+                    else:
+                        building_high = max(building_high, float(c.get("high", 0)))
+                        building_low = min(building_low, float(c.get("low", float('inf'))))
+                else:
+                    if in_ref_window:
+                        # Just exited window — finalize
+                        in_ref_window = False
+                        if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                            completed_windows.append(
+                                (current_ref_start_ts, building_high, building_low)
+                            )
+
+            # Also finalize the last window if we ended inside one and it's closed
+            if in_ref_window and building_high > 0:
+                if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                    completed_windows.append(
+                        (current_ref_start_ts, building_high, building_low)
+                    )
+
+            if not completed_windows:
                 logger.warning(
-                    f"No closed reference candles found at {self.reference_time} IST "
-                    f"for {symbol} ({self.reference_timeframe})"
+                    f"No completed reference windows found at {self.reference_time} IST "
+                    f"for {symbol} (trading TF: {timeframe})"
                 )
                 return None
 
-            # --- Step 4: Calculate reference levels ---
-            ref_result = self.indicator.calculate(matching_candles)
-            if not ref_result:
-                return None
+            # Use the most recent completed window
+            latest_ref_ts, ref_high, ref_low = completed_windows[-1]
+
+            # Apply use_prev_candle merge
+            if self.use_prev_candle and len(completed_windows) >= 2:
+                prev_ref_ts, prev_high, prev_low = completed_windows[-2]
+                target_high = max(ref_high, prev_high)
+                target_low = min(ref_low, prev_low)
+            else:
+                target_high = ref_high
+                target_low = ref_low
+
+            ref_mid = (target_high + target_low) / 2.0
+            precision = OHLCReference._get_precision(target_high)
+
+            ref_result = {
+                "indicator_name": "OHLC Ref",
+                "target_high": round(target_high, precision),
+                "target_low": round(target_low, precision),
+                "ref_mid": round(ref_mid, precision),
+                "ref_open": 0,  # Not available from aggregated window
+                "ref_close": 0,
+                "ref_time": latest_ref_ts,
+                "use_prev_candle": self.use_prev_candle,
+                "precision": precision,
+            }
 
             current_price = float(latest_candle.get('close', 0))
             target_high = ref_result['target_high']

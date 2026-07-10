@@ -271,6 +271,42 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                         f"├ Current Close: ${d['latest_close']:.5f}\n"
                         f"└ Status: {d['signal_text']}\n"
                     )
+                elif ptype == "ohlc_breakout":
+                    ref = result.get('ohlc_ref', {})
+                    price = result.get('current_price', 0)
+                    status = result.get('status', 'Unknown')
+                    prec = ref.get('precision', 4)
+                    th = ref.get('target_high', 0)
+                    tl = ref.get('target_low', 0)
+                    rm = ref.get('ref_mid', 0)
+                    merge = "Yes" if ref.get('use_prev_candle') else "No"
+                    params = preset.get('parameters', {})
+                    entry_mode = params.get('entry_mode', 'confirmation').title()
+                    sl_type = params.get('sl_type', 'opposite').title()
+                    rr = params.get('rr_ratio', 2.0)
+                    ref_time = params.get('reference_time', '09:15')
+                    ref_tf = params.get('reference_timeframe', '1h')
+
+                    if status == "High Broken":
+                        status_icon = "🟢 High Broken (Long)"
+                    elif status == "Low Broken":
+                        status_icon = "🔴 Low Broken (Short)"
+                    else:
+                        status_icon = "⏳ Waiting"
+
+                    msg = (
+                        info +
+                        f"📊 **OHLC Breakout**\n"
+                        f"├ Ref Window: {ref_time} IST ({ref_tf})\n"
+                        f"├ Target High: ${th:.{prec}f}\n"
+                        f"├ Target Low: ${tl:.{prec}f}\n"
+                        f"├ Ref Mid: ${rm:.{prec}f}\n"
+                        f"├ Current: ${price:.{prec}f}\n"
+                        f"├ Status: {status_icon}\n"
+                        f"├ Entry: {entry_mode} | SL: {sl_type}\n"
+                        f"├ RR Ratio: 1:{rr}\n"
+                        f"└ Merge Prev: {merge}\n"
+                    )
             else:
                 msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
                 msg += "**Possible reasons:**\n"
