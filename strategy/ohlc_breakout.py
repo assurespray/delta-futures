@@ -116,6 +116,9 @@ class OHLCBreakoutStrategy(BaseStrategy):
 
         # Output arrays
         entry_signal = np.zeros(n, dtype=int)
+        exact_entry_price = np.zeros(n)
+        target_high_arr = np.zeros(n)
+        target_low_arr = np.zeros(n)
         sl_price_long = np.zeros(n)
         sl_price_short = np.zeros(n)
         exit_long = np.full(n, False)
@@ -215,13 +218,18 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 # Breakout mode: high/low pierce target ± actual_pip_offset
                 if not long_taken and highs[i] > active_high + actual_pip_offset:
                     entry_signal[i] = 1
+                    exact_entry_price[i] = active_high + actual_pip_offset
                     long_taken = True
                 # Short breakout (long takes priority if both trigger)
                 if entry_signal[i] == 0 and not short_taken and lows[i] < active_low - actual_pip_offset:
                     entry_signal[i] = -1
+                    exact_entry_price[i] = active_low - actual_pip_offset
                     short_taken = True
 
-            # ---- SL prices ----
+            # ---- SL prices & Meta ----
+            target_high_arr[i] = active_high
+            target_low_arr[i] = active_low
+            
             if entry_signal[i] == 1:
                 sl_price_long[i] = active_low if self.sl_type == "opposite" else ref_mid
             elif entry_signal[i] == -1:
@@ -236,6 +244,9 @@ class OHLCBreakoutStrategy(BaseStrategy):
 
         return {
             "entry_signal": entry_signal,
+            "exact_entry_price": exact_entry_price,
+            "meta_Ref. High": target_high_arr,
+            "meta_Ref. Low": target_low_arr,
             "exit_long": exit_long,        # All False — exits are SL/TP only
             "exit_short": exit_short,      # All False — exits are SL/TP only
             "sl_price_long": sl_price_long,

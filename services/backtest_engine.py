@@ -142,6 +142,12 @@ class BacktestEngine:
             sl_price_short_arr = signals["sl_price_short"]
             indicator_val_arr = signals["indicator_value"]
             
+            # Exact entry support for breakout strategies
+            exact_entry_price_arr = signals.get("exact_entry_price")
+            
+            # Dynamic metadata support
+            meta_keys = [k for k in signals.keys() if k.startswith("meta_")]
+            
             # TP support: strategies can return rr_ratio for auto TP computation
             rr_ratio = signals.get("rr_ratio", 0)
             
@@ -226,38 +232,78 @@ class BacktestEngine:
                 
                 # Check for new entries (Only if we don't have an open trade)
                 if not self.open_trade:
-                    # Breakout Logic: Did the strategy trigger an entry on the previous candle?
-                    # Using i-1 ensures we only act on *closed* candle signals.
-                    signal = int(entry_signal_arr[i-1])
-                    
-                    # Apply Time Filter Bouncer
-                    if not is_within_entry_window:
-                        signal = 0
+                    # Intraday exact entry check (Breakout mode)
+                    if exact_entry_price_arr is not None and int(entry_signal_arr[i]) != 0 and exact_entry_price_arr[i] > 0:
+                        signal = int(entry_signal_arr[i])
+                        if not is_within_entry_window:
+                            signal = 0
                         
-                    if signal == 1 and self.direction in ["both", "long_only"]:
-                        entry_price = t_open
-                        sl_price = float(sl_price_long_arr[i-1])
-                        tp_price = entry_price + (entry_price - sl_price) * rr_ratio if rr_ratio > 0 else 0.0
-                        self._open_position(
-                            direction="long",
-                            entry_price=entry_price,
-                            entry_time=t_time,
-                            sl_price=sl_price,
-                            tp_price=tp_price,
-                            indicator_value=float(indicator_val_arr[i-1])
-                        )
-                    elif signal == -1 and self.direction in ["both", "short_only"]:
-                        entry_price = t_open
-                        sl_price = float(sl_price_short_arr[i-1])
-                        tp_price = entry_price - (sl_price - entry_price) * rr_ratio if rr_ratio > 0 else 0.0
-                        self._open_position(
-                            direction="short",
-                            entry_price=entry_price,
-                            entry_time=t_time,
-                            sl_price=sl_price,
-                            tp_price=tp_price,
-                            indicator_value=float(indicator_val_arr[i-1])
-                        )
+                        if signal != 0:
+                            target_entry = float(exact_entry_price_arr[i])
+                            
+                            # Slippage handling: if candle gapped past trigger, we get filled at open
+                            if signal == 1 and t_open > target_entry:
+                                entry_price = t_open
+                            elif signal == -1 and t_open < target_entry:
+                                entry_price = t_open
+                            else:
+                                entry_price = target_entry
+                                
+                            sl_price = float(sl_price_long_arr[i]) if signal == 1 else float(sl_price_short_arr[i])
+                            tp_price = entry_price + (entry_price - sl_price) * rr_ratio if signal == 1 else entry_price - (sl_price - entry_price) * rr_ratio
+                            if rr_ratio <= 0: tp_price = 0.0
+                            
+                            meta_kwargs = {k.replace("meta_", ""): float(signals[k][i]) for k in meta_keys}
+                            
+                            if signal == 1 and self.direction in ["both", "long_only"]:
+                                self._open_position(
+                                    direction="long", entry_price=entry_price, entry_time=t_time,
+                                    sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]),
+                                    **meta_kwargs
+                                )
+                            elif signal == -1 and self.direction in ["both", "short_only"]:
+                                self._open_position(
+                                    direction="short", entry_price=entry_price, entry_time=t_time,
+                                    sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]),
+                                    **meta_kwargs
+                                )
+                    else:
+                        # Standard closed-candle entry (Confirmation mode / SuperTrend)
+                        signal = int(entry_signal_arr[i-1])
+                        
+                        # Apply Time Filter Bouncer
+                        if not is_within_entry_window:
+                            signal = 0
+                            
+                        if signal != 0:
+                            meta_kwargs = {k.replace("meta_", ""): float(signals[k][i-1]) for k in meta_keys}
+                            
+                        if signal == 1 and self.direction in ["both", "long_only"]:
+                            entry_price = t_open
+                            sl_price = float(sl_price_long_arr[i-1])
+                            tp_price = entry_price + (entry_price - sl_price) * rr_ratio if rr_ratio > 0 else 0.0
+                            self._open_position(
+                                direction="long",
+                                entry_price=entry_price,
+                                entry_time=t_time,
+                                sl_price=sl_price,
+                                tp_price=tp_price,
+                                indicator_value=float(indicator_val_arr[i-1]),
+                                **meta_kwargs
+                            )
+                        elif signal == -1 and self.direction in ["both", "short_only"]:
+                            entry_price = t_open
+                            sl_price = float(sl_price_short_arr[i-1])
+                            tp_price = entry_price - (sl_price - entry_price) * rr_ratio if rr_ratio > 0 else 0.0
+                            self._open_position(
+                                direction="short",
+                                entry_price=entry_price,
+                                entry_time=t_time,
+                                sl_price=sl_price,
+                                tp_price=tp_price,
+                                indicator_value=float(indicator_val_arr[i-1]),
+                                **meta_kwargs
+                            )
                 
                 # HARD MEMORY LIMIT: Stop simulating if trades exceed 50,000
                 if len(self.trade_log) >= 50000:
@@ -292,7 +338,7 @@ class BacktestEngine:
             "total_candles": processed_rows
         }
 
-    def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, tp_price: float, indicator_value: float):
+    def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, tp_price: float, indicator_value: float, **kwargs):
         """Open a mock position with exact margin and lot size math."""
         quantity = self.lot_size
         position_size_usd = entry_price * quantity * self.contract_multiplier
@@ -320,7 +366,8 @@ class BacktestEngine:
             "initial_margin": initial_margin,
             "max_margin_required": max_margin_required,
             "indicator_value": indicator_value,
-            "entry_fee": fee
+            "entry_fee": fee,
+            **kwargs
         }
 
     def _close_position(self, exit_price: float, exit_time: int, reason: str, indicator_value: float):
@@ -350,7 +397,7 @@ class BacktestEngine:
         net_pnl = gross_pnl - total_fee
         
         # Create Trade Record
-        self.trade_log.append({
+        trade_record = {
             "entry_time": self.open_trade["entry_time"],
             "exit_time": exit_time,
             "direction": direction,
@@ -368,6 +415,17 @@ class BacktestEngine:
             "exit_reason": reason,
             "entry_indicator": self.open_trade["indicator_value"],
             "exit_indicator": indicator_value
-        })
+        }
+        
+        # Add dynamic metadata
+        base_keys = {
+            "direction", "entry_price", "entry_time", "sl_price", "tp_price", "quantity",
+            "position_size_usd", "initial_margin", "max_margin_required", "indicator_value", "entry_fee"
+        }
+        for k, v in self.open_trade.items():
+            if k not in base_keys:
+                trade_record[k] = v
+                
+        self.trade_log.append(trade_record)
         
         self.open_trade = None

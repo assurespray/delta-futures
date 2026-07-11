@@ -139,6 +139,17 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
             "Exit Indicator Value"
         ]
         
+        # Detect any dynamic metadata keys
+        first_trade = trade_log[0]
+        base_keys = {
+            "entry_time", "exit_time", "direction", "entry_price", "exit_price", 
+            "quantity", "notional_size", "initial_margin", "max_margin_required", 
+            "gross_pnl", "fee_paid", "pnl", "pnl_pct", "roe_pct", "exit_reason", 
+            "entry_indicator", "exit_indicator"
+        }
+        dynamic_cols = [k for k in first_trade.keys() if k not in base_keys]
+        columns.extend(dynamic_cols)
+        
         with open(filepath, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(columns)
@@ -147,7 +158,7 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
                 entry_dt = datetime.fromtimestamp(t["entry_time"], tz=IST).strftime('%Y-%m-%d %H:%M:%S')
                 exit_dt = datetime.fromtimestamp(t["exit_time"], tz=IST).strftime('%Y-%m-%d %H:%M:%S')
                 
-                writer.writerow([
+                row = [
                     idx,
                     t["direction"].upper(),
                     entry_dt,
@@ -157,14 +168,20 @@ def generate_trade_log_csv(trade_log: List[Dict], symbol: str, timeframe: str) -
                     f"{t.get('quantity', 0):.4f}",
                     f"{t.get('initial_margin', 0):.2f}",
                     f"{t.get('max_margin_required', 0):.2f}",
-                    f"{t.get('gross_pnl', t['pnl']):.2f}",
+                    f"{t.get('gross_pnl', t.get('pnl', 0)):.2f}",
                     f"{t.get('fee_paid', 0.0):.2f}",
-                    f"{t['pnl']:.2f}",
+                    f"{t.get('pnl', 0):.2f}",
                     f"{t.get('roe_pct', 0.0):.2f}%",
                     t["exit_reason"],
                     f"{t.get('entry_indicator', 0):.5f}",
                     f"{t.get('exit_indicator', 0):.5f}"
-                ])
+                ]
+                
+                for col in dynamic_cols:
+                    val = t.get(col, 0)
+                    row.append(f"{val:.5f}" if isinstance(val, float) else str(val))
+                    
+                writer.writerow(row)
                 
         logger.info(f"[BT-EXPORTER] Saved Trade Log CSV to {filepath}")
         return filepath
