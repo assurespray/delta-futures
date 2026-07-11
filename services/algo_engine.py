@@ -671,11 +671,26 @@ class AlgoEngine:
                 await client.close()
                 return
                 
+            # Time Window Invalidation Check (Universal)
+            is_invalidated_by_time = False
+            time_window = setup.get("time_window")
+            if time_window:
+                from utils.time_utils import parse_time, is_time_in_window, IST
+                now_ist = datetime.now(IST).time()
+                tw_start = parse_time(time_window["start"])
+                tw_stop = parse_time(time_window["stop_entries"])
+                
+                # If current time is outside the allowed entry window (e.g., past stop_entries)
+                if not is_time_in_window(now_ist, tw_start, tw_stop):
+                    logger.info(f"TIME WINDOW EXPIRED: Cancelling pending {pending_side.upper()} for {asset}.")
+                    is_invalidated_by_time = True
+                    
             # Invalidation Check (strategy-agnostic)
-            is_invalidated = strategy.should_invalidate_pending_entry(pending_side, indicator_result)
+            is_invalidated = is_invalidated_by_time or strategy.should_invalidate_pending_entry(pending_side, indicator_result)
                 
             if is_invalidated:
-                logger.info(f"[INVALIDATION] Strategy invalidated pending {pending_side.upper()} for {asset}. Cancelling entry.")
+                reason = "Time Window Expired" if is_invalidated_by_time else "Strategy Conditions"
+                logger.info(f"[INVALIDATION] {reason} invalidated pending {pending_side.upper()} for {asset}. Cancelling entry.")
                 
                 if trade_state.get("is_paper_trade", False):
                     from strategy.paper_trader import paper_trader
