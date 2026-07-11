@@ -125,9 +125,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
         # Reference window state
         active_high = 0.0
         active_low = 0.0
-        prev_ref_high = 0.0
-        prev_ref_low = 0.0
-        current_ref_start_ts = 0
+        current_ref_anchor_ts = 0
         building_high = 0.0
         building_low = float('inf')
         in_ref_window = False
@@ -140,35 +138,39 @@ class OHLCBreakoutStrategy(BaseStrategy):
             ts = int(times[i])
             dt = datetime.fromtimestamp(ts, tz=IST)
 
-            # Compute the most recent reference window start
-            today_ref_start = dt.replace(
+            # Compute the most recent reference window start anchor
+            today_ref_anchor = dt.replace(
                 hour=self.ref_hour, minute=self.ref_minute,
                 second=0, microsecond=0
             )
-            today_ref_start_ts = int(today_ref_start.timestamp())
+            today_ref_anchor_ts = int(today_ref_anchor.timestamp())
+            
+            # Determine scanning window boundaries
+            window_offset = ref_tf_seconds if self.use_prev_candle else 0
+            actual_today_start_ts = today_ref_anchor_ts - window_offset
 
-            # If candle is before today's ref start, use yesterday's
-            if ts < today_ref_start_ts:
-                nearest_ref_start_ts = today_ref_start_ts - 86400
+            # If candle is before today's actual scanning start, use yesterday's
+            if ts < actual_today_start_ts:
+                nearest_ref_anchor_ts = today_ref_anchor_ts - 86400
+                actual_nearest_start_ts = nearest_ref_anchor_ts - window_offset
             else:
-                nearest_ref_start_ts = today_ref_start_ts
+                nearest_ref_anchor_ts = today_ref_anchor_ts
+                actual_nearest_start_ts = actual_today_start_ts
 
-            nearest_ref_end_ts = nearest_ref_start_ts + ref_tf_seconds
+            actual_nearest_end_ts = nearest_ref_anchor_ts + ref_tf_seconds
 
-            # Check if candle is within a reference window
-            candle_in_window = nearest_ref_start_ts <= ts < nearest_ref_end_ts
+            # Check if candle is within the scanning reference window
+            candle_in_window = actual_nearest_start_ts <= ts < actual_nearest_end_ts
 
             if candle_in_window:
-                if current_ref_start_ts != nearest_ref_start_ts:
+                if current_ref_anchor_ts != nearest_ref_anchor_ts:
                     # New reference window starting
                     if in_ref_window and building_high > 0:
                         # Finalize previous window (edge case: back-to-back windows)
-                        self._finalize_ref_targets(
-                            building_high, building_low,
-                            prev_ref_high, prev_ref_low
-                        )
+                        active_high = building_high
+                        active_low = building_low
 
-                    current_ref_start_ts = nearest_ref_start_ts
+                    current_ref_anchor_ts = nearest_ref_anchor_ts
                     in_ref_window = True
                     building_high = highs[i]
                     building_low = lows[i]
@@ -184,16 +186,8 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 if in_ref_window:
                     # Just exited the reference window — finalize targets
                     in_ref_window = False
-
-                    if self.use_prev_candle and prev_ref_high > 0:
-                        active_high = max(building_high, prev_ref_high)
-                        active_low = min(building_low, prev_ref_low)
-                    else:
-                        active_high = building_high
-                        active_low = building_low
-
-                    prev_ref_high = building_high
-                    prev_ref_low = building_low
+                    active_high = building_high
+                    active_low = building_low
                     targets_valid = True
 
             # Store ref mid as indicator value
@@ -250,7 +244,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
             "rr_ratio": self.rr_ratio,     # Engine computes TP from entry price + SL + this
         }
 
-    def _finalize_ref_targets(self, bld_high, bld_low, prev_high, prev_low):
+    def _finalize_ref_targets(self, bld_high, bld_low):
         """Helper for edge case finalization (not normally needed in backtest loop)."""
         pass
 
@@ -355,42 +349,48 @@ class OHLCBreakoutStrategy(BaseStrategy):
             ref_tf_seconds = TIMEFRAME_SECONDS.get(self.reference_timeframe, 3600)
             now_ts = int(current_time.timestamp())
 
-            # Track the two most recent completed reference windows
-            completed_windows = []  # list of (ref_start_ts, high, low)
-            current_ref_start_ts = 0
+            # Track the most recent completed reference window
+            completed_windows = []  # list of (ref_anchor_ts, high, low)
+            current_ref_anchor_ts = 0
             building_high = 0.0
             building_low = float('inf')
             in_ref_window = False
+            
+            window_offset = ref_tf_seconds if self.use_prev_candle else 0
 
             for c in trading_candles:
                 ts = int(c.get("time", 0))
                 dt = datetime.fromtimestamp(ts, tz=IST)
 
-                # Compute nearest reference window start (same logic as backtest)
-                today_ref_start = dt.replace(
+                # Compute nearest reference window start anchor
+                today_ref_anchor = dt.replace(
                     hour=self.ref_hour, minute=self.ref_minute,
                     second=0, microsecond=0
                 )
-                today_ref_start_ts = int(today_ref_start.timestamp())
+                today_ref_anchor_ts = int(today_ref_anchor.timestamp())
+                
+                actual_today_start_ts = today_ref_anchor_ts - window_offset
 
-                if ts < today_ref_start_ts:
-                    nearest_ref_start_ts = today_ref_start_ts - 86400
+                if ts < actual_today_start_ts:
+                    nearest_ref_anchor_ts = today_ref_anchor_ts - 86400
+                    actual_nearest_start_ts = nearest_ref_anchor_ts - window_offset
                 else:
-                    nearest_ref_start_ts = today_ref_start_ts
+                    nearest_ref_anchor_ts = today_ref_anchor_ts
+                    actual_nearest_start_ts = actual_today_start_ts
 
-                nearest_ref_end_ts = nearest_ref_start_ts + ref_tf_seconds
-                candle_in_window = nearest_ref_start_ts <= ts < nearest_ref_end_ts
+                actual_nearest_end_ts = nearest_ref_anchor_ts + ref_tf_seconds
+                candle_in_window = actual_nearest_start_ts <= ts < actual_nearest_end_ts
 
                 if candle_in_window:
-                    if current_ref_start_ts != nearest_ref_start_ts:
+                    if current_ref_anchor_ts != nearest_ref_anchor_ts:
                         # New window starting — finalize previous if exists
                         if in_ref_window and building_high > 0:
                             # Only count as completed if the window has fully closed
-                            if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                            if current_ref_anchor_ts + ref_tf_seconds <= now_ts:
                                 completed_windows.append(
-                                    (current_ref_start_ts, building_high, building_low)
+                                    (current_ref_anchor_ts, building_high, building_low)
                                 )
-                        current_ref_start_ts = nearest_ref_start_ts
+                        current_ref_anchor_ts = nearest_ref_anchor_ts
                         in_ref_window = True
                         building_high = float(c.get("high", 0))
                         building_low = float(c.get("low", float('inf')))
@@ -401,16 +401,16 @@ class OHLCBreakoutStrategy(BaseStrategy):
                     if in_ref_window:
                         # Just exited window — finalize
                         in_ref_window = False
-                        if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                        if current_ref_anchor_ts + ref_tf_seconds <= now_ts:
                             completed_windows.append(
-                                (current_ref_start_ts, building_high, building_low)
+                                (current_ref_anchor_ts, building_high, building_low)
                             )
 
             # Also finalize the last window if we ended inside one and it's closed
             if in_ref_window and building_high > 0:
-                if current_ref_start_ts + ref_tf_seconds <= now_ts:
+                if current_ref_anchor_ts + ref_tf_seconds <= now_ts:
                     completed_windows.append(
-                        (current_ref_start_ts, building_high, building_low)
+                        (current_ref_anchor_ts, building_high, building_low)
                     )
 
             if not completed_windows:
@@ -421,16 +421,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 return None
 
             # Use the most recent completed window
-            latest_ref_ts, ref_high, ref_low = completed_windows[-1]
-
-            # Apply use_prev_candle merge
-            if self.use_prev_candle and len(completed_windows) >= 2:
-                prev_ref_ts, prev_high, prev_low = completed_windows[-2]
-                target_high = max(ref_high, prev_high)
-                target_low = min(ref_low, prev_low)
-            else:
-                target_high = ref_high
-                target_low = ref_low
+            latest_ref_ts, target_high, target_low = completed_windows[-1]
 
             ref_mid = (target_high + target_low) / 2.0
             precision = OHLCReference._get_precision(target_high)
