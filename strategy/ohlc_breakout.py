@@ -466,6 +466,7 @@ class OHLCBreakoutStrategy(BaseStrategy):
                 "ohlc_ref": ref_result,
                 "current_price": current_price,
                 "status": status,
+                "in_ref_window": in_ref_window,
                 # Compatibility mappings
                 "perusu": ref_result,
                 "sirusu": ref_result,
@@ -501,6 +502,10 @@ class OHLCBreakoutStrategy(BaseStrategy):
         TP computed and stored for exit signal checking.
         """
         try:
+            # Strictly freeze entry generation if the current reference window is still building
+            if indicators_data.get("in_ref_window", False):
+                return None
+
             ref = indicators_data.get("ohlc_ref")
             if not ref:
                 logger.error("Missing OHLC reference data for entry signal")
