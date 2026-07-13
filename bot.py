@@ -77,6 +77,7 @@ from handlers.paper_trading import (
     paper_confirmed,
     cancel_paper_setup, paper_view_list_callback, paper_setup_group_callback, paper_detail_callback,
     paper_toggle_callback, paper_cancel_callback, paper_close_callback,
+    paper_close_all_confirm_callback, paper_close_all_execute_callback,
     paper_delete_list_callback, paper_delete_confirm_callback,
     paper_set_balance_callback, paper_set_balance_amount_received,
     pscr_add_start, pscr_name_received, pscr_desc_received,
@@ -446,6 +447,8 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
     application.add_handler(CallbackQueryHandler(paper_cancel_callback, pattern="^paper_cancel_"))
     application.add_handler(CallbackQueryHandler(paper_close_callback, pattern="^paper_close_"))
+    application.add_handler(CallbackQueryHandler(paper_close_all_confirm_callback, pattern="^paper_close_all_confirm$"))
+    application.add_handler(CallbackQueryHandler(paper_close_all_execute_callback, pattern="^paper_close_all_execute$"))
     application.add_handler(CallbackQueryHandler(paper_activity_callback, pattern="^paper_activity"))
     application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
     application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))

@@ -695,9 +695,10 @@ async def paper_trading_menu_callback(update: Update, context: ContextTypes.DEFA
         ],
         [InlineKeyboardButton("View Paper Setups", callback_data="paper_view_list")],
         [InlineKeyboardButton("📄 Paper Activity", callback_data="paper_activity")],
+        [InlineKeyboardButton("🧨 Close All Open Positions", callback_data="paper_close_all_confirm")],
         [InlineKeyboardButton("Delete Paper Setup", callback_data="paper_delete_list")],
         [InlineKeyboardButton("Set Virtual Balance", callback_data="paper_set_balance")],
-        [InlineKeyboardButton("Back to Main Menu", callback_data="main_menu")]
+        [InlineKeyboardButton("Main Menu", callback_data="main_menu")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1312,6 +1313,102 @@ async def paper_close_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="Markdown"
         )
 
+
+async def paper_close_all_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation dialog to close all open paper trades."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = str(query.from_user.id)
+    open_positions = await get_open_paper_positions(user_id)
+    
+    if not open_positions:
+        await query.edit_message_text(
+            "ℹ️ You have no open paper positions to close.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ])
+        )
+        return
+        
+    await query.edit_message_text(
+        f"⚠️ **WARNING: MASS CLOSE**\n\n"
+        f"You are about to force-close **{len(open_positions)} open paper positions** at current market prices.\n"
+        f"This action cannot be undone.\n\n"
+        f"Are you absolutely sure?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🧨 YES, CLOSE ALL {len(open_positions)}", callback_data="paper_close_all_execute")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="menu_paper_trading")]
+        ]),
+        parse_mode="Markdown"
+    )
+
+async def paper_close_all_execute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute the mass close of all paper trades."""
+    query = update.callback_query
+    await query.answer("Closing all positions... This may take a moment.")
+    
+    user_id = str(query.from_user.id)
+    open_positions = await get_open_paper_positions(user_id)
+    
+    if not open_positions:
+        await query.edit_message_text(
+            "ℹ️ No open positions found.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ])
+        )
+        return
+        
+    from database.crud import get_all_active_algo_setups, get_all_active_screener_setups, get_api_credential_by_id
+    
+    # Needs a client for live pricing. Just grab the first available.
+    client = None
+    all_configs = await get_all_active_algo_setups() + await get_all_active_screener_setups()
+    for config in all_configs:
+        api_id = config.get("api_id")
+        if api_id:
+            cred = await get_api_credential_by_id(api_id, decrypt=True)
+            if cred:
+                client = DeltaExchangeClient(api_key=cred['api_key'], api_secret=cred['api_secret'])
+                break
+                
+    if not client:
+        await query.edit_message_text(
+            "❌ No API credentials available to fetch live prices.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+            ])
+        )
+        return
+
+    await query.edit_message_text("⏳ Processing mass close... Please wait.")
+    
+    success_count = 0
+    fail_count = 0
+    
+    try:
+        for trade in open_positions:
+            success, _, _ = await paper_trader.execute_virtual_exit(
+                client, trade, "Mass Manual Close (user)"
+            )
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+    finally:
+        await client.close()
+        
+    await query.edit_message_text(
+        f"✅ **Mass Close Complete**\n\n"
+        f"🟢 Successfully closed: {success_count}\n"
+        f"🔴 Failed to close: {fail_count}\n\n"
+        f"Your virtual locked margin has been freed.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Back to Menu", callback_data="menu_paper_trading")]
+        ]),
+        parse_mode="Markdown"
+    )
 
 # ==================== VIEW PAPER SETUPS (UNIFIED: Individual + Screener) ====================
 
