@@ -485,13 +485,20 @@ async def get_trades_by_user(user_id: str, closed_only: bool = False, is_paper: 
         query = {"user_id": user_id, "is_paper_trade": is_paper}
         if closed_only:
             query["status"] = "closed"
-            
-        if days:
-            cutoff = datetime.utcnow() - timedelta(days=days)
-            query["entry_time"] = {"$gte": cutoff}
+            if days:
+                cutoff = datetime.utcnow() - timedelta(days=days)
+                query["entry_time"] = {"$gte": cutoff}
+        else:
+            if days:
+                cutoff = datetime.utcnow() - timedelta(days=days)
+                # Show ALL open/pending trades regardless of age, but only recent closed trades
+                query["$or"] = [
+                    {"status": {"$in": ["open", "pending_entry"]}},
+                    {"entry_time": {"$gte": cutoff}}
+                ]
             
         cursor = mongodb.get_db().trade_states.find(query).sort("entry_time", -1)
-        trades = await cursor.to_list(length=100)
+        trades = await cursor.to_list(length=1000)
         for t in trades:
             t["_id"] = str(t["_id"])
         return trades
