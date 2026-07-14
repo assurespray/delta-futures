@@ -67,8 +67,8 @@ from handlers.screener_setup import (
     SCREENER_TIME_WINDOW, SCREENER_CUSTOM_TIME
 )
 from handlers.algo_activity import algo_activity_callback, paper_activity_callback
-from handlers.paper_setup import get_paper_setup_handlers
-from handlers.paper_screener import get_paper_screener_handlers
+from handlers.paper_setup import get_paper_setup_handlers, paper_cancel_handler
+from handlers.paper_screener import get_paper_screener_handlers, pscr_cancel_handler
 from handlers.paper_trading import get_paper_hub_handlers
 from handlers.performance import (
     performance_menu_callback, performance_command,
