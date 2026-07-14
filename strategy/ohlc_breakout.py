@@ -111,8 +111,9 @@ class OHLCBreakoutStrategy(BaseStrategy):
         highs = df['high'].astype(float).values
         lows = df['low'].astype(float).values
         closes = df['close'].astype(float).values
-
-        ref_tf_seconds = TIMEFRAME_SECONDS.get(self.reference_timeframe, 3600)
+        
+        from utils.timeframe import get_timeframe_seconds
+        ref_tf_seconds = get_timeframe_seconds(self.reference_timeframe)
 
         # Output arrays
         entry_signal = np.zeros(n, dtype=int)
@@ -357,7 +358,8 @@ class OHLCBreakoutStrategy(BaseStrategy):
             # Scan trading candles to find reference windows at ref_hour:ref_minute IST,
             # exactly like the backtest does. This avoids the UTC-alignment mismatch
             # where Delta's 1h candles never land on :15 IST.
-            ref_tf_seconds = TIMEFRAME_SECONDS.get(self.reference_timeframe, 3600)
+            from utils.timeframe import get_timeframe_seconds
+            ref_tf_seconds = get_timeframe_seconds(self.reference_timeframe)
             now_ts = int(current_time.timestamp())
 
             # Track the most recent completed reference window

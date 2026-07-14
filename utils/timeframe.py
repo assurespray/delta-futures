@@ -212,8 +212,7 @@ def get_next_boundary_time(timeframe: str, current_time: Optional[datetime] = No
 def get_timeframe_seconds(timeframe: str) -> int:
     """
     Get the number of seconds in a timeframe period.
-    
-    ✅ COMPLETE: All timeframes
+    Dynamically calculates for ANY timeframe (e.g., '5h', '10m', '3d').
     
     Args:
         timeframe: Timeframe string
@@ -221,32 +220,29 @@ def get_timeframe_seconds(timeframe: str) -> int:
     Returns:
         Number of seconds in one candle period
     """
-    timeframe_map = {
-        "1m": 60,
-        "2m": 120,
-        "3m": 180,
-        "4m": 240,
-        "5m": 300,
-        "10m": 600,
-        "15m": 900,
-        "20m": 1200,
-        "30m": 1800,
-        "45m": 2700,
-        "1h": 3600,
-        "2h": 7200,
-        "3h": 10800,
-        "4h": 14400,
-        "6h": 21600,
-        "8h": 28800,
-        "12h": 43200,
-        "1d": 86400,
-        "2d": 172800,
-        "3d": 259200,
-        "7d": 604800,
-        "1w": 604800
-    }
+    if not timeframe:
+        return 60
+        
+    timeframe = timeframe.strip().lower()
     
-    return timeframe_map.get(timeframe, 60)
+    import re
+    match = re.match(r'^(\d+)([mhdw])$', timeframe)
+    if not match:
+        return 60
+        
+    val = int(match.group(1))
+    unit = match.group(2)
+    
+    if unit == 'm':
+        return val * 60
+    elif unit == 'h':
+        return val * 3600
+    elif unit == 'd':
+        return val * 86400
+    elif unit == 'w':
+        return val * 604800
+        
+    return 60
 
 
 def get_timeframe_display_name(timeframe: str) -> str:
