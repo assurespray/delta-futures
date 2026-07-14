@@ -1283,11 +1283,12 @@ async def get_backtest_results(
     sort_by: str = "created_at",
     sort_order: int = -1,
     limit: int = 20,
+    skip: int = 0,
     symbol: Optional[str] = None,
     strategy: Optional[str] = None,
-) -> list:
+) -> tuple[list, int]:
     """
-    Retrieve past backtest results for a user with flexible sorting.
+    Retrieve past backtest results for a user with true database pagination.
 
     Args:
         user_id:     Telegram user ID.
@@ -1297,11 +1298,12 @@ async def get_backtest_results(
                      "sharpe_ratio", "expectancy_ratio", "reward_to_risk".
         sort_order:  1 for ascending, -1 for descending.
         limit:       Max results to return (default 20).
+        skip:        Number of results to skip for pagination.
         symbol:      Optional filter by symbol (e.g. "BTCUSD").
         strategy:    Optional filter by strategy name.
 
     Returns:
-        List of backtest result dicts.
+        Tuple of (List of backtest result dicts, Total count of matching documents).
     """
     try:
         db = mongodb.get_db()
@@ -1323,21 +1325,23 @@ async def get_backtest_results(
         if sort_by not in allowed_sort_fields:
             sort_by = "created_at"
 
+        total_count = await db.backtest_results.count_documents(query)
+
         # Apply MongoDB Projection to exclude heavy array data for fast menu rendering
         cursor = db.backtest_results.find(
             query, 
             {"trade_log": 0, "equity_curve": 0}
-        ).sort(sort_by, sort_order).limit(limit)
+        ).sort(sort_by, sort_order).skip(skip).limit(limit)
         results = await cursor.to_list(length=limit)
 
         # Convert ObjectId to string for JSON safety
         for r in results:
             r["_id"] = str(r["_id"])
 
-        return results
+        return results, total_count
     except Exception as e:
         logger.error(f"[BT-CRUD] Error fetching backtest results: {e}")
-        return []
+        return [], 0
 
 
 async def get_backtest_result_by_id(result_id: str, include_arrays: bool = False) -> Optional[dict]:

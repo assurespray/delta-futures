@@ -482,23 +482,48 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = str(update.effective_user.id)
     
-    # Always sort by newest for the basic history view
-    results = await get_backtest_results(user_id, sort_by="created_at", sort_order=-1, limit=5)
+    # Parse page number
+    page = 0
+    if query.data.startswith("bt_history_p"):
+        try:
+            page = int(query.data.replace("bt_history_p", ""))
+        except ValueError:
+            pass
+            
+    ITEMS_PER_PAGE = 10
+    skip = page * ITEMS_PER_PAGE
     
-    if not results:
+    # Fetch exactly the requested page from the database
+    results, total_count = await get_backtest_results(
+        user_id, sort_by="created_at", sort_order=-1, limit=ITEMS_PER_PAGE, skip=skip
+    )
+    
+    if not results and page == 0:
         await query.edit_message_text(
             "🗄️ No past backtest results found.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_backtest")]])
         )
         return
         
-    text = "🗄️ **Recent Backtest Results**\n\nSelect a result to view its full details:"
+    total_pages = max(1, (total_count + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    
+    text = f"🗄️ **Recent Backtest Results** (Page {page+1}/{total_pages})\n\nSelect a result to view its full details:"
     
     keyboard = []
     for r in results:
         dt = r["created_at"].strftime('%Y-%m-%d %H:%M')
         label = f"{r.get('symbol', '?')} {r.get('timeframe', '?')} | PnL: {r.get('overall_profit_pct', 0):.1f}% | {dt}"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"bt_view_{r['_id']}")])
+        
+    # Pagination controls
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"bt_history_p{page-1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"bt_history_p{page+1}"))
+        
+    if nav_row:
+        keyboard.append(nav_row)
         
     keyboard.append([InlineKeyboardButton("🔙 Back to Backtester", callback_data="menu_backtest")])
     
@@ -818,7 +843,7 @@ def get_backtest_handlers():
     return [
         fsm_handler,
         CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
-        CallbackQueryHandler(bt_history_menu, pattern="^bt_history$"),
+        CallbackQueryHandler(bt_history_menu, pattern="^bt_history"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_recalc_leverage, pattern="^bt_recalc_"),
         CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
