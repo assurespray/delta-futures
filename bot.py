@@ -67,37 +67,9 @@ from handlers.screener_setup import (
     SCREENER_TIME_WINDOW, SCREENER_CUSTOM_TIME
 )
 from handlers.algo_activity import algo_activity_callback, paper_activity_callback
-from handlers.paper_trading import (
-    paper_trading_menu_callback, paper_add_start, paper_name_received,
-    paper_desc_received, paper_api_selected, paper_indicator_selected,
-    paper_direction_selected,
-    paper_timeframe_selected, paper_asset_received, paper_lot_size_received, paper_lot_size_callback, paper_lot_size_callback,
-    paper_leverage_selected, paper_protection_selected,
-    paper_time_window_callback, paper_custom_time_received,
-    paper_confirmed,
-    cancel_paper_setup, paper_view_list_callback, paper_setup_group_callback, paper_detail_callback,
-    paper_toggle_callback, paper_cancel_callback, paper_close_callback,
-    paper_close_all_confirm_callback, paper_close_all_execute_callback,
-    paper_delete_list_callback, paper_delete_confirm_callback,
-    paper_set_balance_callback, paper_set_balance_amount_received,
-    pscr_add_start, pscr_name_received, pscr_desc_received,
-    pscr_api_selected, pscr_indicator_selected, pscr_asset_type_selected,
-    pscr_timeframe_selected,
-    pscr_direction_selected, pscr_lot_size_received, pscr_lot_size_callback, pscr_leverage_selected,
-    pscr_protection_selected,
-    pscr_time_window_callback, pscr_custom_time_received,
-    pscr_confirmed,
-    paper_back_handler, paper_cancel_handler, pscr_back_handler, pscr_cancel_handler,
-    PAPER_NAME, PAPER_DESC, PAPER_API, PAPER_INDICATOR, PAPER_DIRECTION,
-    PAPER_TIMEFRAME, PAPER_ASSET, PAPER_LOT_SIZE, PAPER_LEVERAGE,
-    PAPER_PROTECTION, PAPER_CONFIRM,
-    PAPER_TIME_WINDOW, PAPER_CUSTOM_TIME,
-    PSCR_NAME, PSCR_DESC, PSCR_API, PSCR_INDICATOR, PSCR_ASSET_TYPE,
-    PSCR_TIMEFRAME, PSCR_DIRECTION, PSCR_LOT_SIZE, PSCR_LEVERAGE,
-    PSCR_PROTECTION, PSCR_CONFIRM,
-    PSCR_TIME_WINDOW, PSCR_CUSTOM_TIME,
-    PAPER_SET_BALANCE_AMOUNT,
-)
+from handlers.paper_setup import get_paper_setup_handlers
+from handlers.paper_screener import get_paper_screener_handlers
+from handlers.paper_trading import get_paper_hub_handlers
 from handlers.performance import (
     performance_menu_callback, performance_command,
     perf_real_callback, perf_real_chart_callback, perf_real_csv_callback,
@@ -364,95 +336,18 @@ def create_application() -> Application:
     
     # ===== PAPER TRADING HANDLERS =====
     
-    # Paper Trading individual setup conversation handler
-    paper_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(paper_add_start, pattern="^paper_add_start$")],
-        states={
-            PAPER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_name_received)],
-            PAPER_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_desc_received)],
-            PAPER_API: [CallbackQueryHandler(paper_api_selected, pattern="^paper_api_")],
-            PAPER_INDICATOR: [CallbackQueryHandler(paper_indicator_selected, pattern="^paper_ind_")],
-            PAPER_DIRECTION: [CallbackQueryHandler(paper_direction_selected, pattern="^paper_dir_")],
-            PAPER_TIMEFRAME: [CallbackQueryHandler(paper_timeframe_selected, pattern="^paper_tf_")],
-            PAPER_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_asset_received)],
-            PAPER_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_lot_size_received), CallbackQueryHandler(paper_lot_size_callback, pattern="^paper_lot_")],
-            PAPER_LEVERAGE: [CallbackQueryHandler(paper_leverage_selected, pattern="^paper_lev_")],
-            PAPER_PROTECTION: [CallbackQueryHandler(paper_protection_selected, pattern="^paper_prot_")],
-            PAPER_TIME_WINDOW: [CallbackQueryHandler(paper_time_window_callback, pattern="^paper_tw_")],
-            PAPER_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_custom_time_received)],
-            PAPER_CONFIRM: [CallbackQueryHandler(paper_confirmed, pattern="^paper_confirm_")],
-        },
-        fallbacks=[
-            CallbackQueryHandler(paper_back_handler, pattern="^paper_back_to_"),
-            CallbackQueryHandler(paper_cancel_handler, pattern="^paper_fsm_cancel$"),
-            CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
-        ],
-        per_message=False,
-        allow_reentry=True
-    )
-    application.add_handler(paper_conv_handler)
+    # Paper Trading Individual Setup
+    application.add_handler(get_paper_setup_handlers())
     
-    # Paper Trading screener setup conversation handler
-    pscr_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(pscr_add_start, pattern="^pscr_add_start$")],
-        states={
-            PSCR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_name_received)],
-            PSCR_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_desc_received)],
-            PSCR_API: [CallbackQueryHandler(pscr_api_selected, pattern="^pscr_api_")],
-            PSCR_INDICATOR: [CallbackQueryHandler(pscr_indicator_selected, pattern="^pscr_ind_")],
-            PSCR_ASSET_TYPE: [CallbackQueryHandler(pscr_asset_type_selected, pattern="^pscr_atype_")],
-            PSCR_TIMEFRAME: [CallbackQueryHandler(pscr_timeframe_selected, pattern="^pscr_tf_")],
-            PSCR_DIRECTION: [CallbackQueryHandler(pscr_direction_selected, pattern="^pscr_dir_")],
-            PSCR_LOT_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_lot_size_received), CallbackQueryHandler(pscr_lot_size_callback, pattern="^pscr_lot_")],
-            PSCR_LEVERAGE: [CallbackQueryHandler(pscr_leverage_selected, pattern="^pscr_lev_")],
-            PSCR_PROTECTION: [CallbackQueryHandler(pscr_protection_selected, pattern="^pscr_prot_")],
-            PSCR_TIME_WINDOW: [CallbackQueryHandler(pscr_time_window_callback, pattern="^pscr_tw_")],
-            PSCR_CUSTOM_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, pscr_custom_time_received)],
-            PSCR_CONFIRM: [CallbackQueryHandler(pscr_confirmed, pattern="^pscr_confirm_")],
-        },
-        fallbacks=[
-            CallbackQueryHandler(pscr_back_handler, pattern="^pscr_back_to_"),
-            CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_fsm_cancel$"),
-            CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
-        ],
-        per_message=False,
-        allow_reentry=True
-    )
-    application.add_handler(pscr_conv_handler)
+    # Paper Trading Screener Setup
+    application.add_handler(get_paper_screener_handlers())
     
-    # Paper Trading set virtual balance conversation handler
-    paper_balance_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(paper_set_balance_callback, pattern="^paper_set_balance$")],
-        states={
-            PAPER_SET_BALANCE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, paper_set_balance_amount_received)],
-        },
-        fallbacks=[
-            CallbackQueryHandler(pscr_back_handler, pattern="^pscr_back_to_"),
-            CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_fsm_cancel$"),
-            CommandHandler("cancel", cancel_paper_setup),
-            CallbackQueryHandler(main_menu_callback, pattern="^main_menu$")
-        ],
-        per_message=False,
-        allow_reentry=True
-    )
-    application.add_handler(paper_balance_conv_handler)
-    
-    # Paper Trading menu and action handlers
-    application.add_handler(CallbackQueryHandler(paper_trading_menu_callback, pattern="^menu_paper_trading$"))
-    application.add_handler(CallbackQueryHandler(paper_view_list_callback, pattern="^paper_view_list$"))
-    application.add_handler(CallbackQueryHandler(paper_setup_group_callback, pattern="^paper_setup_grp_"))
-    application.add_handler(CallbackQueryHandler(paper_detail_callback, pattern="^paper_detail_"))
-    application.add_handler(CallbackQueryHandler(paper_toggle_callback, pattern="^paper_toggle_"))
-    application.add_handler(CallbackQueryHandler(paper_cancel_callback, pattern="^paper_cancel_"))
-    application.add_handler(CallbackQueryHandler(paper_close_callback, pattern="^paper_close_"))
-    application.add_handler(CallbackQueryHandler(paper_close_all_confirm_callback, pattern="^paper_close_all_confirm$"))
-    application.add_handler(CallbackQueryHandler(paper_close_all_execute_callback, pattern="^paper_close_all_execute$"))
+    # Paper Trading Hub & Actions
+    for handler in get_paper_hub_handlers():
+        application.add_handler(handler)
+        
     application.add_handler(CallbackQueryHandler(paper_activity_callback, pattern="^paper_activity"))
-    application.add_handler(CallbackQueryHandler(paper_delete_list_callback, pattern="^paper_delete_list$"))
-    application.add_handler(CallbackQueryHandler(paper_delete_confirm_callback, pattern="^paper_del_confirm_"))
-    
+        
     # ===== PERFORMANCE HANDLERS =====
     
     application.add_handler(CommandHandler("performance", performance_command))
