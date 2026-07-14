@@ -1388,6 +1388,18 @@ async def delete_backtest_result(result_id: str) -> bool:
         logger.error(f"[BT-CRUD] Error deleting backtest result {result_id}: {e}")
         return False
 
+async def delete_all_backtest_results(user_id: str) -> int:
+    """
+    Delete all backtest results for a user.
+    """
+    try:
+        db = mongodb.get_db()
+        result = await db.backtest_results.delete_many({"user_id": user_id})
+        return result.deleted_count
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error deleting all results for {user_id}: {e}")
+        return 0
+
 
 async def delete_all_backtest_results(user_id: str) -> int:
     """

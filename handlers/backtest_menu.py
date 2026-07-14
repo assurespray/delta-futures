@@ -525,6 +525,7 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if nav_row:
         keyboard.append(nav_row)
         
+    keyboard.append([InlineKeyboardButton("🧨 Delete All History", callback_data="bt_del_all_confirm")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Backtester", callback_data="menu_backtest")])
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -722,6 +723,39 @@ async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
 
 
+async def bt_del_all_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation dialog to delete all backtest history."""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "⚠️ **WARNING: DELETE ALL HISTORY**\n\n"
+        "You are about to permanently delete **all** of your past backtest results.\n"
+        "This action cannot be undone.\n\n"
+        "Are you absolutely sure?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧨 YES, DELETE ALL", callback_data="bt_del_all_execute")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="bt_history")]
+        ]),
+        parse_mode="Markdown"
+    )
+
+async def bt_del_all_execute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute the mass deletion of all backtest results."""
+    query = update.callback_query
+    await query.answer("Deleting all history...")
+    user_id = str(query.from_user.id)
+    
+    from database.crud import delete_all_backtest_results
+    deleted_count = await delete_all_backtest_results(user_id)
+    
+    await query.edit_message_text(
+        f"✅ Successfully deleted {deleted_count} backtest results.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back to Backtester", callback_data="menu_backtest")]
+        ])
+    )
+
 async def bt_del_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a specific backtest record."""
     query = update.callback_query
@@ -847,6 +881,8 @@ def get_backtest_handlers():
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_recalc_leverage, pattern="^bt_recalc_"),
         CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
+        CallbackQueryHandler(bt_del_all_confirm_callback, pattern="^bt_del_all_confirm$"),
+        CallbackQueryHandler(bt_del_all_execute_callback, pattern="^bt_del_all_execute$"),
         CallbackQueryHandler(bt_del_result, pattern="^bt_del_"),
         CallbackQueryHandler(bt_stop_backtest, pattern="^bt_stop$"),
         CallbackQueryHandler(bt_glossary, pattern="^bt_glossary$"),
