@@ -216,6 +216,16 @@ async def ensure_default_presets(user_id: str) -> None:
                 "expansion_alpha": 0.5
             },
         },
+        {
+            "strategy_type": "recovery_supertrend",
+            "preset_name": "[S] Recovery ST (10, 3.0, A:5.0%, T:1.0)",
+            "parameters": {
+                "atr_length": 10,
+                "multiplier": 3.0,
+                "recovery_alpha": 5.0,
+                "recovery_threshold": 1.0
+            },
+        },
     ]
 
     for d in defaults:

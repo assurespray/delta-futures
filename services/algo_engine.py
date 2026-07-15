@@ -161,30 +161,41 @@ class AlgoEngine:
         self, prev_cache: dict, cache_data: dict,
         setup_name: str, asset: str, timeframe: str
     ) -> None:
-        """Detect noise state transition for Evasive SuperTrend."""
+        """Detect noise/recovery state transitions for Evasive ST and Recovery ST."""
         if not prev_cache:
             return
             
         prev_state = prev_cache.get("strategy_state", {})
         new_state = cache_data.get("strategy_state", {})
         
-        # Only fires for strategies that track is_noisy (Evasive ST)
-        if "is_noisy" not in new_state:
-            return
+        # Evasive ST: is_noisy transitions
+        if "is_noisy" in new_state:
+            prev_noisy = prev_state.get("is_noisy")
+            new_noisy = new_state.get("is_noisy")
             
-        prev_noisy = prev_state.get("is_noisy")
-        new_noisy = new_state.get("is_noisy")
+            if prev_noisy is not None and prev_noisy != new_noisy:
+                await self.logger_bot.send_noise_alert(
+                    setup_name=setup_name, asset=asset, timeframe=timeframe,
+                    noise_active=new_noisy,
+                    st_value=cache_data.get("primary_value", 0),
+                    current_price=cache_data.get("current_price", 0),
+                    atr_value=cache_data.get("display_details", {}).get("ATR")
+                )
         
-        if prev_noisy is None or prev_noisy == new_noisy:
-            return
+        # Recovery ST: is_at_loss transitions
+        if "is_at_loss" in new_state:
+            prev_at_loss = prev_state.get("is_at_loss")
+            new_at_loss = new_state.get("is_at_loss")
             
-        await self.logger_bot.send_noise_alert(
-            setup_name=setup_name, asset=asset, timeframe=timeframe,
-            noise_active=new_noisy,
-            st_value=cache_data.get("primary_value", 0),
-            current_price=cache_data.get("current_price", 0),
-            atr_value=cache_data.get("display_details", {}).get("ATR")
-        )
+            if prev_at_loss is not None and prev_at_loss != new_at_loss:
+                await self.logger_bot.send_recovery_alert(
+                    setup_name=setup_name, asset=asset, timeframe=timeframe,
+                    recovery_active=new_at_loss,
+                    st_value=cache_data.get("primary_value", 0),
+                    current_price=cache_data.get("current_price", 0),
+                    switch_price=cache_data.get("display_details", {}).get("Switch Price"),
+                    atr_value=cache_data.get("display_details", {}).get("ATR")
+                )
 
     async def run_continuous_monitoring(self):
         """

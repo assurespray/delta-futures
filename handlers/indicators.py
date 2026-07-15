@@ -318,6 +318,18 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                         f"├ Noise: {noise_str}\n"
                         f"└ ATR: {d.get('atr', 0):.6f}\n"
                     )
+                elif ptype == "recovery_supertrend":
+                    d = result['recovery_st']
+                    recovery_str = "🔄 Active" if d.get('is_at_loss') else "✅ Normal"
+                    msg = (
+                        info +
+                        f"🔄 **Recovery SuperTrend**\n"
+                        f"├ Signal: {'📈' if d['signal']==1 else '📉'} {d['signal_text']}\n"
+                        f"├ ST Value: ${d['supertrend_value']:.4f}\n"
+                        f"├ Recovery: {recovery_str}\n"
+                        f"├ Switch Price: ${d.get('switch_price', 0):.4f}\n"
+                        f"└ ATR: {d.get('atr', 0):.6f}\n"
+                    )
             else:
                 msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
                 msg += "**Possible reasons:**\n"

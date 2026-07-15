@@ -110,6 +110,8 @@ def _format_indicator_params(indicator: str, params: dict) -> str:
         return f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')}, PipMult:{params.get('pip_offset_multiplier','?')})"
     elif indicator == 'evasive_supertrend':
         return f"Evasive ST ({params.get('atr_length','?')}, {params.get('multiplier','?')}, T:{params.get('noise_threshold','?')})"
+    elif indicator == 'recovery_supertrend':
+        return f"Recovery ST ({params.get('atr_length','?')}, {params.get('multiplier','?')}, A:{params.get('recovery_alpha','?')}%)"
     
     return indicator.replace('_', ' ').title()
 

@@ -73,6 +73,7 @@ async def preset_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
         [InlineKeyboardButton("🛡️ Evasive SuperTrend", callback_data="preset_type_evasive_supertrend")],
+        [InlineKeyboardButton("🔄 Recovery SuperTrend", callback_data="preset_type_recovery_supertrend")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await update.message.reply_text("Select base strategy:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -104,6 +105,11 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     elif ptype == "evasive_supertrend":
         context.user_data['evasive_step'] = 0
         context.user_data['evasive_params'] = {}
+        await query.edit_message_text("Step 1/3: Enter ATR Length and Multiplier separated by comma (e.g., 10,3.0):")
+        return PRESET_P1
+    elif ptype == "recovery_supertrend":
+        context.user_data['recovery_step'] = 0
+        context.user_data['recovery_params'] = {}
         await query.edit_message_text("Step 1/3: Enter ATR Length and Multiplier separated by comma (e.g., 10,3.0):")
         return PRESET_P1
 
@@ -213,6 +219,45 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
                 params = params_dict
                 context.user_data.pop('evasive_step', None)
                 context.user_data.pop('evasive_params', None)
+                # Fall through to save preset
+            
+        elif ptype == "recovery_supertrend":
+            step = context.user_data.get('recovery_step', 0)
+            params_dict = context.user_data.get('recovery_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                parts_recovery = [p.strip() for p in val.split(",")]
+                if len(parts_recovery) != 2: raise ValueError("Need 2 values: ATR Length and Multiplier")
+                params_dict['atr_length'] = int(parts_recovery[0])
+                params_dict['multiplier'] = float(parts_recovery[1])
+            elif step == 1:
+                params_dict['recovery_alpha'] = float(val)
+            elif step == 2:
+                params_dict['recovery_threshold'] = float(val)
+                
+            context.user_data['recovery_params'] = params_dict
+            step += 1
+            context.user_data['recovery_step'] = step
+            
+            if step == 1:
+                msg_text = "Step 2/3: Enter Recovery Alpha % (e.g., 5.0):"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(msg_text)
+                else:
+                    await update.message.reply_text(msg_text)
+                return PRESET_P1
+            elif step == 2:
+                msg_text = "Step 3/3: Enter Recovery Threshold in ATRs (e.g., 1.0):"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(msg_text)
+                else:
+                    await update.message.reply_text(msg_text)
+                return PRESET_P1
+            else:
+                params = params_dict
+                context.user_data.pop('recovery_step', None)
+                context.user_data.pop('recovery_params', None)
                 # Fall through to save preset
             
         await create_strategy_preset({
@@ -351,6 +396,15 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += f"Step 1/3: Enter ATR Length and Multiplier (e.g., 10,3.0)\n*(Current: {params.get('atr_length', '?')},{params.get('multiplier', '?')})*"
         message += "\n\nSend /cancel to abort."
         await query.edit_message_text(message, parse_mode="Markdown")
+    elif ptype == "recovery_supertrend":
+        context.user_data['recovery_step'] = 0
+        context.user_data['recovery_params'] = {}
+        context.user_data['recovery_old_params'] = params
+        
+        message += f"Let's update them one by one.\n\n"
+        message += f"Step 1/3: Enter ATR Length and Multiplier (e.g., 10,3.0)\n*(Current: {params.get('atr_length', '?')},{params.get('multiplier', '?')})*"
+        message += "\n\nSend /cancel to abort."
+        await query.edit_message_text(message, parse_mode="Markdown")
         
     return PRESET_EDIT_PARAMS
 
@@ -483,6 +537,48 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
                 context.user_data.pop('evasive_params', None)
                 context.user_data.pop('evasive_old_params', None)
                 # Fall through to save preset
+        elif ptype == "recovery_supertrend":
+            step = context.user_data.get('recovery_step', 0)
+            params_dict = context.user_data.get('recovery_params', {})
+            old_params = context.user_data.get('recovery_old_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                parts_recovery = [p.strip() for p in val.split(",")]
+                if len(parts_recovery) != 2: raise ValueError("Need 2 values: ATR Length and Multiplier")
+                params_dict['atr_length'] = int(parts_recovery[0])
+                params_dict['multiplier'] = float(parts_recovery[1])
+            elif step == 1:
+                params_dict['recovery_alpha'] = float(val)
+            elif step == 2:
+                params_dict['recovery_threshold'] = float(val)
+                
+            context.user_data['recovery_params'] = params_dict
+            step += 1
+            context.user_data['recovery_step'] = step
+            
+            if step == 1:
+                current_val = old_params.get('recovery_alpha', '?')
+                prompt = f"Step 2/3: Enter Recovery Alpha % (e.g., 5.0)\n*(Current: {current_val})*"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(prompt, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(prompt, parse_mode="Markdown")
+                return PRESET_EDIT_PARAMS
+            elif step == 2:
+                current_val = old_params.get('recovery_threshold', '?')
+                prompt = f"Step 3/3: Enter Recovery Threshold in ATRs (e.g., 1.0)\n*(Current: {current_val})*"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(prompt, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(prompt, parse_mode="Markdown")
+                return PRESET_EDIT_PARAMS
+            else:
+                params = params_dict
+                context.user_data.pop('recovery_step', None)
+                context.user_data.pop('recovery_params', None)
+                context.user_data.pop('recovery_old_params', None)
+                # Fall through to save preset
         
         await update_strategy_preset(pid, {"parameters": params})
         
@@ -533,6 +629,7 @@ async def preset_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
         [InlineKeyboardButton("🛡️ Evasive SuperTrend", callback_data="preset_type_evasive_supertrend")],
+        [InlineKeyboardButton("🔄 Recovery SuperTrend", callback_data="preset_type_recovery_supertrend")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await query.edit_message_text(

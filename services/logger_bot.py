@@ -387,6 +387,33 @@ class LoggerBot:
         await self.send_message(message, chat_id=self.flip_chat_id)
         await self.send_message(message, chat_id=self.trade_chat_id)
 
+    async def send_recovery_alert(self, setup_name: str, asset: str, timeframe: str,
+                                  recovery_active: bool, st_value: float, current_price: float,
+                                  switch_price: float = None, atr_value: float = None):
+        """Send notification when Recovery SuperTrend loss state changes."""
+        if recovery_active:
+            emoji = "🔄"
+            state = "RECOVERY ACTIVE — Band tracking toward price"
+        else:
+            emoji = "✅"
+            state = "RECOVERY CLEARED — Normal trailing resumed"
+        
+        message = (
+            f"{emoji} **RECOVERY ST: {state}**\n\n"
+            f"**Setup:** {setup_name}\n"
+            f"**Asset:** {asset} ({timeframe})\n"
+            f"├ ST Band: ${st_value:.5f}\n"
+            f"├ Price: ${current_price:.5f}\n"
+        )
+        if switch_price is not None:
+            message += f"├ Switch Price: ${switch_price:.5f}\n"
+        if atr_value is not None:
+            message += f"├ ATR: {atr_value:.6f}\n"
+        message += f"└ Time: {self._get_timestamp()}"
+        
+        await self.send_message(message, chat_id=self.flip_chat_id)
+        await self.send_message(message, chat_id=self.trade_chat_id)
+
     async def send_trade_entry_detail(self, setup_name: str, asset: str, timeframe: str,
                                      direction: str, entry_price: float, lot_size: int,
                                      primary_signal_text: str, secondary_signal_text: str,
