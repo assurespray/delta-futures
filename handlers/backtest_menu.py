@@ -484,18 +484,24 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Parse page number
     page = 0
-    if query.data.startswith("bt_history_p"):
+    if query.data.startswith("bt_history_p") and query.data != "bt_history_profit_toggle":
         try:
             page = int(query.data.replace("bt_history_p", ""))
         except ValueError:
             pass
+            
+    if query.data == "bt_history_profit_toggle":
+        context.user_data['bt_profit_only'] = not context.user_data.get('bt_profit_only', False)
+        
+    profit_only = context.user_data.get('bt_profit_only', False)
             
     ITEMS_PER_PAGE = 10
     skip = page * ITEMS_PER_PAGE
     
     # Fetch exactly the requested page from the database
     results, total_count = await get_backtest_results(
-        user_id, sort_by="created_at", sort_order=-1, limit=ITEMS_PER_PAGE, skip=skip
+        user_id, sort_by="created_at", sort_order=-1, limit=ITEMS_PER_PAGE, skip=skip,
+        profit_only=profit_only
     )
     
     if not results and page == 0:
@@ -507,7 +513,8 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     total_pages = max(1, (total_count + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     
-    text = f"🗄️ **Recent Backtest Results** (Page {page+1}/{total_pages})\n\nSelect a result to view its full details:"
+    filter_label = " (Profit Only)" if profit_only else ""
+    text = f"🗄️ **Recent Backtest Results**{filter_label} (Page {page+1}/{total_pages})\n\nSelect a result to view its full details:"
     
     keyboard = []
     for r in results:
@@ -524,6 +531,11 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     if nav_row:
         keyboard.append(nav_row)
+        
+    if profit_only:
+        keyboard.append([InlineKeyboardButton("✅ Showing Profit Only (tap to reset)", callback_data="bt_history_profit_toggle")])
+    else:
+        keyboard.append([InlineKeyboardButton("📊 Show Profit Only", callback_data="bt_history_profit_toggle")])
         
     keyboard.append([InlineKeyboardButton("🧨 Delete All History", callback_data="bt_del_all_confirm")])
     keyboard.append([InlineKeyboardButton("🔙 Back to Backtester", callback_data="menu_backtest")])

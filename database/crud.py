@@ -1296,6 +1296,7 @@ async def get_backtest_results(
     skip: int = 0,
     symbol: Optional[str] = None,
     strategy: Optional[str] = None,
+    profit_only: bool = False,
 ) -> tuple[list, int]:
     """
     Retrieve past backtest results for a user with true database pagination.
@@ -1323,6 +1324,8 @@ async def get_backtest_results(
             query["symbol"] = symbol.upper()
         if strategy:
             query["strategy"] = strategy
+        if profit_only:
+            query["overall_profit_pct"] = {"$gt": 0}
 
         # Validate sort field to prevent injection
         allowed_sort_fields = {
