@@ -102,7 +102,9 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text(OHLC_PROMPTS[0], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
         return PRESET_P1
     elif ptype == "evasive_supertrend":
-        await query.edit_message_text("Enter ATR Length, Multiplier, Noise Threshold, Expansion Alpha separated by comma (e.g., 10,3.0,1.0,0.5):")
+        context.user_data['evasive_step'] = 0
+        context.user_data['evasive_params'] = {}
+        await query.edit_message_text("Step 1/3: Enter ATR Length and Multiplier separated by comma (e.g., 10,3.0):")
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,11 +177,43 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
                 # Fall through to save preset
             
         elif ptype == "evasive_supertrend":
-            if len(parts) != 4: raise ValueError("Need 4 values")
-            params = {
-                "atr_length": int(parts[0]), "multiplier": float(parts[1]),
-                "noise_threshold": float(parts[2]), "expansion_alpha": float(parts[3])
-            }
+            step = context.user_data.get('evasive_step', 0)
+            params_dict = context.user_data.get('evasive_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                parts_evasive = [p.strip() for p in val.split(",")]
+                if len(parts_evasive) != 2: raise ValueError("Need 2 values: ATR Length and Multiplier")
+                params_dict['atr_length'] = int(parts_evasive[0])
+                params_dict['multiplier'] = float(parts_evasive[1])
+            elif step == 1:
+                params_dict['noise_threshold'] = float(val)
+            elif step == 2:
+                params_dict['expansion_alpha'] = float(val)
+                
+            context.user_data['evasive_params'] = params_dict
+            step += 1
+            context.user_data['evasive_step'] = step
+            
+            if step == 1:
+                msg_text = "Step 2/3: Enter Noise Threshold (e.g., 1.0):"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(msg_text)
+                else:
+                    await update.message.reply_text(msg_text)
+                return PRESET_P1
+            elif step == 2:
+                msg_text = "Step 3/3: Enter Expansion Alpha (e.g., 0.5):"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(msg_text)
+                else:
+                    await update.message.reply_text(msg_text)
+                return PRESET_P1
+            else:
+                params = params_dict
+                context.user_data.pop('evasive_step', None)
+                context.user_data.pop('evasive_params', None)
+                # Fall through to save preset
             
         await create_strategy_preset({
             "user_id": str(update.effective_user.id),
@@ -309,9 +343,12 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += "\n\nSend /cancel to abort."
         await query.edit_message_text(message, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
     elif ptype == "evasive_supertrend":
-        message += f"• ATR Length: {params.get('atr_length', '?')}, Multiplier: {params.get('multiplier', '?')}\n"
-        message += f"• Noise Threshold: {params.get('noise_threshold', '?')}, Expansion Alpha: {params.get('expansion_alpha', '?')}\n\n"
-        message += "Enter new ATR Length, Multiplier, Noise Threshold, Expansion Alpha (e.g., 10,3.0,1.0,0.5):"
+        context.user_data['evasive_step'] = 0
+        context.user_data['evasive_params'] = {}
+        context.user_data['evasive_old_params'] = params
+        
+        message += f"Let's update them one by one.\n\n"
+        message += f"Step 1/3: Enter ATR Length and Multiplier (e.g., 10,3.0)\n*(Current: {params.get('atr_length', '?')},{params.get('multiplier', '?')})*"
         message += "\n\nSend /cancel to abort."
         await query.edit_message_text(message, parse_mode="Markdown")
         
@@ -405,11 +442,47 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
                 context.user_data.pop('ohlc_old_params', None)
                 # Fall through to save preset
         elif ptype == "evasive_supertrend":
-            if len(parts) != 4: raise ValueError("Need 4 values")
-            params = {
-                "atr_length": int(parts[0]), "multiplier": float(parts[1]),
-                "noise_threshold": float(parts[2]), "expansion_alpha": float(parts[3])
-            }
+            step = context.user_data.get('evasive_step', 0)
+            params_dict = context.user_data.get('evasive_params', {})
+            old_params = context.user_data.get('evasive_old_params', {})
+            val = text.strip()
+            
+            if step == 0:
+                parts_evasive = [p.strip() for p in val.split(",")]
+                if len(parts_evasive) != 2: raise ValueError("Need 2 values: ATR Length and Multiplier")
+                params_dict['atr_length'] = int(parts_evasive[0])
+                params_dict['multiplier'] = float(parts_evasive[1])
+            elif step == 1:
+                params_dict['noise_threshold'] = float(val)
+            elif step == 2:
+                params_dict['expansion_alpha'] = float(val)
+                
+            context.user_data['evasive_params'] = params_dict
+            step += 1
+            context.user_data['evasive_step'] = step
+            
+            if step == 1:
+                current_val = old_params.get('noise_threshold', '?')
+                prompt = f"Step 2/3: Enter Noise Threshold (e.g., 1.0)\n*(Current: {current_val})*"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(prompt, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(prompt, parse_mode="Markdown")
+                return PRESET_EDIT_PARAMS
+            elif step == 2:
+                current_val = old_params.get('expansion_alpha', '?')
+                prompt = f"Step 3/3: Enter Expansion Alpha (e.g., 0.5)\n*(Current: {current_val})*"
+                if update.callback_query:
+                    await update.callback_query.edit_message_text(prompt, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(prompt, parse_mode="Markdown")
+                return PRESET_EDIT_PARAMS
+            else:
+                params = params_dict
+                context.user_data.pop('evasive_step', None)
+                context.user_data.pop('evasive_params', None)
+                context.user_data.pop('evasive_old_params', None)
+                # Fall through to save preset
         
         await update_strategy_preset(pid, {"parameters": params})
         
