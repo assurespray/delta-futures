@@ -157,6 +157,35 @@ class AlgoEngine:
             except Exception as e:
                 logger.error(f"Error sending flip notification for {flipped_name}: {e}")
 
+    async def _detect_and_notify_noise_change(
+        self, prev_cache: dict, cache_data: dict,
+        setup_name: str, asset: str, timeframe: str
+    ) -> None:
+        """Detect noise state transition for Evasive SuperTrend."""
+        if not prev_cache:
+            return
+            
+        prev_state = prev_cache.get("strategy_state", {})
+        new_state = cache_data.get("strategy_state", {})
+        
+        # Only fires for strategies that track is_noisy (Evasive ST)
+        if "is_noisy" not in new_state:
+            return
+            
+        prev_noisy = prev_state.get("is_noisy")
+        new_noisy = new_state.get("is_noisy")
+        
+        if prev_noisy is None or prev_noisy == new_noisy:
+            return
+            
+        await self.logger_bot.send_noise_alert(
+            setup_name=setup_name, asset=asset, timeframe=timeframe,
+            noise_active=new_noisy,
+            st_value=cache_data.get("primary_value", 0),
+            current_price=cache_data.get("current_price", 0),
+            atr_value=cache_data.get("display_details", {}).get("ATR")
+        )
+
     async def run_continuous_monitoring(self):
         """
         Background loop to monitor active setups and open trades on candle boundaries.
@@ -321,6 +350,9 @@ class AlgoEngine:
                 
             # --- Universal Flip Detection (Telegram alert) ---
             await self._detect_and_notify_flips(
+                prev_cache, cache_data, setup_name, asset, timeframe
+            )
+            await self._detect_and_notify_noise_change(
                 prev_cache, cache_data, setup_name, asset, timeframe
             )
                 
@@ -528,6 +560,9 @@ class AlgoEngine:
                 })
                 setup_name = trade_state.get("setup_name", "Unknown")
                 await self._detect_and_notify_flips(
+                    prev_cache, cache_data, setup_name, asset, timeframe
+                )
+                await self._detect_and_notify_noise_change(
                     prev_cache, cache_data, setup_name, asset, timeframe
                 )
                 

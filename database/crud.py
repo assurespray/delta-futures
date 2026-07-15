@@ -206,6 +206,16 @@ async def ensure_default_presets(user_id: str) -> None:
                 "entry_mode": "confirmation"
             },
         },
+        {
+            "strategy_type": "evasive_supertrend",
+            "preset_name": "[S] Evasive ST (10, 3.0, T:1.0, A:0.5)",
+            "parameters": {
+                "atr_length": 10,
+                "multiplier": 3.0,
+                "noise_threshold": 1.0,
+                "expansion_alpha": 0.5
+            },
+        },
     ]
 
     for d in defaults:

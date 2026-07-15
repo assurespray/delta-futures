@@ -72,6 +72,7 @@ async def preset_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
+        [InlineKeyboardButton("🛡️ Evasive SuperTrend", callback_data="preset_type_evasive_supertrend")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await update.message.reply_text("Select base strategy:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -99,6 +100,9 @@ async def preset_type_selected(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data['ohlc_step'] = 0
         context.user_data['ohlc_params'] = {}
         await query.edit_message_text(OHLC_PROMPTS[0], parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
+        return PRESET_P1
+    elif ptype == "evasive_supertrend":
+        await query.edit_message_text("Enter ATR Length, Multiplier, Noise Threshold, Expansion Alpha separated by comma (e.g., 10,3.0,1.0,0.5):")
         return PRESET_P1
 
 async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,6 +173,13 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             else:
                 params = params_dict
                 # Fall through to save preset
+            
+        elif ptype == "evasive_supertrend":
+            if len(parts) != 4: raise ValueError("Need 4 values")
+            params = {
+                "atr_length": int(parts[0]), "multiplier": float(parts[1]),
+                "noise_threshold": float(parts[2]), "expansion_alpha": float(parts[3])
+            }
             
         await create_strategy_preset({
             "user_id": str(update.effective_user.id),
@@ -297,6 +308,12 @@ async def preset_edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message += OHLC_PROMPTS[0] + f"\n*(Current: {params.get('reference_time', '?')})*"
         message += "\n\nSend /cancel to abort."
         await query.edit_message_text(message, parse_mode="Markdown", reply_markup=OHLC_KEYBOARDS[0])
+    elif ptype == "evasive_supertrend":
+        message += f"• ATR Length: {params.get('atr_length', '?')}, Multiplier: {params.get('multiplier', '?')}\n"
+        message += f"• Noise Threshold: {params.get('noise_threshold', '?')}, Expansion Alpha: {params.get('expansion_alpha', '?')}\n\n"
+        message += "Enter new ATR Length, Multiplier, Noise Threshold, Expansion Alpha (e.g., 10,3.0,1.0,0.5):"
+        message += "\n\nSend /cancel to abort."
+        await query.edit_message_text(message, parse_mode="Markdown")
         
     return PRESET_EDIT_PARAMS
 
@@ -387,6 +404,12 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
                 context.user_data.pop('ohlc_params', None)
                 context.user_data.pop('ohlc_old_params', None)
                 # Fall through to save preset
+        elif ptype == "evasive_supertrend":
+            if len(parts) != 4: raise ValueError("Need 4 values")
+            params = {
+                "atr_length": int(parts[0]), "multiplier": float(parts[1]),
+                "noise_threshold": float(parts[2]), "expansion_alpha": float(parts[3])
+            }
         
         await update_strategy_preset(pid, {"parameters": params})
         
@@ -436,6 +459,7 @@ async def preset_back_to_type(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("🏔️ Range Breakout (LazyBear)", callback_data="preset_type_range_breakout_lazybear")],
         [InlineKeyboardButton("🐢 Donchian Channels", callback_data="preset_type_donchian")],
         [InlineKeyboardButton("⏰ OHLC Breakout", callback_data="preset_type_ohlc_breakout")],
+        [InlineKeyboardButton("🛡️ Evasive SuperTrend", callback_data="preset_type_evasive_supertrend")],
         [InlineKeyboardButton("🔙 Back", callback_data="preset_back_name")]
     ]
     await query.edit_message_text(

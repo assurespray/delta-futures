@@ -307,6 +307,17 @@ async def _calculate_and_display_indicator(message, context, asset, indicator_ty
                         f"├ RR Ratio: 1:{rr}\n"
                         f"└ Merge Prev: {merge}\n"
                     )
+                elif ptype == "evasive_supertrend":
+                    d = result['evasive_st']
+                    noise_str = "⚡ Noisy" if d.get('is_noisy') else "✅ Clear"
+                    msg = (
+                        info +
+                        f"🛡️ **Evasive SuperTrend**\n"
+                        f"├ Signal: {'📈' if d['signal']==1 else '📉'} {d['signal_text']}\n"
+                        f"├ ST Value: ${d['supertrend_value']:.4f}\n"
+                        f"├ Noise: {noise_str}\n"
+                        f"└ ATR: {d.get('atr', 0):.6f}\n"
+                    )
             else:
                 msg = f"❌ Failed to calculate indicator(s) for {asset}.\n\n"
                 msg += "**Possible reasons:**\n"

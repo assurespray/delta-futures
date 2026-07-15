@@ -361,6 +361,31 @@ class LoggerBot:
         )
         
         await self.send_message(message, chat_id=self.flip_chat_id)
+        
+    async def send_noise_alert(self, setup_name: str, asset: str, timeframe: str,
+                              noise_active: bool, st_value: float, current_price: float,
+                              atr_value: float = None):
+        """Send notification when Evasive SuperTrend noise state changes."""
+        if noise_active:
+            emoji = "⚡"
+            state = "NOISE DETECTED — Band expanding"
+        else:
+            emoji = "✅"
+            state = "NOISE CLEARED — Normal trailing resumed"
+        
+        message = (
+            f"{emoji} **EVASIVE ST: {state}**\n\n"
+            f"**Setup:** {setup_name}\n"
+            f"**Asset:** {asset} ({timeframe})\n"
+            f"├ ST Band: ${st_value:.5f}\n"
+            f"├ Price: ${current_price:.5f}\n"
+        )
+        if atr_value is not None:
+            message += f"├ ATR: {atr_value:.6f}\n"
+        message += f"└ Time: {self._get_timestamp()}"
+        
+        await self.send_message(message, chat_id=self.flip_chat_id)
+        await self.send_message(message, chat_id=self.trade_chat_id)
 
     async def send_trade_entry_detail(self, setup_name: str, asset: str, timeframe: str,
                                      direction: str, entry_price: float, lot_size: int,

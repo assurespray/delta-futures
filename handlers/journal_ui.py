@@ -108,6 +108,8 @@ def _format_indicator_params(indicator: str, params: dict) -> str:
         return f"Donchian ({params.get('period','?')})"
     elif indicator == 'ohlc_breakout':
         return f"OHLC Breakout ({params.get('reference_time','?')}, {params.get('reference_timeframe','?')}, PipMult:{params.get('pip_offset_multiplier','?')})"
+    elif indicator == 'evasive_supertrend':
+        return f"Evasive ST ({params.get('atr_length','?')}, {params.get('multiplier','?')}, T:{params.get('noise_threshold','?')})"
     
     return indicator.replace('_', ' ').title()
 
