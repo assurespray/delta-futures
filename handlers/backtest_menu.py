@@ -543,6 +543,21 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+def _build_dir_filter_row(result_id: str, active: str = "all") -> list:
+    from telegram import InlineKeyboardButton
+    buttons = [
+        ("📈 Long Only", "long"),
+        ("📉 Short Only", "short"),
+        ("📊 All Trades", "all"),
+    ]
+    return [
+        InlineKeyboardButton(
+            f"{'✅ ' if key == active else ''}{label}",
+            callback_data=f"bt_dirfilter_{result_id}_{key}"
+        )
+        for label, key in buttons
+    ]
+
 async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """View details of a specific past backtest."""
     query = update.callback_query
@@ -550,6 +565,9 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     result_id = query.data.replace("bt_view_", "")
     r = await get_backtest_result_by_id(result_id)
+    
+    # Reset direction filter when viewing a past result
+    context.user_data['bt_dir_filter'] = 'all'
     
     if not r:
         await query.edit_message_text(
@@ -583,6 +601,7 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         btn_rows.append(current_row)
         
     keyboard = btn_rows + [
+        _build_dir_filter_row(result_id, 'all'),
         [InlineKeyboardButton("📥 Resend Chart & CSV", callback_data=f"bt_resend_{result_id}")],
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
         [InlineKeyboardButton("🗑️ Delete Record", callback_data=f"bt_del_{result_id}")],
@@ -616,6 +635,13 @@ async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.reply_text("❌ No trade log data available for recalculation.")
         return
         
+    dir_filter = context.user_data.get('bt_dir_filter', 'all')
+    if dir_filter != 'all':
+        trade_log = [t for t in trade_log if t.get("direction") == dir_filter]
+        if not trade_log:
+            await query.answer(f"No {dir_filter} trades found in this backtest.", show_alert=True)
+            return
+        
     from handlers.backtest import recalculate_metrics_with_auto_capital, format_report_text
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from utils.market_utils import get_max_leverage
@@ -632,6 +658,8 @@ async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Generate new text
     text = format_report_text(r)
+    if dir_filter != 'all':
+        text = f"⚠️ **Filtered: {dir_filter.title()} trades only ({len(trade_log)} trades)**\n\n" + text
     
     # Rebuild keyboard
     max_lev = get_max_leverage(r['symbol'])
@@ -654,6 +682,7 @@ async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE)
         btn_rows.append(current_row)
         
     keyboard = btn_rows + [
+        _build_dir_filter_row(result_id, dir_filter),
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
         [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
         [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
@@ -668,6 +697,90 @@ async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e2:
             pass
 
+
+async def bt_dirfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Filter trade log by direction and recalculate metrics."""
+    query = update.callback_query
+    await query.answer("Filtering...")
+    
+    # data format: bt_dirfilter_{result_id}_{direction}
+    parts = query.data.replace("bt_dirfilter_", "").split("_")
+    if len(parts) != 2:
+        return
+        
+    result_id, direction = parts[0], parts[1]
+    context.user_data['bt_dir_filter'] = direction
+    
+    # Fetch full result (including heavy arrays)
+    r = await get_backtest_result_by_id(result_id, include_arrays=True)
+    if not r:
+        await query.message.reply_text("❌ Result not found or deleted.")
+        return
+        
+    trade_log = r.get("trade_log", [])
+    if not trade_log:
+        await query.message.reply_text("❌ No trade log data available for filtering.")
+        return
+        
+    if direction != 'all':
+        trade_log = [t for t in trade_log if t.get("direction") == direction]
+        if not trade_log:
+            await query.answer(f"No {direction} trades found in this backtest.", show_alert=True)
+            return
+            
+    from handlers.backtest import recalculate_metrics_with_auto_capital, format_report_text
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from utils.market_utils import get_max_leverage
+    
+    # Recalculate everything with the current leverage
+    current_leverage = r.get("leverage", 1)
+    auto_cap, peak_m, max_dd_usd, metrics, advanced = recalculate_metrics_with_auto_capital(trade_log, current_leverage)
+    
+    # Update result dictionary with new stats
+    r.update(metrics)
+    r.update(advanced)
+    r["leverage"] = current_leverage
+    r["initial_balance"] = auto_cap
+    r["peak_margin_required"] = peak_m
+    
+    # Generate new text
+    text = format_report_text(r)
+    if direction != 'all':
+        text = f"⚠️ **Filtered: {direction.title()} trades only ({len(trade_log)} trades)**\n\n" + text
+    
+    # Rebuild keyboard
+    max_lev = get_max_leverage(r['symbol'])
+    std_tiers = [1, 2, 3, 5, 10, 25, 50, 100, 200]
+    valid_tiers = [t for t in std_tiers if t <= max_lev]
+    if max_lev not in valid_tiers:
+        valid_tiers.append(int(max_lev))
+        valid_tiers.sort()
+        
+    btn_rows = []
+    current_row = []
+    for t in valid_tiers:
+        prefix = "✅ " if t == current_leverage else "🔍 "
+        current_row.append(InlineKeyboardButton(f"{prefix}{t}x", callback_data=f"bt_recalc_{result_id}_{t}"))
+        if len(current_row) >= 5:
+            btn_rows.append(current_row)
+            current_row = []
+    if current_row:
+        btn_rows.append(current_row)
+        
+    keyboard = btn_rows + [
+        _build_dir_filter_row(result_id, direction),
+        [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
+        [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
+        [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
+    ]
+    
+    try:
+        await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except Exception as e:
+        try:
+            await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e2:
+            pass
 
 async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Resend the chart and CSV files for a past backtest."""
@@ -892,6 +1005,7 @@ def get_backtest_handlers():
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_recalc_leverage, pattern="^bt_recalc_"),
+        CallbackQueryHandler(bt_dirfilter, pattern="^bt_dirfilter_"),
         CallbackQueryHandler(bt_resend_result, pattern="^bt_resend_"),
         CallbackQueryHandler(bt_del_all_confirm_callback, pattern="^bt_del_all_confirm$"),
         CallbackQueryHandler(bt_del_all_execute_callback, pattern="^bt_del_all_execute$"),

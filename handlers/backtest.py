@@ -399,7 +399,15 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
         if current_row:
             btn_rows.append(current_row)
             
+        # We don't include "All Trades" since it is default on fresh result
+        result_id = result.get('_id', '')
+        dir_filter_row = [
+            InlineKeyboardButton("📈 Long Only", callback_data=f"bt_dirfilter_{result_id}_long"),
+            InlineKeyboardButton("📉 Short Only", callback_data=f"bt_dirfilter_{result_id}_short")
+        ]
+            
         keyboard = btn_rows + [
+            dir_filter_row,
             [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
             [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
             [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
