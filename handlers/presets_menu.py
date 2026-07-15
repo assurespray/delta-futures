@@ -268,11 +268,17 @@ async def preset_params_received(update: Update, context: ContextTypes.DEFAULT_T
             "is_default": False
         })
         
-        msg = "✅ Preset saved successfully.\nUse /start to go to main menu."
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Another Preset", callback_data="preset_add_start")],
+            [InlineKeyboardButton("🔙 Back to Presets", callback_data="menu_indicator_settings")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
+        
+        msg = "✅ Preset saved successfully."
         if update.callback_query:
-            await update.callback_query.edit_message_text(msg)
+            await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            await update.message.reply_text(msg)
+            await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
     except Exception as e:
         msg = f"❌ Invalid format. Error: {e}\nTry again:"
@@ -304,7 +310,13 @@ async def preset_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     pid = query.data.replace("preset_del_", "")
     await delete_strategy_preset(pid, str(query.from_user.id))
-    await query.edit_message_text("✅ Preset deleted. Use /start to return.")
+    
+    keyboard = [
+        [InlineKeyboardButton("🗑️ Delete Another", callback_data="preset_delete_list")],
+        [InlineKeyboardButton("🔙 Back to Presets", callback_data="menu_indicator_settings")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+    ]
+    await query.edit_message_text("✅ Preset deleted successfully.", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 # ==================== Edit Preset Handlers ====================
@@ -587,13 +599,17 @@ async def preset_edit_params_received(update: Update, context: ContextTypes.DEFA
         
         msg = (
             "✅ Preset parameters updated.\n\n"
-            "⚠️ This only affects **new** Algo Setups. Existing running setups keep their original parameters.\n\n"
-            "Use /start to return to main menu."
+            "⚠️ This only affects **new** Algo Setups. Existing running setups keep their original parameters."
         )
+        keyboard = [
+            [InlineKeyboardButton("✏️ Edit Another", callback_data="preset_edit_list")],
+            [InlineKeyboardButton("🔙 Back to Presets", callback_data="menu_indicator_settings")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
+        ]
         if update.callback_query:
-            await update.callback_query.edit_message_text(msg, parse_mode="Markdown")
+            await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
-            await update.message.reply_text(msg, parse_mode="Markdown")
+            await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return ConversationHandler.END
     except Exception as e:
         msg = f"❌ Invalid format. Error: {e}\nTry again:"
