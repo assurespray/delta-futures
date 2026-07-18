@@ -157,7 +157,7 @@ class BacktestEngine:
             from datetime import datetime
             
             from api.delta_client import DeltaExchangeClient
-            client = DeltaExchangeClient()
+            client = DeltaExchangeClient("", "")
             symbol = self.params.get("symbol", "BTCUSD")
             timeframe = self.params.get("timeframe", "15m")
             

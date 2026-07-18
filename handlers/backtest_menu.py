@@ -29,6 +29,7 @@ BT_CUSTOM_DATE = 805
 BT_SELECT_LOT_SIZE = 807
 BT_ASK_TIME_MODE = 808
 BT_ASK_CUSTOM_TIME = 809
+BT_ASK_CUSTOM_TIMEFRAME = 810
 
 
 async def menu_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,6 +192,7 @@ async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("1m", callback_data="bt_tf_1m"), InlineKeyboardButton("3m", callback_data="bt_tf_3m"), InlineKeyboardButton("5m", callback_data="bt_tf_5m")],
         [InlineKeyboardButton("15m", callback_data="bt_tf_15m"), InlineKeyboardButton("30m", callback_data="bt_tf_30m"), InlineKeyboardButton("1h", callback_data="bt_tf_1h")],
         [InlineKeyboardButton("4h", callback_data="bt_tf_4h"), InlineKeyboardButton("1d", callback_data="bt_tf_1d")],
+        [InlineKeyboardButton("⚙️ Custom Timeframe", callback_data="bt_tf_custom")],
         [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
     ]
     
@@ -199,16 +201,48 @@ async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def bt_timeframe_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 4: Ask for Lot Size."""
+    """Step 4: Ask for Lot Size (or Custom TF)."""
     query = update.callback_query
     await query.answer()
     
     tf = query.data.replace("bt_tf_", "")
+    
+    if tf == "custom":
+        await query.edit_message_text(
+            "⚙️ **Custom Timeframe**\n\n"
+            "Please type your custom timeframe.\n"
+            "Format: Number followed by `m`, `h`, or `d`.\n"
+            "Examples: `10m`, `2h`, `45m`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]])
+        )
+        return BT_ASK_CUSTOM_TIMEFRAME
+        
     context.user_data['bt_timeframe'] = tf
-    return await bt_ask_lot_size(query, context)
+    return await bt_ask_lot_size(update, context)
 
-async def bt_ask_lot_size(query, context: ContextTypes.DEFAULT_TYPE):
+import re
+
+async def bt_custom_timeframe_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process custom timeframe input."""
+    text = update.message.text.strip().lower()
+    
+    if not re.match(r"^\d+[mhd]$", text):
+        await update.message.reply_text(
+            "❌ **Invalid Format**\n\nPlease enter a valid timeframe (e.g., `10m`, `2h`, `1d`):",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]])
+        )
+        return BT_ASK_CUSTOM_TIMEFRAME
+        
+    context.user_data['bt_timeframe'] = text
+    return await bt_ask_lot_size(update, context)
+
+async def bt_ask_lot_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Step 5: Ask for Lot Size."""
+    query = update.callback_query
+    message = update.message if update.message else query.message
+    
     preset_name = context.user_data['bt_preset']['preset_name']
     asset = context.user_data['bt_asset']
     tf = context.user_data['bt_timeframe']
@@ -225,7 +259,12 @@ async def bt_ask_lot_size(query, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("100 Lots", callback_data="bt_lot_100"), InlineKeyboardButton("1000 Lots", callback_data="bt_lot_1000")],
         [InlineKeyboardButton("🔙 Cancel", callback_data="menu_backtest")]
     ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    
+    if query:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
     return BT_SELECT_LOT_SIZE
 
 
@@ -974,6 +1013,9 @@ def get_backtest_handlers():
             ],
             BT_SELECT_TIMEFRAME: [
                 CallbackQueryHandler(bt_timeframe_selected, pattern="^bt_tf_")
+            ],
+            BT_ASK_CUSTOM_TIMEFRAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bt_custom_timeframe_received)
             ],
             BT_SELECT_LOT_SIZE: [
                 CallbackQueryHandler(bt_lot_callback, pattern="^bt_lot_"),
