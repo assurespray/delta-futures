@@ -187,6 +187,7 @@ async def bt_ask_timeframe(query, context: ContextTypes.DEFAULT_TYPE):
     )
     
     keyboard = [
+        [InlineKeyboardButton("🌐 Batch Test All (8 Native)", callback_data="bt_tf_batch_native")],
         [InlineKeyboardButton("1m", callback_data="bt_tf_1m"), InlineKeyboardButton("3m", callback_data="bt_tf_3m"), InlineKeyboardButton("5m", callback_data="bt_tf_5m")],
         [InlineKeyboardButton("15m", callback_data="bt_tf_15m"), InlineKeyboardButton("30m", callback_data="bt_tf_30m"), InlineKeyboardButton("1h", callback_data="bt_tf_1h")],
         [InlineKeyboardButton("4h", callback_data="bt_tf_4h"), InlineKeyboardButton("1d", callback_data="bt_tf_1d")],

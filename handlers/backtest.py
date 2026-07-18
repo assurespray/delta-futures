@@ -160,108 +160,131 @@ async def run_backtest_task(
                 # Silently ignore "Message is not modified" or minor network errors
                 pass
 
+
     try:
-        # 1. Initialize Client & Fetcher
         cred = await get_api_credential_by_id(api_id, decrypt=True)
         if not cred:
             await context.bot.send_message(chat_id=chat_id, text="❌ API Credentials not found.")
             return
 
-        client = DeltaExchangeClient(api_key=cred["api_key"], api_secret=cred["api_secret"])
-        
         if custom_start_ts and custom_end_ts:
             start_ts = custom_start_ts
             end_ts = custom_end_ts
             days = max(1, int((end_ts - start_ts) / 86400))
         elif days == 5000:
-            # Max Available Data shortcut
             end_ts = int(datetime.utcnow().timestamp())
-            start_ts = end_ts - (5000 * 86400) # Roughly 13.5 years (effectively genesis)
+            start_ts = end_ts - (5000 * 86400)
         else:
             end_ts = int(datetime.utcnow().timestamp())
             start_ts = end_ts - (days * 86400)
-        
-        # 2. Fetch Data (Phase 1)
-        await _update_ui(0, 100, "Connecting to Delta Exchange...")
-        fetcher = BacktestFetcher()
-        csv_path, total_candles = await fetcher.fetch_and_cache(
-            client=client,
-            symbol=symbol,
-            timeframe=timeframe,
-            start_ts=start_ts,
-            end_ts=end_ts,
-            progress_callback=_update_ui
-        )
-        await client.close()
 
-        if not csv_path or total_candles == 0:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="❌ Failed to download historical data.")
-            return
-
-        # 3. Run Simulation (Phase 2)
-        await _update_ui(0, total_candles, "Warming up simulation engine...", force=True)
-        strategy_params["symbol"] = symbol
-        engine = BacktestEngine(csv_path=csv_path, params=strategy_params)
-        engine_result = await engine.run(progress_callback=_update_ui)
-        
-        trade_log = engine_result["trade_log"]
-        equity_curve = engine_result["equity_curve"]
-        
-        # 4. Analytics (Phase 3)
-        await _update_ui(95, 100, "Calculating advanced metrics...", force=True)
-        
-        from utils.market_utils import get_max_leverage
-        max_lev = get_max_leverage(symbol)
-        base_leverage = min(200.0, max_lev)
-        
-        auto_cap, peak_m, max_dd_usd, metrics, advanced_stats = recalculate_metrics_with_auto_capital(trade_log, base_leverage)
-        
-        # 5. Build Final Result Document
-        run_duration = time.time() - start_cpu_time
-        
-        # Optimize DB storage: MongoDB Free Tier limits
-        db_trade_log = trade_log
-        db_equity_curve = equity_curve
-        if len(trade_log) > 2500:
-            logger.info(f"[BT-TASK] Truncating DB trade log from {len(trade_log)} to 2500 to save Atlas free tier space.")
-            db_trade_log = trade_log[:2500]
-            db_equity_curve = equity_curve[:2500]
+        # Batch Logic
+        timeframes_to_run = [timeframe]
+        if timeframe == "batch_native":
+            from config.constants import SUPPORTED_NATIVE_TIMEFRAMES
+            timeframes_to_run = SUPPORTED_NATIVE_TIMEFRAMES
             
-        final_result = {
-            "user_id": user_id,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "strategy": strategy_params.get("strategy_name", "dual_supertrend"),
-            "strategy_params": strategy_params,
-            "direction": strategy_params.get("direction", "both"),
-            "lot_size": strategy_params.get("lot_size", 1),
-            "leverage": base_leverage,
-            "initial_balance": auto_cap,
-            "backtest_start": datetime.fromtimestamp(start_ts, tz=timezone.utc),
-            "backtest_end": datetime.fromtimestamp(end_ts, tz=timezone.utc),
-            "total_candles": total_candles,
-            "trade_log": db_trade_log,
-            "equity_curve": db_equity_curve,
-            "run_duration_seconds": run_duration,
-            "created_at": datetime.utcnow()
-        }
+        batch_results = []
         
-        # Merge metrics and stats
-        final_result.update(metrics)
-        final_result.update(advanced_stats)
-        
-        # 6. Save to MongoDB
-        result_id = await save_backtest_result(final_result)
-        final_result['_id'] = result_id
-        
-        # 7. Generate Files (Phase 4)
-        await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
-        chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, timeframe)
-        csv_path = generate_trade_log_csv(trade_log, symbol, timeframe)
-        
-        # 8. Send Final Report
-        await _send_final_report(chat_id, context, final_result, chart_path, csv_path, message_id)
-        
+        for tf in timeframes_to_run:
+            if timeframe == "batch_native":
+                await _update_ui(0, 100, f"Starting batch run for {tf}...", force=True)
+                
+            client = DeltaExchangeClient(api_key=cred["api_key"], api_secret=cred["api_secret"])
+            
+            # Fetch
+            await _update_ui(0, 100, f"Connecting to Delta Exchange for {tf}...")
+            fetcher = BacktestFetcher()
+            csv_path, total_candles = await fetcher.fetch_and_cache(
+                client=client, symbol=symbol, timeframe=tf,
+                start_ts=start_ts, end_ts=end_ts, progress_callback=_update_ui
+            )
+            await client.close()
+
+            if not csv_path or total_candles == 0:
+                if timeframe != "batch_native":
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ Failed to download historical data for {tf}.")
+                    return
+                continue
+
+            # Run Engine
+            await _update_ui(0, total_candles, f"Warming up engine for {tf}...", force=True)
+            sp = dict(strategy_params)
+            sp["symbol"] = symbol
+            sp["timeframe"] = tf
+            engine = BacktestEngine(csv_path=csv_path, params=sp)
+            engine_result = await engine.run(progress_callback=_update_ui)
+            
+            trade_log = engine_result["trade_log"]
+            equity_curve = engine_result["equity_curve"]
+            
+            await _update_ui(95, 100, f"Calculating metrics for {tf}...", force=True)
+            
+            from utils.market_utils import get_max_leverage
+            max_lev = get_max_leverage(symbol)
+            base_leverage = min(200.0, max_lev)
+            
+            auto_cap, peak_m, max_dd_usd, metrics, advanced_stats = recalculate_metrics_with_auto_capital(trade_log, base_leverage)
+            
+            run_duration = time.time() - start_cpu_time
+            
+            db_trade_log = trade_log[:2500] if len(trade_log) > 2500 else trade_log
+            db_equity_curve = equity_curve[:2500] if len(equity_curve) > 2500 else equity_curve
+                
+            final_result = {
+                "user_id": user_id,
+                "symbol": symbol,
+                "timeframe": tf,
+                "strategy": sp.get("strategy_name", "dual_supertrend"),
+                "strategy_params": sp,
+                "direction": sp.get("direction", "both"),
+                "lot_size": sp.get("lot_size", 1),
+                "leverage": base_leverage,
+                "initial_balance": auto_cap,
+                "backtest_start": datetime.fromtimestamp(start_ts, tz=timezone.utc),
+                "backtest_end": datetime.fromtimestamp(end_ts, tz=timezone.utc),
+                "total_candles": total_candles,
+                "trade_log": db_trade_log,
+                "equity_curve": db_equity_curve,
+                "run_duration_seconds": run_duration,
+                "created_at": datetime.utcnow()
+            }
+            
+            final_result.update(metrics)
+            final_result.update(advanced_stats)
+            
+            result_id = await save_backtest_result(final_result)
+            final_result['_id'] = result_id
+            
+            batch_results.append(final_result)
+            
+            if timeframe != "batch_native":
+                # Generate Files and Send Report for single
+                await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
+                chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, tf)
+                csv_path = generate_trade_log_csv(trade_log, symbol, tf)
+                await _send_final_report(chat_id, context, final_result, chart_path, csv_path, message_id)
+                return
+
+        # If we get here, it's a batch run
+        if timeframe == "batch_native" and batch_results:
+            summary_lines = [f"✅ **Batch Backtest Complete for {symbol}**", f"Strategy: {strategy_params.get('strategy_name', 'Unknown')}", "", "**Performance Summary:**"]
+            for r in batch_results:
+                icon = "🟢" if r.get('overall_profit_pct', 0) > 0 else "🔴"
+                if r.get('overall_profit_pct', 0) == 0: icon = "⚪"
+                summary_lines.append(f"• **{r['timeframe']}:** {r.get('overall_profit_pct', 0):+.1f}% (W: {r.get('win_pct', 0):.1f}%) {icon}")
+            
+            keyboard = [[InlineKeyboardButton("🗄️ View Full Reports & Charts", callback_data="bt_history")]]
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=chr(10).join(summary_lines),
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except Exception:
+                pass
     except asyncio.CancelledError:
         logger.info(f"[BT-TASK] Backtest cancelled by user: {symbol} {timeframe}")
         try:
@@ -333,6 +356,7 @@ def format_report_text(result: dict) -> str:
         f"💰 **Profitability**\n"
         f"• Overall Net Profit: `${result['overall_profit']:.2f}` ({result['overall_profit_pct']:.2f}%)\n"
         f"• Gross Profit: `${result.get('total_gross_profit', result['overall_profit']):.2f}` | Total Fees: `${-result.get('total_fees_paid', 0.0):.2f}`\n"
+        f"• Est. Slippage: `-${result.get('total_slippage_penalty', 0.0):.2f}`\n"
         f"• No. of Trades: `{result['num_trades']}`\n"
         f"• Win / Loss %: `{result['win_pct']:.2f}%` / `{result['loss_pct']:.2f}%`\n"
         f"• Avg Profit per Trade: `${result['avg_profit_per_trade']:.2f}`\n"

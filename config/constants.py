@@ -15,34 +15,34 @@ Trading constants and application-wide configuration.
 # ✅ Maps other timeframes to nearest available (with comments)
 
 TIMEFRAME_MAPPING = {
-    # ===== MINUTES =====
-    "1m": "1m",          # ✅ Delta supports
-    "2m": "3m",          # ❌ Delta doesn't have 2m → use 3m
-    "3m": "3m",          # ✅ Delta supports (CRITICAL - was missing!)
-    "4m": "5m",          # ❌ Delta doesn't have 4m → use 5m
-    "5m": "5m",          # ✅ Delta supports
-    "10m": "15m",        # ❌ Delta doesn't have 10m → use 15m
-    "15m": "15m",        # ✅ Delta supports
-    "20m": "30m",        # ❌ Delta doesn't have 20m → use 30m
-    "30m": "30m",        # ✅ Delta supports
-    "45m": "1h",         # ❌ Delta doesn't have 45m → use 1h
+    # ===== NATIVE (Supported by Delta) =====
+    "1m": "1m",
+    "3m": "3m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
     
-    # ===== HOURS =====
-    "1h": "1h",          # ✅ Delta supports
-    "2h": "4h",          # ❌ Delta doesn't have 2h → use 4h
-    "3h": "4h",          # ❌ Delta doesn't have 3h → use 4h
-    "4h": "4h",          # ✅ Delta supports
-    "6h": "1d",          # ❌ Delta doesn't have 6h → use 1d
-    "8h": "1d",          # ❌ Delta doesn't have 8h → use 1d
-    "12h": "1d",         # ❌ Delta doesn't have 12h → use 1d
-    
-    # ===== DAYS =====
-    "1d": "1d",          # ✅ Delta supports
-    "2d": "1d",          # ❌ Delta doesn't have 2d → use 1d
-    "3d": "1d",          # ❌ Delta doesn't have 3d → use 1d
-    "7d": "1d",          # ❌ Delta doesn't have 7d → use 1d
-    "1w": "1d",          # ❌ Delta doesn't have 1w → use 1d
+    # ===== CUSTOM (Aggregated by Bot) =====
+    "2m": "1m",
+    "4m": "1m",
+    "10m": "5m",
+    "20m": "5m",
+    "45m": "15m",
+    "2h": "1h",
+    "3h": "1h",
+    "6h": "1h",
+    "8h": "4h",
+    "12h": "4h",
+    "2d": "1d",
+    "3d": "1d",
+    "7d": "1d",
+    "1w": "1d",
 }
+
+SUPPORTED_NATIVE_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"]
 
 # ===== TIME IN FORCE OPTIONS =====
 TIME_IN_FORCE_GTC = "gtc"     # Good-Till-Cancelled (default)
@@ -159,6 +159,7 @@ ENABLE_VERBOSE_LOGGING = True                   # Set False for production
 PAPER_TRADE_DEFAULT_BALANCE = 10000.0           # Starting virtual balance (USD)
 PAPER_TRADE_DEFAULT_LEVERAGE = 10               # Default leverage for paper trades
 PAPER_TRADE_TAKER_FEE = 0.0005                  # 0.05% taker fee (realistic)
+BACKTEST_SLIPPAGE_PCT = 0.0002                  # 0.02% aggregate slippage penalty for final PnL
 PAPER_TRADE_MAKER_FEE = 0.0002                  # 0.02% maker fee
 PAPER_TRADE_PRICE_CHECK_INTERVAL = 5            # Seconds between SL/entry price checks
 PAPER_TRADE_MAX_OPEN_POSITIONS = 20             # Max simultaneous paper positions

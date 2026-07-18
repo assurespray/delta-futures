@@ -213,6 +213,15 @@ def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str
     avg_notional_size = sum(notionals) / len(notionals) if notionals else 0.0
     avg_stop_loss_risk = sum(sl_risks) / len(sl_risks) if sl_risks else 0.0
 
+    # Slippage Penalty
+    from config.constants import BACKTEST_SLIPPAGE_PCT
+    total_volume = sum(notionals) * 2  # Entry + Exit
+    total_slippage_penalty = total_volume * BACKTEST_SLIPPAGE_PCT
+    
+    # Apply penalty to final net profit
+    overall_profit -= total_slippage_penalty
+    overall_profit_pct = (overall_profit / initial_balance) * 100.0
+
     return {
         "overall_profit": overall_profit,
         "overall_profit_pct": overall_profit_pct,
@@ -248,6 +257,7 @@ def calculate_metrics(trade_log: List[Dict], initial_balance: float) -> Dict[str
         "max_win_streak": max_win_streak,
         "max_loss_streak": max_loss_streak,
         
+        "total_slippage_penalty": total_slippage_penalty,
         "final_balance": running_balance
     }
 

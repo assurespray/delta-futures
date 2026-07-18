@@ -154,11 +154,61 @@ class BacktestFetcher:
             (None, 0)                          on failure.
         """
         self._abort = False
-
         # Validate timeframe
         if timeframe not in TIMEFRAME_SECONDS:
             logger.error(f"[BT-FETCH] Unknown timeframe: {timeframe}")
             return None, 0
+            
+        from config.constants import SUPPORTED_NATIVE_TIMEFRAMES, TIMEFRAME_MAPPING
+        if timeframe not in SUPPORTED_NATIVE_TIMEFRAMES:
+            native_tf = TIMEFRAME_MAPPING.get(timeframe)
+            if not native_tf or native_tf not in SUPPORTED_NATIVE_TIMEFRAMES:
+                logger.error(f"[BT-FETCH] Cannot map custom timeframe {timeframe} to a supported native timeframe.")
+                return None, 0
+                
+            logger.info(f"[BT-FETCH] Custom timeframe {timeframe} requested. Fetching native {native_tf} first...")
+            
+            # Fetch native data first
+            native_csv, native_rows = await self.fetch_and_cache(
+                client=client, symbol=symbol, timeframe=native_tf,
+                start_ts=start_ts, end_ts=end_ts, progress_callback=progress_callback
+            )
+            
+            if not native_csv or native_rows == 0:
+                return None, 0
+                
+            if progress_callback:
+                await progress_callback(native_rows, native_rows, f"Aggregating {native_tf} into {timeframe}...")
+                
+            # Aggregate via Pandas
+            import pandas as pd
+            df = pd.read_csv(native_csv)
+            df['datetime'] = pd.to_datetime(df['time'], unit='s', utc=True)
+            df.set_index('datetime', inplace=True)
+            
+            # Resample logic
+            rule = timeframe.replace('m', 'min').replace('d', 'D')
+            agg_dict = {
+                'time': 'first',
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            }
+            
+            # We must dropna to remove empty bins
+            df_resampled = df.resample(rule).agg(agg_dict).dropna()
+            
+            # Convert back to list of dicts or save to csv directly
+            custom_csv_path = _cache_path(symbol, timeframe)
+            df_resampled.to_csv(custom_csv_path, index=False)
+            
+            total_rows = len(df_resampled)
+            logger.info(f"[BT-FETCH] Aggregated {native_rows} native rows into {total_rows} {timeframe} rows.")
+            
+            return custom_csv_path, total_rows
+
 
         seconds_per_candle = TIMEFRAME_SECONDS[timeframe]
         estimated_total = max(1, (end_ts - start_ts) // seconds_per_candle)

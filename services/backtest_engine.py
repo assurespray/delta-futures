@@ -156,155 +156,101 @@ class BacktestEngine:
             from utils.time_utils import IST
             from datetime import datetime
             
-            for i in range(start_idx, len(times)):
-                t_time = int(times[i])
-                t_open = float(opens[i])
-                t_high = float(highs[i])
-                t_low = float(lows[i])
-                t_close = float(closes[i])
-                
-                # Check Time Window Rules
-                current_dt = datetime.fromtimestamp(t_time, tz=IST)
-                current_time = current_dt.time()
-                
-                is_within_entry_window = True
-                if self.time_window:
-                    from utils.time_utils import is_time_in_window, is_time_to_hard_exit
-                    is_within_entry_window = is_time_in_window(current_time, self.tw_start, self.tw_stop_entries)
+            from api.delta_client import DeltaExchangeClient
+            client = DeltaExchangeClient()
+            symbol = self.params.get("symbol", "BTCUSD")
+            timeframe = self.params.get("timeframe", "15m")
+            
+            try:
+                for i in range(start_idx, len(times)):
+                    t_time = int(times[i])
+                    t_open = float(opens[i])
+                    t_high = float(highs[i])
+                    t_low = float(lows[i])
+                    t_close = float(closes[i])
                     
-                    # Hard Exit Check (Executes BEFORE regular exits to ensure strict deadlines)
-                    if self.open_trade and is_time_to_hard_exit(current_time, self.tw_hard_exit, self.tw_start):
-                        self._close_position(
-                            exit_price=t_open,  # Exit at open of the candle that crossed the hard exit time
-                            exit_time=t_time,
-                            reason="Time Hard Exit",
-                            indicator_value=float(indicator_val_arr[i-1]) if 'indicator_val_arr' in locals() else 0.0
-                        )
-                
-                # Check for open position exits FIRST
-                if self.open_trade:
-                    # Industry Safe Intra-Candle Logic:
-                    # Always evaluate the worst-case scenario (Stop Loss hit before Take Profit).
+                    # Check Time Window Rules
+                    current_dt = datetime.fromtimestamp(t_time, tz=IST)
+                    current_time = current_dt.time()
                     
-                    exit_triggered = False
-                    exit_price = 0.0
-                    exit_reason = ""
-                    
-                    if self.open_trade["direction"] == "long":
-                        sl_price = self.open_trade["sl_price"]
-                        tp_price = self.open_trade.get("tp_price", 0)
-                        if t_low <= sl_price:
-                            exit_triggered = True
-                            exit_price = t_open if t_open < sl_price else sl_price
-                            exit_reason = "Stop Loss"
-                        elif tp_price > 0 and t_high >= tp_price:
-                            exit_triggered = True
-                            exit_price = t_open if t_open > tp_price else tp_price
-                            exit_reason = "Take Profit"
-                        elif exit_long_arr[i-1]:
-                            exit_triggered = True
-                            exit_price = t_open
-                            exit_reason = "Signal Exit"
-                            
-                    elif self.open_trade["direction"] == "short":
-                        sl_price = self.open_trade["sl_price"]
-                        tp_price = self.open_trade.get("tp_price", 0)
-                        if t_high >= sl_price:
-                            exit_triggered = True
-                            exit_price = t_open if t_open > sl_price else sl_price
-                            exit_reason = "Stop Loss"
-                        elif tp_price > 0 and t_low <= tp_price:
-                            exit_triggered = True
-                            exit_price = t_open if t_open < tp_price else tp_price
-                            exit_reason = "Take Profit"
-                        elif exit_short_arr[i-1]:
-                            exit_triggered = True
-                            exit_price = t_open
-                            exit_reason = "Signal Exit"
-                            
-                    if exit_triggered:
-                        self._close_position(
-                            exit_price=float(exit_price),
-                            exit_time=t_time,
-                            reason=exit_reason,
-                            indicator_value=float(indicator_val_arr[i-1])
-                        )
-                
-                # Check for new entries (Only if we don't have an open trade)
-                if not self.open_trade:
-                    # Intraday exact entry check (Breakout mode)
-                    if exact_entry_price_arr is not None and int(entry_signal_arr[i]) != 0 and exact_entry_price_arr[i] > 0:
-                        signal = int(entry_signal_arr[i])
-                        if not is_within_entry_window:
-                            signal = 0
+                    is_within_entry_window = True
+                    if self.time_window:
+                        from utils.time_utils import is_time_in_window, is_time_to_hard_exit
+                        is_within_entry_window = is_time_in_window(current_time, self.tw_start, self.tw_stop_entries)
                         
-                        if signal != 0:
-                            target_entry = float(exact_entry_price_arr[i])
+                        # Hard Exit Check
+                        if self.open_trade and is_time_to_hard_exit(current_time, self.tw_hard_exit, self.tw_start):
+                            self._close_position(
+                                exit_price=t_open,
+                                exit_time=t_time,
+                                reason="Time Hard Exit",
+                                indicator_value=float(indicator_val_arr[i-1]) if 'indicator_val_arr' in locals() else 0.0
+                            )
+                    
+                    # 1. Exit Evaluation (Start of candle)
+                    if self.open_trade:
+                        signal_exit = exit_long_arr[i-1] if self.open_trade["direction"] == "long" else exit_short_arr[i-1]
+                        await self._evaluate_candle_exits(
+                            client, symbol, timeframe, t_time, t_open, t_high, t_low, t_close, 
+                            indicator_val_arr[i-1], signal_exit
+                        )
+                    
+                    # 2. Entry Evaluation
+                    trade_opened_this_candle = False
+                    if not self.open_trade:
+                        if exact_entry_price_arr is not None and int(entry_signal_arr[i]) != 0 and exact_entry_price_arr[i] > 0:
+                            signal = int(entry_signal_arr[i])
+                            if not is_within_entry_window:
+                                signal = 0
                             
-                            # Slippage handling: if candle gapped past trigger, we get filled at open
-                            if signal == 1 and t_open > target_entry:
-                                entry_price = t_open
-                            elif signal == -1 and t_open < target_entry:
-                                entry_price = t_open
-                            else:
-                                entry_price = target_entry
+                            if signal != 0:
+                                target_entry = float(exact_entry_price_arr[i])
+                                if signal == 1 and t_open > target_entry: entry_price = t_open
+                                elif signal == -1 and t_open < target_entry: entry_price = t_open
+                                else: entry_price = target_entry
+                                    
+                                sl_price = float(sl_price_long_arr[i]) if signal == 1 else float(sl_price_short_arr[i])
+                                tp_price = entry_price + (entry_price - sl_price) * rr_ratio if signal == 1 else entry_price - (sl_price - entry_price) * rr_ratio
+                                if rr_ratio <= 0: tp_price = 0.0
                                 
-                            sl_price = float(sl_price_long_arr[i]) if signal == 1 else float(sl_price_short_arr[i])
-                            tp_price = entry_price + (entry_price - sl_price) * rr_ratio if signal == 1 else entry_price - (sl_price - entry_price) * rr_ratio
-                            if rr_ratio <= 0: tp_price = 0.0
-                            
-                            meta_kwargs = {k.replace("meta_", ""): float(signals[k][i]) for k in meta_keys}
-                            
+                                meta_kwargs = {k.replace("meta_", ""): float(signals[k][i]) for k in meta_keys}
+                                
+                                if signal == 1 and self.direction in ["both", "long_only"]:
+                                    self._open_position(direction="long", entry_price=entry_price, entry_time=t_time, sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]), **meta_kwargs)
+                                    trade_opened_this_candle = True
+                                elif signal == -1 and self.direction in ["both", "short_only"]:
+                                    self._open_position(direction="short", entry_price=entry_price, entry_time=t_time, sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]), **meta_kwargs)
+                                    trade_opened_this_candle = True
+                        else:
+                            signal = int(entry_signal_arr[i-1])
+                            if not is_within_entry_window:
+                                signal = 0
+                                
+                            if signal != 0:
+                                meta_kwargs = {k.replace("meta_", ""): float(signals[k][i-1]) for k in meta_keys}
+                                
                             if signal == 1 and self.direction in ["both", "long_only"]:
-                                self._open_position(
-                                    direction="long", entry_price=entry_price, entry_time=t_time,
-                                    sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]),
-                                    **meta_kwargs
-                                )
+                                entry_price = t_open
+                                sl_price = float(sl_price_long_arr[i-1])
+                                tp_price = entry_price + (entry_price - sl_price) * rr_ratio if rr_ratio > 0 else 0.0
+                                self._open_position(direction="long", entry_price=entry_price, entry_time=t_time, sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i-1]), **meta_kwargs)
+                                trade_opened_this_candle = True
                             elif signal == -1 and self.direction in ["both", "short_only"]:
-                                self._open_position(
-                                    direction="short", entry_price=entry_price, entry_time=t_time,
-                                    sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i]),
-                                    **meta_kwargs
-                                )
-                    else:
-                        # Standard closed-candle entry (Confirmation mode / SuperTrend)
-                        signal = int(entry_signal_arr[i-1])
-                        
-                        # Apply Time Filter Bouncer
-                        if not is_within_entry_window:
-                            signal = 0
-                            
-                        if signal != 0:
-                            meta_kwargs = {k.replace("meta_", ""): float(signals[k][i-1]) for k in meta_keys}
-                            
-                        if signal == 1 and self.direction in ["both", "long_only"]:
-                            entry_price = t_open
-                            sl_price = float(sl_price_long_arr[i-1])
-                            tp_price = entry_price + (entry_price - sl_price) * rr_ratio if rr_ratio > 0 else 0.0
-                            self._open_position(
-                                direction="long",
-                                entry_price=entry_price,
-                                entry_time=t_time,
-                                sl_price=sl_price,
-                                tp_price=tp_price,
-                                indicator_value=float(indicator_val_arr[i-1]),
-                                **meta_kwargs
-                            )
-                        elif signal == -1 and self.direction in ["both", "short_only"]:
-                            entry_price = t_open
-                            sl_price = float(sl_price_short_arr[i-1])
-                            tp_price = entry_price - (sl_price - entry_price) * rr_ratio if rr_ratio > 0 else 0.0
-                            self._open_position(
-                                direction="short",
-                                entry_price=entry_price,
-                                entry_time=t_time,
-                                sl_price=sl_price,
-                                tp_price=tp_price,
-                                indicator_value=float(indicator_val_arr[i-1]),
-                                **meta_kwargs
-                            )
-                
+                                entry_price = t_open
+                                sl_price = float(sl_price_short_arr[i-1])
+                                tp_price = entry_price - (sl_price - entry_price) * rr_ratio if rr_ratio > 0 else 0.0
+                                self._open_position(direction="short", entry_price=entry_price, entry_time=t_time, sl_price=sl_price, tp_price=tp_price, indicator_value=float(indicator_val_arr[i-1]), **meta_kwargs)
+                                trade_opened_this_candle = True
+                                
+                    # 3. Same-Candle Exit Evaluation (Fixing the blind spot)
+                    if self.open_trade and trade_opened_this_candle:
+                        # Cannot use signal_exit for the entry candle, only SL/TP matters
+                        await self._evaluate_candle_exits(
+                            client, symbol, timeframe, t_time, t_open, t_high, t_low, t_close, 
+                            indicator_val_arr[i], False
+                        )
+            finally:
+                await client.close()
                 # HARD MEMORY LIMIT: Stop simulating if trades exceed 50,000
                 if len(self.trade_log) >= 50000:
                     logger.warning(f"[BT-ENGINE] Trade limit reached (50,000). Stopping simulation early to save memory.")
@@ -337,6 +283,129 @@ class BacktestEngine:
             "final_balance": self.balance,
             "total_candles": processed_rows
         }
+
+
+
+    async def _resolve_intrabar_ambiguity(self, client, symbol, timeframe, t_time, t_open, sl_price, tp_price, direction):
+        from api.market_data import get_candles
+        from config.constants import TIMEFRAME_SECONDS
+        import asyncio
+        
+        # Don't micro-fetch if we are already on 1m
+        if timeframe == "1m":
+            return None # fallback to pessimistic
+            
+        tf_secs = TIMEFRAME_SECONDS.get(timeframe, 900)
+        end_time = t_time + tf_secs
+        
+        try:
+            # Wait 0.2s to respect API rate limits
+            await asyncio.sleep(0.2)
+            candles = await get_candles(client, symbol, "1m", start_time=t_time, end_time=end_time)
+            if not candles:
+                return None
+                
+            for c in candles:
+                c_low = float(c["low"])
+                c_high = float(c["high"])
+                
+                if direction == "long":
+                    if c_low <= sl_price:
+                        return {"price": sl_price, "reason": "Stop Loss"}
+                    if tp_price > 0 and c_high >= tp_price:
+                        return {"price": tp_price, "reason": "Take Profit"}
+                elif direction == "short":
+                    if c_high >= sl_price:
+                        return {"price": sl_price, "reason": "Stop Loss"}
+                    if tp_price > 0 and c_low <= tp_price:
+                        return {"price": tp_price, "reason": "Take Profit"}
+                        
+        except Exception as e:
+            logger.error(f"[BT-ENGINE] Error in micro-fetch: {e}")
+            
+        return None
+
+    async def _evaluate_candle_exits(self, client, symbol, timeframe, t_time, t_open, t_high, t_low, t_close, indicator_val_prev, signal_exit):
+        """
+        Evaluate if the open trade should exit on this candle.
+        Returns True if the trade was closed, False otherwise.
+        """
+        if not self.open_trade:
+            return False
+            
+        direction = self.open_trade["direction"]
+        sl_price = self.open_trade["sl_price"]
+        tp_price = self.open_trade.get("tp_price", 0)
+        
+        exit_triggered = False
+        exit_price = 0.0
+        exit_reason = ""
+        ambiguity = False
+        
+        if direction == "long":
+            sl_hit = t_low <= sl_price
+            tp_hit = tp_price > 0 and t_high >= tp_price
+            
+            if signal_exit:
+                exit_triggered = True
+                exit_price = t_open
+                exit_reason = "Signal Exit"
+            elif sl_hit and tp_hit:
+                ambiguity = True
+            elif sl_hit:
+                exit_triggered = True
+                exit_price = t_open if t_open < sl_price else sl_price
+                exit_reason = "Stop Loss"
+            elif tp_hit:
+                exit_triggered = True
+                exit_price = t_open if t_open > tp_price else tp_price
+                exit_reason = "Take Profit"
+                
+        elif direction == "short":
+            sl_hit = t_high >= sl_price
+            tp_hit = tp_price > 0 and t_low <= tp_price
+            
+            if signal_exit:
+                exit_triggered = True
+                exit_price = t_open
+                exit_reason = "Signal Exit"
+            elif sl_hit and tp_hit:
+                ambiguity = True
+            elif sl_hit:
+                exit_triggered = True
+                exit_price = t_open if t_open > sl_price else sl_price
+                exit_reason = "Stop Loss"
+            elif tp_hit:
+                exit_triggered = True
+                exit_price = t_open if t_open < tp_price else tp_price
+                exit_reason = "Take Profit"
+                
+        if ambiguity:
+            # 1m Micro-fetch resolution
+            resolved_exit = await self._resolve_intrabar_ambiguity(client, symbol, timeframe, t_time, t_open, sl_price, tp_price, direction)
+            if resolved_exit:
+                exit_triggered = True
+                exit_price = resolved_exit["price"]
+                exit_reason = resolved_exit["reason"]
+            else:
+                # Fallback to pessimistic rule
+                exit_triggered = True
+                exit_reason = "Stop Loss"
+                if direction == "long":
+                    exit_price = t_open if t_open < sl_price else sl_price
+                else:
+                    exit_price = t_open if t_open > sl_price else sl_price
+
+        if exit_triggered:
+            self._close_position(
+                exit_price=float(exit_price),
+                exit_time=t_time,
+                reason=exit_reason,
+                indicator_value=float(indicator_val_prev)
+            )
+            return True
+            
+        return False
 
     def _open_position(self, direction: str, entry_price: float, entry_time: int, sl_price: float, tp_price: float, indicator_value: float, **kwargs):
         """Open a mock position with exact margin and lot size math."""
