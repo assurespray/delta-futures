@@ -1367,6 +1367,28 @@ async def get_backtest_results(
         return [], 0
 
 
+async def get_backtest_results_by_ids(result_ids: list[str]) -> list[dict]:
+    """Fetch specific backtest results by their IDs (for batch view)."""
+    try:
+        from bson.objectid import ObjectId
+        db = mongodb.get_db()
+        oids = [ObjectId(rid) for rid in result_ids]
+        cursor = db.backtest_results.find(
+            {"_id": {"$in": oids}},
+            {"trade_log": 0, "equity_curve": 0}
+        )
+        results = await cursor.to_list(length=len(result_ids))
+        for r in results:
+            r["_id"] = str(r["_id"])
+        
+        # Maintain the original order of result_ids if possible (or sort by timeframe)
+        # We can just return them, the menu will handle sorting/display
+        return results
+    except Exception as e:
+        logger.error(f"[BT-CRUD] Error fetching batch backtest results: {e}")
+        return []
+
+
 async def get_backtest_result_by_id(result_id: str, include_arrays: bool = False) -> Optional[dict]:
     """
     Retrieve a single backtest result by its MongoDB _id.

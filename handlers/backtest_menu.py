@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 
 import os
 from utils.backtest_exporter import generate_equity_curve_chart, generate_trade_log_csv
-from database.crud import get_strategy_presets_by_user, get_strategy_preset_by_id, get_backtest_summary, get_backtest_results, get_backtest_result_by_id, get_api_credentials_by_user
+from database.crud import get_strategy_presets_by_user, get_strategy_preset_by_id, get_backtest_summary, get_backtest_results, get_backtest_results_by_ids, get_backtest_result_by_id, get_api_credentials_by_user
 from handlers.backtest import run_backtest_task
 
 logger = logging.getLogger(__name__)
@@ -586,6 +586,41 @@ async def bt_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+async def bt_batch_results_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the specific results from a completed batch run."""
+    query = update.callback_query
+    await query.answer()
+    
+    batch_ids = context.user_data.get('bt_batch_result_ids', [])
+    if not batch_ids:
+        await query.edit_message_text(
+            "🗄️ No batch results found in current session.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="menu_backtest")]])
+        )
+        return
+        
+    results = await get_backtest_results_by_ids(batch_ids)
+    
+    # Sort results by the standard native timeframe order
+    from config.constants import SUPPORTED_NATIVE_TIMEFRAMES
+    order_map = {tf: i for i, tf in enumerate(SUPPORTED_NATIVE_TIMEFRAMES)}
+    results.sort(key=lambda r: order_map.get(r.get('timeframe'), 99))
+    
+    text = f"🗄️ **Batch Backtest Results**\n\nSelect a timeframe to view full details and charts:"
+    
+    keyboard = []
+    for r in results:
+        dt = r["created_at"].strftime('%Y-%m-%d %H:%M')
+        icon = "🟢" if r.get('overall_profit_pct', 0) > 0 else "🔴"
+        if r.get('overall_profit_pct', 0) == 0: icon = "⚪"
+        label = f"{r.get('timeframe', '?')} | PnL: {r.get('overall_profit_pct', 0):+.1f}% {icon}"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"bt_view_{r['_id']}")])
+        
+    keyboard.append([InlineKeyboardButton("🔙 Back to Backtester", callback_data="menu_backtest")])
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
 def _build_dir_filter_row(result_id: str, active: str = "all") -> list:
     from telegram import InlineKeyboardButton
     buttons = [
@@ -1048,6 +1083,7 @@ def get_backtest_handlers():
     return [
         fsm_handler,
         CallbackQueryHandler(menu_backtest, pattern="^menu_backtest$"),
+        CallbackQueryHandler(bt_batch_results_menu, pattern="^bt_batch_results$"),
         CallbackQueryHandler(bt_history_menu, pattern="^bt_history"),
         CallbackQueryHandler(bt_view_result, pattern="^bt_view_"),
         CallbackQueryHandler(bt_recalc_leverage, pattern="^bt_recalc_"),

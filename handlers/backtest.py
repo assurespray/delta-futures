@@ -113,7 +113,10 @@ async def run_backtest_task(
         "status": "Initializing...",
         "current": 0,
         "total": 100,
-        "eta": "Calculating..."
+        "eta": "Calculating...",
+        "batch_completed": [],
+        "batch_current_tf": None,
+        "batch_pending": []
     }
 
     async def _update_ui(current: int, total: int, status_msg: str, force: bool = False):
@@ -136,15 +139,34 @@ async def run_backtest_task(
         
         if force or (now - last_ui_update >= UI_UPDATE_INTERVAL):
             bar = generate_progress_bar(current, total)
-            display_tf = "Batch (8 Timeframes)" if timeframe == "batch_native" else timeframe
-            text = (
-                f"🧪 **Backtest in Progress**\n\n"
-                f"**Asset:** {symbol} | **TF:** {display_tf} | **Days:** {days}\n"
-                f"**Status:** {status_msg}\n\n"
-                f"**Progress:** {bar}\n"
-                f"**ETA:** {ui_state['eta']}\n\n"
-                f"⏳ _Please wait, doing heavy math in background..._"
-            )
+            
+            if timeframe == "batch_native":
+                strat_label = strategy_params.get('strategy_name', '').replace('_', ' ').title()
+                lines = [f"🧪 **Batch Backtest: {symbol} ({days}d)**", f"Strategy: {strat_label}", ""]
+                
+                for c in ui_state["batch_completed"]:
+                    lines.append(f"✅ **{c['tf']}** → {c['pct']:+.1f}% {c['icon']}")
+                
+                cur = ui_state.get("batch_current_tf")
+                if cur:
+                    lines.append(f"▶️ **{cur}** → {status_msg} {bar}")
+                
+                for p in ui_state.get("batch_pending", []):
+                    lines.append(f"⏳ **{p}**")
+                
+                lines.append(f"\n**ETA:** {ui_state['eta']}")
+                text = chr(10).join(lines)
+            else:
+                display_tf = timeframe
+                text = (
+                    f"🧪 **Backtest in Progress**\n\n"
+                    f"**Asset:** {symbol} | **TF:** {display_tf} | **Days:** {days}\n"
+                    f"**Status:** {status_msg}\n\n"
+                    f"**Progress:** {bar}\n"
+                    f"**ETA:** {ui_state['eta']}\n\n"
+                    f"⏳ _Please wait, doing heavy math in background..._"
+                )
+            
             stop_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🛑 Stop Backtest", callback_data="bt_stop")]
             ])
@@ -189,6 +211,9 @@ async def run_backtest_task(
         
         for tf in timeframes_to_run:
             if timeframe == "batch_native":
+                idx = timeframes_to_run.index(tf)
+                ui_state["batch_current_tf"] = tf
+                ui_state["batch_pending"] = timeframes_to_run[idx + 1:]
                 await _update_ui(0, 100, f"Starting batch run for {tf}...", force=True)
                 
             client = DeltaExchangeClient(api_key=cred["api_key"], api_secret=cred["api_secret"])
@@ -259,7 +284,11 @@ async def run_backtest_task(
             
             batch_results.append(final_result)
             
-            if timeframe != "batch_native":
+            if timeframe == "batch_native":
+                pct = final_result.get('overall_profit_pct', 0)
+                icon = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
+                ui_state["batch_completed"].append({"tf": tf, "pct": pct, "icon": icon})
+            else:
                 # Generate Files and Send Report for single
                 await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
                 chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, tf)
@@ -276,7 +305,12 @@ async def run_backtest_task(
                 if r.get('overall_profit_pct', 0) == 0: icon = "⚪"
                 summary_lines.append(f"• **{r['timeframe']}:** {r.get('overall_profit_pct', 0):+.1f}% (W: {r.get('win_pct', 0):.1f}%) {icon}")
             
-            keyboard = [[InlineKeyboardButton("🗄️ View Full Reports & Charts", callback_data="bt_history")]]
+            context.user_data['bt_batch_result_ids'] = [str(r['_id']) for r in batch_results]
+            
+            keyboard = [
+                [InlineKeyboardButton("🗄️ View Full Reports & Charts", callback_data="bt_batch_results")],
+                [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
+            ]
             try:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
