@@ -217,13 +217,21 @@ class AlgoEngine:
                 # IMPORTANT: Run Exits and Invalidations FIRST and wait for them to finish
                 # This ensures that if a Single Supertrend flips, the position is closed
                 # before we check for the new reverse entry.
-                exit_tasks = [self.process_open_trade(trade) for trade in open_trades]
-                inv_tasks = [self.process_pending_trade(trade) for trade in pending_trades]
+                
+                # Use a semaphore to prevent blasting Delta API / Telegram rate limits
+                sem = asyncio.Semaphore(3)
+                
+                async def bound_task(coro):
+                    async with sem:
+                        return await coro
+
+                exit_tasks = [bound_task(self.process_open_trade(trade)) for trade in open_trades]
+                inv_tasks = [bound_task(self.process_pending_trade(trade)) for trade in pending_trades]
                 if exit_tasks or inv_tasks:
                     await asyncio.gather(*(exit_tasks + inv_tasks))
                 
                 # Now check configs for entries
-                entry_tasks = [self.process_algo_setup(setup) for setup in active_setups]
+                entry_tasks = [bound_task(self.process_algo_setup(setup)) for setup in active_setups]
                 if entry_tasks:
                     await asyncio.gather(*entry_tasks)
                     

@@ -13,6 +13,7 @@ class LoggerBot:
     
     def __init__(self):
         """Initialize logger bot and main bot for user notifications."""
+        self._send_lock = None
         try:
             self.bot = Bot(token=settings.telegram_logger_bot_token)
             self.chat_id = settings.telegram_logger_chat_id
@@ -47,16 +48,32 @@ class LoggerBot:
             return
         
         target_chat_id = chat_id if chat_id else self.chat_id
-        try:
-            await self.bot.send_message(
-                chat_id=target_chat_id,
-                text=message,
-                parse_mode=parse_mode
-            )
-        except TelegramError as e:
-            logger.error(f"❌ Failed to send logger bot message: {e}")
-        except Exception as e:
-            logger.error(f"❌ Exception sending logger bot message: {e}")
+        
+        import asyncio
+        if self._send_lock is None:
+            self._send_lock = asyncio.Lock()
+            
+        from telegram.error import RetryAfter, TelegramError
+        
+        async with self._send_lock:
+            for attempt in range(3):
+                try:
+                    await self.bot.send_message(
+                        chat_id=target_chat_id,
+                        text=message,
+                        parse_mode=parse_mode
+                    )
+                    await asyncio.sleep(0.5)
+                    break
+                except RetryAfter as e:
+                    logger.warning(f"⚠️ Telegram Flood control. Sleeping for {e.retry_after}s.")
+                    await asyncio.sleep(e.retry_after + 1)
+                except TelegramError as e:
+                    logger.error(f"❌ Failed to send logger bot message: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"❌ Exception sending logger bot message: {e}")
+                    break
     
     async def send_to_user(self, user_id: str, message: str, parse_mode: str = "Markdown"):
         """
@@ -72,16 +89,31 @@ class LoggerBot:
             logger.warning("⚠️ Main bot not available for user notification")
             return
         
-        try:
-            await self.main_bot.send_message(
-                chat_id=user_id,
-                text=message,
-                parse_mode=parse_mode
-            )
-        except TelegramError as e:
-            logger.error(f"❌ Failed to send main bot message to {user_id}: {e}")
-        except Exception as e:
-            logger.error(f"❌ Exception sending main bot message to {user_id}: {e}")
+        import asyncio
+        if self._send_lock is None:
+            self._send_lock = asyncio.Lock()
+            
+        from telegram.error import RetryAfter, TelegramError
+        
+        async with self._send_lock:
+            for attempt in range(3):
+                try:
+                    await self.main_bot.send_message(
+                        chat_id=user_id,
+                        text=message,
+                        parse_mode=parse_mode
+                    )
+                    await asyncio.sleep(0.5)
+                    break
+                except RetryAfter as e:
+                    logger.warning(f"⚠️ Telegram User Flood control. Sleeping for {e.retry_after}s.")
+                    await asyncio.sleep(e.retry_after + 1)
+                except TelegramError as e:
+                    logger.error(f"❌ Failed to send main bot message to {user_id}: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"❌ Exception sending main bot message to {user_id}: {e}")
+                    break
 
     async def send_trade_alert(self, message: str, parse_mode: str = "Markdown"):
         """
