@@ -158,8 +158,8 @@ async def run_backtest_task(
                 )
                 last_ui_update = time.time()
             except Exception as e:
-                # Silently ignore "Message is not modified" or minor network errors
-                pass
+                if "Message is not modified" not in str(e):
+                    logger.warning(f"[BT-UI] Progress update failed: {e}")
 
 
     try:
@@ -285,8 +285,8 @@ async def run_backtest_task(
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[BT-TASK] Failed to send batch summary: {e}")
     except asyncio.CancelledError:
         logger.info(f"[BT-TASK] Backtest cancelled by user: {symbol} {timeframe}")
         try:
@@ -296,8 +296,8 @@ async def run_backtest_task(
                 text="🛑 **Backtest Stopped**\n\nThe backtest was cancelled by user request.",
                 parse_mode="Markdown"
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"[BT-TASK] Failed to send cancel message: {e}")
     except Exception as e:
         logger.error(f"[BT-TASK] Fatal error during backtest: {e}")
         import traceback
@@ -309,8 +309,8 @@ async def run_backtest_task(
                 text=f"❌ **Backtest Failed**\nAn unexpected error occurred:\n`{str(e)}`",
                 parse_mode="Markdown"
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"[BT-TASK] Failed to send error message: {e}")
 
 
 def format_report_text(result: dict) -> str:
@@ -399,8 +399,8 @@ async def _send_final_report(chat_id: int, context: ContextTypes.DEFAULT_TYPE, r
     # We delete the "loading" message and send a fresh one with the photo
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"[BT-REPORT] Could not delete loading message: {e}")
         
     try:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
