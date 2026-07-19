@@ -246,11 +246,12 @@ async def bt_ask_lot_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preset_name = context.user_data['bt_preset']['preset_name']
     asset = context.user_data['bt_asset']
     tf = context.user_data['bt_timeframe']
+    display_tf = "Batch (8 Timeframes)" if tf == "batch_native" else tf
     
     text = (
         f"🧪 **Step 4: Lot Size**\n\n"
         f"**Strategy:** {preset_name}\n"
-        f"**Asset:** {asset} ({tf})\n\n"
+        f"**Asset:** {asset} ({display_tf})\n\n"
         f"How many lots (contracts) do you want to trade per signal?\n"
         f"*(Select an option or type a custom number)*"
     )
@@ -376,11 +377,12 @@ async def bt_ask_duration(query, context: ContextTypes.DEFAULT_TYPE):
     asset = context.user_data['bt_asset']
     tf = context.user_data['bt_timeframe']
     lot = context.user_data['bt_lot_size']
+    display_tf = "Batch (8 Timeframes)" if tf == "batch_native" else tf
     
     text = (
         f"🧪 **Step 7: Select Duration**\n\n"
         f"**Strategy:** {preset_name}\n"
-        f"**Asset:** {asset} ({tf})\n"
+        f"**Asset:** {asset} ({display_tf})\n"
         f"**Lot Size:** {lot}\n"
     )
     time_window = context.user_data.get('bt_time_window')
