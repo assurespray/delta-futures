@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple, Any
 from telegram.ext import BasePersistence, PersistenceInput
 from telegram.ext._utils.types import CDCData, ConversationDict, ConversationKey
 
-from database import mongodb
+from database.mongodb import MongoDB
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class MongoPersistence(BasePersistence):
         super().__init__(store_data=store_data, update_interval=update_interval)
         
     def get_db(self):
-        return mongodb.get_db()
+        return MongoDB.get_db()
         
     # --- CONVERSATIONS ---
     async def get_conversations(self, name: str) -> ConversationDict:
