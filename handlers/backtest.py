@@ -136,9 +136,10 @@ async def run_backtest_task(
         
         if force or (now - last_ui_update >= UI_UPDATE_INTERVAL):
             bar = generate_progress_bar(current, total)
+            display_tf = "Batch (8 Timeframes)" if timeframe == "batch_native" else timeframe
             text = (
                 f"🧪 **Backtest in Progress**\n\n"
-                f"**Asset:** {symbol} | **TF:** {timeframe} | **Days:** {days}\n"
+                f"**Asset:** {symbol} | **TF:** {display_tf} | **Days:** {days}\n"
                 f"**Status:** {status_msg}\n\n"
                 f"**Progress:** {bar}\n"
                 f"**ETA:** {ui_state['eta']}\n\n"
@@ -268,7 +269,8 @@ async def run_backtest_task(
 
         # If we get here, it's a batch run
         if timeframe == "batch_native" and batch_results:
-            summary_lines = [f"✅ **Batch Backtest Complete for {symbol}**", f"Strategy: {strategy_params.get('strategy_name', 'Unknown')}", "", "**Performance Summary:**"]
+            strat_name = strategy_params.get('strategy_name', 'Unknown').replace('_', ' ').title()
+            summary_lines = [f"✅ **Batch Backtest Complete for {symbol}**", f"Strategy: {strat_name}", "", "**Performance Summary:**"]
             for r in batch_results:
                 icon = "🟢" if r.get('overall_profit_pct', 0) > 0 else "🔴"
                 if r.get('overall_profit_pct', 0) == 0: icon = "⚪"

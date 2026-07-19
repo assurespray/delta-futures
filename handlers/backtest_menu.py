@@ -486,7 +486,8 @@ async def _launch_backtest_task(message_id, chat_id, user_id, context, days=None
     if time_window:
         strategy_params["time_window"] = time_window
         
-    loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {timeframe}\n\n⏳ Please wait..."
+    display_tf = "Batch (8 Timeframes)" if timeframe == "batch_native" else timeframe
+    loading_text = f"🧪 **Initializing Sandbox Engine...**\n\nAsset: {asset}\nTimeframe: {display_tf}\n\n⏳ Please wait..."
     
     # We edit the specific message_id to show loading status
     try:
