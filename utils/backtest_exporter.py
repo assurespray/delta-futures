@@ -22,7 +22,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache")
 
-def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, symbol: str, timeframe: str) -> str:
+def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, symbol: str, timeframe: str, result: dict = None) -> str:
     """
     Generate an Equity Curve chart image.
     
@@ -31,6 +31,7 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
         initial_balance: Starting portfolio balance.
         symbol: e.g. "BTCUSD"
         timeframe: e.g. "1m"
+        result: Optional full backtest result dictionary for rich chart metadata.
         
     Returns:
         Absolute path to the saved .png image.
@@ -54,11 +55,16 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
             times.append(dt)
             balances.append(current_balance)
             
+        import numpy as np
+        # Convert to numpy arrays for easier conditional masking
+        times_arr = np.array(times)
+        balances_arr = np.array(balances)
+            
         # RAM Optimization: Downsample massive charts to prevent Matplotlib OOM
-        if len(times) > 5000:
-            step = len(times) // 5000
-            times = times[::step]
-            balances = balances[::step]
+        if len(times_arr) > 5000:
+            step = len(times_arr) // 5000
+            times_arr = times_arr[::step]
+            balances_arr = balances_arr[::step]
             
         # Plotting styling
         plt.style.use('dark_background')
@@ -66,13 +72,72 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
         
         # Draw the curve
         color = '#00FF7F' if current_balance >= initial_balance else '#FF4040'
-        ax.plot(times, balances, color=color, linewidth=2, label='Equity')
+        ax.plot(times_arr, balances_arr, color=color, linewidth=2, label='Equity')
         
-        # Fill under the curve
-        ax.fill_between(times, balances, min(balances) * 0.99, color=color, alpha=0.1)
+        # Fill under the curve globally
+        ax.fill_between(times_arr, balances_arr, min(balances_arr) * 0.99, color=color, alpha=0.1)
+        
+        # Drawdown shading (Red fill when below initial balance)
+        # We fill between balances_arr and initial_balance where balances_arr < initial_balance
+        ax.fill_between(times_arr, balances_arr, initial_balance, 
+                        where=(balances_arr < initial_balance),
+                        color='#FF4040', alpha=0.25, label='Underwater')
         
         # Formatting
-        ax.set_title(f"Backtest Equity Curve: {symbol} ({timeframe})", fontsize=14, pad=15)
+        if result:
+            strat_name = result.get('strategy', '').replace('_', ' ').title()
+            strat_params = result.get('strategy_params', {})
+            
+            meta_keys = {'strategy_name', 'direction', 'lot_size', 'initial_balance', 
+                         'leverage', 'paper_leverage', 'symbol', 'timeframe', 'time_window'}
+            param_parts = [f"{v}" for k, v in strat_params.items() if k not in meta_keys and not isinstance(v, dict)]
+            param_str = ", ".join(param_parts)
+            
+            fig.suptitle(f"{symbol} ({timeframe}) — {strat_name} {param_str}", fontsize=13, y=0.98)
+            
+            direction = result.get('direction', 'both').title()
+            lot = result.get('lot_size', 1.0)
+            lev = result.get('leverage', 1.0)
+            start_str = times[0].strftime("%Y-%m-%d")
+            end_str = times[-1].strftime("%Y-%m-%d")
+            
+            ax.set_title(f"{start_str} to {end_str} | Dir: {direction} | Lot: {lot} | {int(lev)}x Lev", fontsize=9, pad=10, color='lightgray')
+            
+            # Add Stats Box
+            props = dict(boxstyle='round', facecolor='black', alpha=0.7, edgecolor='gray')
+            
+            net_profit = result.get('overall_profit', 0)
+            net_profit_pct = result.get('overall_profit_pct', 0)
+            win_rate = result.get('win_pct', 0)
+            trades = result.get('num_trades', 0)
+            max_dd = result.get('max_drawdown', 0)
+            max_dd_pct = result.get('max_drawdown_pct', 0)
+            pf = result.get('profit_factor', 0)
+            rr = result.get('reward_to_risk', 0)
+            
+            stats_text = (
+                f"Net Profit:     {'+' if net_profit >= 0 else ''}${net_profit:,.2f} ({'+' if net_profit_pct >= 0 else ''}{net_profit_pct:.1f}%)\n"
+                f"Win Rate:      {win_rate:.1f}% ({trades} trades)\n"
+                f"Max DD:        -${abs(max_dd):,.2f} (-{max_dd_pct:.1f}%)\n"
+                f"Profit Factor: {'∞' if pf == float('inf') else f'{pf:.2f}'}\n"
+                f"R:R Ratio:      {'∞' if rr == float('inf') else f'{rr:.2f}'}"
+            )
+            
+            # Place in upper left or bottom left depending on where the final curve is
+            # (If it ends high, put box on bottom. If it ends low, put box on top)
+            if balances[-1] > initial_balance:
+                loc_y = 0.05
+                va = 'bottom'
+            else:
+                loc_y = 0.95
+                va = 'top'
+                
+            ax.text(0.02, loc_y, stats_text, transform=ax.transAxes, fontsize=8,
+                    verticalalignment=va, bbox=props, color='white', family='monospace')
+            
+        else:
+            ax.set_title(f"Backtest Equity Curve: {symbol} ({timeframe})", fontsize=14, pad=15)
+            
         ax.set_ylabel("Portfolio Balance (USD)", fontsize=11)
         ax.grid(True, linestyle='--', alpha=0.3)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
@@ -81,7 +146,8 @@ def generate_equity_curve_chart(trade_log: List[Dict], initial_balance: float, s
         # Add a baseline
         ax.axhline(initial_balance, color='white', linestyle='--', alpha=0.5, label='Initial Capital')
         
-        ax.legend(loc='upper left')
+        # Legend (move to upper right to avoid overlapping stats box on the left)
+        ax.legend(loc='upper right')
         
         # Tight layout to prevent label cutoff
         plt.tight_layout()

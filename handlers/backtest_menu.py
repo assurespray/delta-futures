@@ -882,7 +882,7 @@ async def bt_resend_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     initial_balance = r.get("initial_balance", 10000.0)
     
     # Generate files
-    chart_path = generate_equity_curve_chart(trade_log, initial_balance, symbol, timeframe)
+    chart_path = generate_equity_curve_chart(trade_log, initial_balance, symbol, timeframe, result=r)
     csv_path = generate_trade_log_csv(trade_log, symbol, timeframe)
     
     chat_id = update.effective_chat.id

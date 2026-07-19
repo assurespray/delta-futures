@@ -291,7 +291,7 @@ async def run_backtest_task(
             else:
                 # Generate Files and Send Report for single
                 await _update_ui(99, 100, "Generating charts and trade logs...", force=True)
-                chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, tf)
+                chart_path = generate_equity_curve_chart(trade_log, auto_cap, symbol, tf, result=final_result)
                 csv_path = generate_trade_log_csv(trade_log, symbol, tf)
                 await _send_final_report(chat_id, context, final_result, chart_path, csv_path, message_id)
                 return
