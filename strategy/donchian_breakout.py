@@ -236,7 +236,7 @@ class DonchianBreakoutStrategy(BaseStrategy):
             # Minimum data check
             min_required = self.period + 1
             if actual_count < min_required:
-                logger.error(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
+                logger.debug(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
 
             # Calculate Donchian Channels

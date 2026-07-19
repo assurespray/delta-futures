@@ -154,7 +154,6 @@ class BacktestEngine:
             # 3. Simulate chronological ticks (the core trading loop)
             # We iterate from start_idx to end of chunk.
             from utils.time_utils import IST
-            from datetime import datetime
             
             from api.delta_client import DeltaExchangeClient
             client = DeltaExchangeClient("", "")

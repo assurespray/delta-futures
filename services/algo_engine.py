@@ -379,7 +379,6 @@ class AlgoEngine:
             time_window = algo_setup.get("time_window")
             if time_window and entry_signal:
                 from utils.time_utils import parse_time, is_time_in_window, IST
-                from datetime import datetime
                 now_ist = datetime.now(IST).time()
                 tw_start = parse_time(time_window["start"])
                 tw_stop = parse_time(time_window["stop_entries"])
@@ -590,10 +589,9 @@ class AlgoEngine:
             time_window = algo_setup.get("time_window") if algo_setup else None
             
             exit_signal = None
-            if time_window:
-                from utils.time_utils import parse_time, is_time_to_hard_exit, IST
-                from datetime import datetime
-                now_ist = datetime.now(IST).time()
+        if time_window:
+            from utils.time_utils import parse_time, is_time_to_hard_exit, IST
+            now_ist = datetime.now(IST).time()
                 tw_start = parse_time(time_window["start"])
                 tw_exit = parse_time(time_window["hard_exit"])
                 

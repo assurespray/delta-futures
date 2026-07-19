@@ -168,7 +168,7 @@ class SingleSuperTrendStrategy(BaseStrategy):
 
             min_required = self.atr_length + 10
             if actual_count < min_required:
-                logger.error(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
+                logger.debug(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
 
             logger.info(f"Calculating Single SuperTrend (ATR={self.atr_length}, factor={self.factor})")

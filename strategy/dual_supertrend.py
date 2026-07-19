@@ -233,7 +233,7 @@ class DualSuperTrendStrategy(BaseStrategy):
             # Sufficient data?
             min_required = max(self.perusu_atr, self.sirusu_atr) + 10
             if actual_count < min_required:
-                logger.error(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
+                logger.debug(f"INSUFFICIENT DATA: got {actual_count}, need at least {min_required}")
                 return None
             if actual_count < required_candles:
                 logger.warning(f"Got {actual_count} candles, wanted {required_candles}")
