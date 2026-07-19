@@ -86,6 +86,8 @@ from handlers.custom_tokens import (
 logger = logging.getLogger(__name__)
 
 
+from utils.persistence import MongoPersistence
+
 def create_application() -> Application:
     """
     Create and configure Telegram bot application.
@@ -93,8 +95,9 @@ def create_application() -> Application:
     Returns:
         Configured Application instance
     """
-    # Create application
-    application = Application.builder().token(settings.telegram_bot_token).build()
+    # Create application with MongoDB persistence
+    persistence = MongoPersistence()
+    application = Application.builder().token(settings.telegram_bot_token).persistence(persistence).build()
     
     # Command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -482,14 +485,27 @@ def create_application() -> Application:
     application.add_handler(CallbackQueryHandler(pscr_cancel_handler, pattern="^pscr_back_to_"))
     application.add_handler(CallbackQueryHandler(algo_cancel_handler, pattern="^algo_back_to_"))
     
-    # Main menu - registered LAST so ConversationHandler fallbacks get priority
-
-    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
-    
-    
     # Backtester Handlers
     for handler in get_backtest_handlers():
         application.add_handler(handler)
+        
+    # Main menu - registered TRULY LAST so all ConversationHandler fallbacks get priority
+    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
+    
+    # Global Error Handler
+    async def global_error_handler(update, context):
+        logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
+        if update and update.effective_chat:
+            try:
+                await context.bot.send_message(
+                    update.effective_chat.id,
+                    "⚠️ Something went wrong. Please tap /start to restart."
+                )
+            except Exception:
+                pass
+
+    application.add_error_handler(global_error_handler)
+    
     logger.info("✅ Bot handlers registered")
     
     return application
