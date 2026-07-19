@@ -85,7 +85,9 @@ def generate_progress_bar(current: int, total: int, width: int = 15) -> str:
     filled = int(width * pct)
     empty = width - filled
     bar = "█" * filled + "░" * empty
-    return f"[{bar}] {int(pct * 100)}%"
+    
+    pct_display = f"{pct * 100:.1f}" if 0 < pct * 100 < 1 else f"{int(pct * 100)}"
+    return f"[{bar}] {pct_display}%"
 
 async def run_backtest_task(
     chat_id: int,
@@ -135,14 +137,43 @@ async def run_backtest_task(
             remaining = total - current
             if rate > 0:
                 eta_secs = remaining / rate
-                ui_state["eta"] = f"{int(eta_secs)} seconds"
+                if eta_secs >= 3600:
+                    ui_state["eta"] = f"~{int(eta_secs // 3600)}h {int((eta_secs % 3600) // 60)}m"
+                elif eta_secs >= 60:
+                    ui_state["eta"] = f"~{int(eta_secs // 60)}m {int(eta_secs % 60)}s"
+                else:
+                    ui_state["eta"] = f"~{int(eta_secs)}s"
         
         if force or (now - last_ui_update >= UI_UPDATE_INTERVAL):
             bar = generate_progress_bar(current, total)
             
             if timeframe == "batch_native":
                 strat_label = strategy_params.get('strategy_name', '').replace('_', ' ').title()
-                lines = [f"🧪 **Batch Backtest: {symbol} ({days}d)**", f"Strategy: {strat_label}", ""]
+                
+                # Build params string
+                meta_keys = {'strategy_name', 'direction', 'lot_size', 'leverage', 'symbol', 
+                             'timeframe', 'time_window', 'paper_leverage', 'initial_balance'}
+                param_parts = [f"{k.replace('_', ' ').title()}: {v}" for k, v in strategy_params.items() 
+                               if k not in meta_keys and not isinstance(v, dict)]
+                param_str = ", ".join(param_parts) if param_parts else "None"
+                
+                direction = strategy_params.get('direction', 'both').title()
+                lot = strategy_params.get('lot_size', 1.0)
+                lev = strategy_params.get('leverage', 1.0)
+                
+                lines = [
+                    f"🧪 **Batch Backtest: {symbol} ({days}d)**",
+                    f"**Strategy:** {strat_label}",
+                    f"**Params:** {param_str}",
+                    f"**Config:** Dir: {direction} | Lot: {lot} | {int(lev)}x Lev",
+                    ""
+                ]
+                
+                # Overall progress bar
+                completed = len(ui_state["batch_completed"])
+                total_tfs = completed + (1 if ui_state["batch_current_tf"] else 0) + len(ui_state["batch_pending"])
+                overall_bar = generate_progress_bar(completed, total_tfs, width=15)
+                lines.append(f"**Overall:** {overall_bar} ({completed}/{total_tfs} TFs)\n")
                 
                 for c in ui_state["batch_completed"]:
                     lines.append(f"✅ **{c['tf']}** → {c['pct']:+.1f}% {c['icon']}")
