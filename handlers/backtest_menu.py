@@ -678,13 +678,20 @@ async def bt_view_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_row:
         btn_rows.append(current_row)
         
+    # Build context-aware navigation buttons
+    nav_rows = []
+    batch_ids = context.user_data.get('bt_batch_result_ids', [])
+    if str(result_id) in [str(bid) for bid in batch_ids]:
+        nav_rows.append([InlineKeyboardButton("🔙 Back to Batch Results", callback_data="bt_batch_results")])
+    nav_rows.append([InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")])
+    nav_rows.append([InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")])
+    
     keyboard = btn_rows + [
         _build_dir_filter_row(result_id, 'all'),
         [InlineKeyboardButton("📥 Resend Chart & CSV", callback_data=f"bt_resend_{result_id}")],
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
         [InlineKeyboardButton("🗑️ Delete Record", callback_data=f"bt_del_{result_id}")],
-        [InlineKeyboardButton("🔙 Back to History", callback_data="bt_history")]
-    ]
+    ] + nav_rows
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -759,12 +766,18 @@ async def bt_recalc_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if current_row:
         btn_rows.append(current_row)
         
+    # Build context-aware navigation buttons
+    nav_rows = []
+    batch_ids = context.user_data.get('bt_batch_result_ids', [])
+    if str(result_id) in [str(bid) for bid in batch_ids]:
+        nav_rows.append([InlineKeyboardButton("🔙 Back to Batch Results", callback_data="bt_batch_results")])
+    nav_rows.append([InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")])
+    nav_rows.append([InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")])
+    
     keyboard = btn_rows + [
         _build_dir_filter_row(result_id, dir_filter),
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
-        [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
-        [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
-    ]
+    ] + nav_rows
     
     try:
         await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -845,12 +858,18 @@ async def bt_dirfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_row:
         btn_rows.append(current_row)
         
+    # Build context-aware navigation buttons
+    nav_rows = []
+    batch_ids = context.user_data.get('bt_batch_result_ids', [])
+    if str(result_id) in [str(bid) for bid in batch_ids]:
+        nav_rows.append([InlineKeyboardButton("🔙 Back to Batch Results", callback_data="bt_batch_results")])
+    nav_rows.append([InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")])
+    nav_rows.append([InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")])
+    
     keyboard = btn_rows + [
         _build_dir_filter_row(result_id, direction),
         [InlineKeyboardButton("📖 Glossary & Benchmarks", callback_data="bt_glossary")],
-        [InlineKeyboardButton("🔄 Backtest Another Strategy", callback_data="bt_start_fsm")],
-        [InlineKeyboardButton("🔙 Back to Backtest Menu", callback_data="menu_backtest")]
-    ]
+    ] + nav_rows
     
     try:
         await query.edit_message_caption(caption=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
