@@ -202,6 +202,15 @@ class BacktestEngine:
                             if not is_within_entry_window:
                                 signal = 0
                             
+                            if signal == 2:
+                                # Resolve entry ambiguity
+                                e_long = float(signals.get("exact_entry_price_long", [0]*len(times))[i])
+                                e_short = float(signals.get("exact_entry_price_short", [0]*len(times))[i])
+                                resolved_dir = await self._resolve_intrabar_entry_ambiguity(client, symbol, timeframe, t_time, e_long, e_short)
+                                signal = 1 if resolved_dir == "long" else -1
+                                # Update exact_entry_price so the downstream logic uses the correct one
+                                exact_entry_price_arr[i] = e_long if signal == 1 else e_short
+                            
                             if signal != 0:
                                 target_entry = float(exact_entry_price_arr[i])
                                 if signal == 1 and t_open > target_entry: entry_price = t_open
@@ -222,6 +231,11 @@ class BacktestEngine:
                                     trade_opened_this_candle = True
                         else:
                             signal = int(entry_signal_arr[i-1])
+                            
+                            # Do not double-execute intrabar breakout signals from the previous candle
+                            if exact_entry_price_arr is not None and exact_entry_price_arr[i-1] > 0:
+                                signal = 0
+                                
                             if not is_within_entry_window:
                                 signal = 0
                                 
@@ -323,6 +337,44 @@ class BacktestEngine:
             logger.error(f"[BT-ENGINE] Error in micro-fetch: {e}")
             
         return None
+
+    async def _resolve_intrabar_entry_ambiguity(self, client, symbol, timeframe, t_time, long_price, short_price):
+        from api.market_data import get_candles
+        from config.constants import TIMEFRAME_SECONDS
+        import asyncio
+        
+        # Don't micro-fetch if we are already on 1m
+        if timeframe == "1m":
+            return "long" # fallback bias if already 1m
+            
+        tf_secs = TIMEFRAME_SECONDS.get(timeframe, 900)
+        end_time = t_time + tf_secs
+        
+        try:
+            # Wait 0.2s to respect API rate limits
+            await asyncio.sleep(0.2)
+            candles = await get_candles(client, symbol, "1m", start_time=t_time, end_time=end_time)
+            if not candles:
+                return "long"
+                
+            for c in candles:
+                c_low = float(c["low"])
+                c_high = float(c["high"])
+                
+                hit_long = c_high >= long_price
+                hit_short = c_low <= short_price
+                
+                if hit_long and hit_short:
+                    return "long"
+                if hit_long:
+                    return "long"
+                if hit_short:
+                    return "short"
+                    
+        except Exception as e:
+            logger.error(f"[BT-ENGINE] Error in entry micro-fetch: {e}")
+            
+        return "long"
 
     async def _evaluate_candle_exits(self, client, symbol, timeframe, t_time, t_open, t_high, t_low, t_close, indicator_val_prev, signal_exit):
         """

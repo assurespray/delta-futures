@@ -118,6 +118,8 @@ class OHLCBreakoutStrategy(BaseStrategy):
         # Output arrays
         entry_signal = np.zeros(n, dtype=int)
         exact_entry_price = np.zeros(n)
+        exact_entry_price_long = np.zeros(n)
+        exact_entry_price_short = np.zeros(n)
         target_high_arr = np.zeros(n)
         target_low_arr = np.zeros(n)
         sl_price_long = np.zeros(n)
@@ -217,12 +219,21 @@ class OHLCBreakoutStrategy(BaseStrategy):
                     short_taken = True
             else:
                 # Breakout mode: high/low pierce target ± actual_pip_offset
-                if not long_taken and highs[i] > active_high + actual_pip_offset:
+                long_trigger = not long_taken and highs[i] > active_high + actual_pip_offset
+                short_trigger = not short_taken and lows[i] < active_low - actual_pip_offset
+
+                if long_trigger and short_trigger:
+                    entry_signal[i] = 2  # Ambiguous intrabar breach
+                    exact_entry_price[i] = active_high + actual_pip_offset  # Fallback
+                    exact_entry_price_long[i] = active_high + actual_pip_offset
+                    exact_entry_price_short[i] = active_low - actual_pip_offset
+                    long_taken = True
+                    short_taken = True
+                elif long_trigger:
                     entry_signal[i] = 1
                     exact_entry_price[i] = active_high + actual_pip_offset
                     long_taken = True
-                # Short breakout (long takes priority if both trigger)
-                if entry_signal[i] == 0 and not short_taken and lows[i] < active_low - actual_pip_offset:
+                elif short_trigger:
                     entry_signal[i] = -1
                     exact_entry_price[i] = active_low - actual_pip_offset
                     short_taken = True
@@ -246,6 +257,8 @@ class OHLCBreakoutStrategy(BaseStrategy):
         return {
             "entry_signal": entry_signal,
             "exact_entry_price": exact_entry_price,
+            "exact_entry_price_long": exact_entry_price_long,
+            "exact_entry_price_short": exact_entry_price_short,
             "meta_Ref. High": target_high_arr,
             "meta_Ref. Low": target_low_arr,
             "exit_long": exit_long,        # All False — exits are SL/TP only
